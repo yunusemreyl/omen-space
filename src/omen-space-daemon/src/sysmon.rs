@@ -387,32 +387,45 @@ struct GpuMetrics {
     power: Option<f64>,
 }
 
+static NVML_INSTANCE: OnceLock<Mutex<Option<nvml_wrapper::Nvml>>> = OnceLock::new();
+
 fn fetch_gpu_metrics_with_timeout() -> Option<GpuMetrics> {
     let (tx, rx) = std::sync::mpsc::channel();
+    
     std::thread::spawn(move || {
-        if let Ok(nvml) = nvml_wrapper::Nvml::init() {
-            if let Ok(device) = nvml.device_by_index(0) {
-                let gfx = device.running_graphics_processes().map(|v| v.len()).unwrap_or(0);
-                let comp = device.running_compute_processes().map(|v| v.len()).unwrap_or(0);
-                let has_clients = (gfx + comp) > 0;
-                
-                let mut temp = None;
-                let mut power = None;
-                
-                if has_clients {
-                    if let Ok(t) = device.temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu) {
-                        temp = Some(t as i32);
+        // Get or initialize the cached NVML instance
+        let nvml_lock = NVML_INSTANCE.get_or_init(|| {
+            Mutex::new(nvml_wrapper::Nvml::init().ok())
+        });
+
+        // Use try_lock() to avoid piling up threads if one is blocked in D3cold/D0 transition
+        if let Ok(mut nvml_guard) = nvml_lock.try_lock() {
+            if let Some(nvml) = nvml_guard.as_mut() {
+                if let Ok(device) = nvml.device_by_index(0) {
+                    let gfx = device.running_graphics_processes().map(|v| v.len()).unwrap_or(0);
+                    let comp = device.running_compute_processes().map(|v| v.len()).unwrap_or(0);
+                    let has_clients = (gfx + comp) > 0;
+                    
+                    let mut temp = None;
+                    let mut power = None;
+                    
+                    if has_clients {
+                        if let Ok(t) = device.temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu) {
+                            temp = Some(t as i32);
+                        }
+                        if let Ok(p) = device.power_usage() {
+                            power = Some(p as f64 / 1000.0);
+                        }
                     }
-                    if let Ok(p) = device.power_usage() {
-                        power = Some(p as f64 / 1000.0);
-                    }
+                    let _ = tx.send(GpuMetrics { has_clients, temp, power });
                 }
-                let _ = tx.send(GpuMetrics { has_clients, temp, power });
             }
         }
     });
+
     rx.recv_timeout(std::time::Duration::from_millis(500)).ok()
 }
+
 pub fn get_safe_gpu_temp() -> f64 {
     let nvidia_state = check_nvidia_state();
     let is_nvidia_awake = nvidia_state.unwrap_or(false);
@@ -594,6 +607,7 @@ pub fn fetch_system_stats() -> SystemStats {
     let nvidia_state = check_nvidia_state();
     let is_nvidia_awake = nvidia_state.unwrap_or(false);
     let has_nvidia = nvidia_state.is_some();
+    let mut nvml_timed_out = false;
 
     // 1. Check if we are in an intentional quiet window to let the driver sleep
     let in_cooldown = {
@@ -630,7 +644,10 @@ pub fn fetch_system_stats() -> SystemStats {
                 }
             }
         }
-
+        else {
+            // NVML timed out! The NVIDIA driver is busy/hanging.
+            nvml_timed_out = true; 
+        }
         if !has_active_clients {
             // Zero game/render clients detected. Arm 6s quiet window so kernel can suspend.
             let mut guard = GPU_IDLE_COOLDOWN.lock().unwrap_or_else(|e| e.into_inner());
@@ -641,7 +658,7 @@ pub fn fetch_system_stats() -> SystemStats {
     }
 
     // Fallback to sysfs hwmon GPU paths if NVML did not yield metrics (e.g. open source drivers like nouveau/amdgpu)
-    if stats.gpu_temp == 0 {
+    if stats.gpu_temp == 0 && !has_nvidia && !nvml_timed_out {
         if let Some(ref p) = paths.gpu_temp_path {
             if let Ok(s) = fs::read_to_string(p) {
                 if let Ok(milli) = s.trim().parse::<f64>() {
@@ -650,7 +667,7 @@ pub fn fetch_system_stats() -> SystemStats {
             }
         }
     }
-    if stats.gpu_pwr <= 0.0 {
+    if stats.gpu_pwr <= 0.0 && !has_nvidia && !nvml_timed_out {
         if let Some(ref p) = paths.gpu_pwr_path {
             if let Ok(s) = fs::read_to_string(p) {
                 if let Ok(micro) = s.trim().parse::<f64>() {

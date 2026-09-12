@@ -346,27 +346,34 @@ where
     if !TELEMETRY_STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
         let rt = get_runtime();
         rt.spawn(async move {
-            if let Ok(conn) = get_conn().await {
-                if let Ok(proxy) = SysMonProxy::new(&conn).await {
-                    if let Ok(mut stream) = proxy.receive_telemetry_updated().await {
-                        use zbus::export::futures_util::StreamExt;
-                        while let Some(signal) = stream.next().await {
-                            if let Ok(args) = signal.args() {
-                                let json_str = args.json_stats();
-                                if let Ok(stats) = serde_json::from_str::<SystemStats>(json_str) {
-                                    if let Some(mutex) = TELEMETRY_SENDERS.get() {
-                                        let senders = mutex.lock().unwrap_or_else(|e| e.into_inner());
-                                        for tx in senders.iter() {
-                                            let _ = tx.send(stats.clone());
+            use zbus::export::futures_util::StreamExt;
+            loop {
+                if let Ok(conn) = get_conn().await {
+                    if let Ok(proxy) = SysMonProxy::new(&conn).await {
+                        if let Ok(mut stream) = proxy.receive_telemetry_updated().await {
+                            while let Some(signal) = stream.next().await {
+                                if let Ok(args) = signal.args() {
+                                    let json_str = args.json_stats();
+                                    if let Ok(stats) = serde_json::from_str::<SystemStats>(json_str) {
+                                        if let Some(mutex) = TELEMETRY_SENDERS.get() {
+                                            let senders = mutex.lock().unwrap_or_else(|e| e.into_inner());
+                                            for tx in senders.iter() {
+                                                let _ = tx.send(stats.clone());
+                                            }
                                         }
+                                    } else {
+                                        eprintln!("Telemetry parse error. JSON: {}", json_str);
                                     }
-                                } else {
-                                    eprintln!("Telemetry parse error. JSON: {}", json_str);
                                 }
                             }
                         }
                     }
                 }
+                // If we reach this point, the stream has ended (daemon crashed, 
+                // daemon restarted, or DBus dropped). 
+                // We sleep for 3 seconds as a backoff before retrying to prevent 
+                // a tight CPU spin-loop while the daemon is offline.
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             }
         });
     }
