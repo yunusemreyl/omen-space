@@ -198,6 +198,7 @@ struct PlatformInner {
     cpu_temp_path: Option<String>,
     gpu_temp_path: Option<String>,
     info_cache: serde_json::Value,
+    last_temp_path_refresh: std::time::Instant,
 }
 
 #[derive(Clone)]
@@ -206,6 +207,20 @@ pub struct PlatformService {
 }
 
 impl PlatformService {
+    fn temp_path_ready(path: Option<&str>) -> bool {
+        path.is_some_and(|p| Path::new(p).exists())
+    }
+
+    fn should_refresh_temp_paths(cpu_ready: bool, gpu_ready: bool, elapsed: std::time::Duration) -> bool {
+        if !cpu_ready {
+            return elapsed >= std::time::Duration::from_secs(5);
+        }
+        if !gpu_ready {
+            return elapsed >= std::time::Duration::from_secs(30);
+        }
+        false
+    }
+
     pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let config = PlatformConfig::load();
 
@@ -256,6 +271,7 @@ impl PlatformService {
                 cpu_temp_path,
                 gpu_temp_path,
                 info_cache,
+                last_temp_path_refresh: std::time::Instant::now(),
             })),
         };
 
@@ -279,7 +295,14 @@ impl PlatformService {
     async fn monitor_loop(inner: Arc<Mutex<PlatformInner>>) {
         loop {
             let (cpu_path, gpu_path) = {
-                let g = inner.lock().await;
+                let mut g = inner.lock().await;
+                let cpu_ready = Self::temp_path_ready(g.cpu_temp_path.as_deref());
+                let gpu_ready = Self::temp_path_ready(g.gpu_temp_path.as_deref());
+                if Self::should_refresh_temp_paths(cpu_ready, gpu_ready, g.last_temp_path_refresh.elapsed()) {
+                    g.last_temp_path_refresh = std::time::Instant::now();
+                    g.cpu_temp_path = find_best_cpu_temp_path();
+                    g.gpu_temp_path = find_gpu_temp_path();
+                }
                 (g.cpu_temp_path.clone(), g.gpu_temp_path.clone())
             };
 
@@ -591,3 +614,40 @@ pub fn set_thermal_policy_by_name(profile: &str) -> bool {
     set
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_should_refresh_temp_paths_cpu_missing() {
+        assert!(PlatformService::should_refresh_temp_paths(
+            false,
+            false,
+            std::time::Duration::from_secs(5),
+        ));
+        assert!(!PlatformService::should_refresh_temp_paths(
+            false,
+            false,
+            std::time::Duration::from_secs(4),
+        ));
+    }
+
+    #[test]
+    fn test_should_refresh_temp_paths_gpu_missing() {
+        assert!(PlatformService::should_refresh_temp_paths(
+            true,
+            false,
+            std::time::Duration::from_secs(30),
+        ));
+        assert!(!PlatformService::should_refresh_temp_paths(
+            true,
+            false,
+            std::time::Duration::from_secs(29),
+        ));
+        assert!(!PlatformService::should_refresh_temp_paths(
+            true,
+            true,
+            std::time::Duration::from_secs(120),
+        ));
+    }
+}

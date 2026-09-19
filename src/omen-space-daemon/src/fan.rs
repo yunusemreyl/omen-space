@@ -42,6 +42,7 @@ pub struct FanState {
     pub last_power_profile_was_perf: bool,
     pub last_written_duty: Option<u32>,
     pub last_written_duty_time: Option<std::time::Instant>,
+    pub last_hw_detect_attempt: std::time::Instant,
 }
 
 #[derive(Clone)]
@@ -98,6 +99,7 @@ impl FanService {
             last_power_profile_was_perf: false,
             last_written_duty: None,
             last_written_duty_time: None,
+            last_hw_detect_attempt: std::time::Instant::now(),
         };
         Self::detect_hardware(&mut state).await;
         
@@ -190,6 +192,10 @@ impl FanService {
     }
 
     async fn detect_hardware(state: &mut FanState) {
+        state.found_fans.clear();
+        state.max_speeds.clear();
+        state.fallback_paths.clear();
+        state.fan_count = 0;
         state.hwmon_path = Self::_find_hwmon().await;
         
         if let Some(ref hwmon) = state.hwmon_path {
@@ -229,6 +235,10 @@ impl FanService {
                 _ => "auto".to_string(),
             };
         }
+    }
+
+    fn should_retry_hw_detect(hwmon_available: bool, fan_count: u32, elapsed: std::time::Duration) -> bool {
+        elapsed >= std::time::Duration::from_secs(5) && (!hwmon_available || fan_count == 0)
     }
 
     #[allow(dead_code)]
@@ -399,6 +409,20 @@ impl FanService {
 
         loop {
             interval.tick().await;
+
+            {
+                let mut state = self.state.lock().await;
+                let hwmon_available = state.hwmon_path.is_some();
+                if Self::should_retry_hw_detect(hwmon_available, state.fan_count, state.last_hw_detect_attempt.elapsed()) {
+                    state.last_hw_detect_attempt = std::time::Instant::now();
+                    let mode_to_restore = state.mode.clone();
+                    Self::detect_hardware(&mut state).await;
+                    if !hwmon_available && state.hwmon_path.is_some() && state.fan_count > 0 {
+                        let _ = Self::set_mode_internal(&mut state, &mode_to_restore).await;
+                        info!("Recovered fan hardware after delayed boot initialization");
+                    }
+                }
+            }
             
             let temp = Self::get_max_temp().await;
             
@@ -980,5 +1004,33 @@ mod tests {
         assert_eq!(FanService::pct_to_pwm(0), 0);
         assert_eq!(FanService::pct_to_pwm(50), 128);
         assert_eq!(FanService::pct_to_pwm(100), 255);
+    }
+
+    #[test]
+    fn test_should_retry_hw_detect_when_missing_hwmon() {
+        assert!(FanService::should_retry_hw_detect(
+            false,
+            0,
+            std::time::Duration::from_secs(5),
+        ));
+        assert!(!FanService::should_retry_hw_detect(
+            false,
+            0,
+            std::time::Duration::from_secs(4),
+        ));
+    }
+
+    #[test]
+    fn test_should_retry_hw_detect_when_no_fans() {
+        assert!(FanService::should_retry_hw_detect(
+            true,
+            0,
+            std::time::Duration::from_secs(5),
+        ));
+        assert!(!FanService::should_retry_hw_detect(
+            true,
+            2,
+            std::time::Duration::from_secs(30),
+        ));
     }
 }
