@@ -324,9 +324,9 @@ fn build_interactive_keyboard(
         vec![("Shift", 2.25), ("Z", 1.0), ("X", 1.0), ("C", 1.0), ("V", 1.0), ("B", 1.0), ("N", 1.0), ("M", 1.0), (",", 1.0), (".", 1.0), ("/", 1.0), ("Shift_R", 1.75), ("Up", 1.0), ("1_num", 1.0), ("2_num", 1.0), ("3_num", 1.0), ("Ent", 1.0)],
         vec![("Ctrl", 1.25), ("Fn", 1.25), ("Win", 1.25), ("Alt", 1.25), ("Space", 5.5), ("Alt_R", 1.25), ("Menu", 1.25), ("Left", 1.0), ("Down", 1.0), ("Right", 1.0), ("0_num", 1.0), ("._num", 1.0), ("", 1.0)]
     ];
-    let unit_size = 30.0;
-    let margin = 4.0;
-    let height = 28.0;
+    let unit_size = 38.0;
+    let margin = 3.5;
+    let height = 34.0;
 
     let mut keys = Vec::new();
     let mut global_idx = 0;
@@ -372,7 +372,7 @@ fn build_interactive_keyboard(
 
     let drawing_area = gtk::DrawingArea::builder()
         .width_request(760)
-        .height_request(200)
+        .height_request(260)
         .halign(gtk::Align::Center)
         .build();
 
