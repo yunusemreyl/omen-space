@@ -238,7 +238,6 @@ fn build_interactive_keyboard(
     let top_bar = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).build();
 
     // -- Selection Tools (Left-aligned) --
-    let sel_mode = Rc::new(RefCell::new(SelectionMode::Key));
     let sel_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).build();
     let sel_label = gtk::Label::builder().label("Select:").css_classes(["dim-label"]).build();
     sel_box.append(&sel_label);
@@ -247,9 +246,13 @@ fn build_interactive_keyboard(
     sel_btns_box.add_css_class("linked");
     
     let btn_off = gtk::ToggleButton::builder().label("Off").build();
-    let btn_key = gtk::ToggleButton::builder().label("Key").active(true).build();
-    let btn_zone = gtk::ToggleButton::builder().label("Zone").build();
+    let btn_key = gtk::ToggleButton::builder().label("Key").active(detected_mode == KeyboardMode::PerKey).sensitive(detected_mode == KeyboardMode::PerKey).build();
+    let btn_zone = gtk::ToggleButton::builder().label("Zone").active(detected_mode != KeyboardMode::PerKey).build();
     let btn_all = gtk::ToggleButton::builder().label("All").build();
+    
+    // Set initial sel_mode based on supported mode
+    let sel_mode = Rc::new(RefCell::new(if detected_mode == KeyboardMode::PerKey { SelectionMode::Key } else { SelectionMode::Zone }));
+
     btn_key.set_group(Some(&btn_off));
     btn_zone.set_group(Some(&btn_off));
     btn_all.set_group(Some(&btn_off));
@@ -406,6 +409,7 @@ fn build_interactive_keyboard(
     let selected_draw = selected_keys.clone();
     let hovered_draw = hovered_key.clone();
     let colors_draw = key_colors.clone();
+    let sel_mode_draw = sel_mode.clone();
     
     drawing_area.set_draw_func(move |_, cr, _, _| {
         cr.set_source_rgba(0.08, 0.08, 0.09, 1.0);
@@ -471,6 +475,38 @@ fn build_interactive_keyboard(
                 );
                 let _ = cr.show_text(&k.display);
             }
+        }
+        
+        let active_sel = *sel_mode_draw.borrow();
+        if active_sel == SelectionMode::Zone {
+            // Draw zone bounding boxes
+            for z in 1..=4 {
+                let mut min_x = f64::MAX;
+                let mut min_y = f64::MAX;
+                let mut max_x = f64::MIN;
+                let mut max_y = f64::MIN;
+                let mut found = false;
+                for k in keys_draw.iter() {
+                    if get_zone_for_key(&k.name) == z {
+                        if k.x < min_x { min_x = k.x; }
+                        if k.y < min_y { min_y = k.y; }
+                        if k.x + k.w > max_x { max_x = k.x + k.w; }
+                        if k.y + k.h > max_y { max_y = k.y + k.h; }
+                        found = true;
+                    }
+                }
+                if found {
+                    cr.set_source_rgba(1.0, 1.0, 1.0, 0.4);
+                    cr.set_line_width(2.0);
+                    // cr.set_dash(&[4.0, 4.0], 0.0);
+                    draw_rounded_rect(cr, min_x - 2.0, min_y - 2.0, (max_x - min_x) + 4.0, (max_y - min_y) + 4.0, 6.0);
+                    let _ = cr.stroke();
+                }
+            }
+        } else if active_sel == SelectionMode::Key {
+             // In Key mode, maybe draw a faint dash around all keys to signify they are individual?
+             // Actually, the stroke on each key is enough, but we can make it slightly brighter if needed.
+             // But let's leave it, the keys already have individual strokes.
         }
     });
 
@@ -722,10 +758,8 @@ fn build_interactive_keyboard(
     global_color_btn.set_widget_name("global_color_btn");
     
     let dyn_prov_g = gtk::CssProvider::new();
-    if let Some(display) = gtk::gdk::Display::default() {
-        gtk::style_context_add_provider_for_display(&display, &dyn_prov_g, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-    }
     dyn_prov_g.load_from_string(&format!("#global_color_btn {{ background: {}; background-image: none; border: 1px solid rgba(255,255,255,0.4); }}", "#0099ED"));
+    global_color_btn.style_context().add_provider(&dyn_prov_g, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
     
     let dyn_prov_clone = dyn_prov_g.clone();
     let paint_color_btn = paint_color.clone();
@@ -738,6 +772,13 @@ fn build_interactive_keyboard(
         }));
     });
 
+    let instructions = gtk::Label::builder()
+        .label("İlk renk seçiminizi yapıp boyamak istediğiniz tuşlara/bölgelere tıklayın.")
+        .css_classes(["dim-label"])
+        .margin_end(16)
+        .build();
+    bottom_box.append(&instructions);
+    
     bottom_box.append(&gtk::Label::builder().label("Color:").css_classes(["dim-label"]).build());
     bottom_box.append(&global_color_btn);
 
@@ -772,6 +813,7 @@ fn build_interactive_keyboard(
             }
         }
     });
+    speed_box.append(&speed_scale);
     bottom_box.append(&speed_box);
     bottom_box.append(&gtk::Separator::new(gtk::Orientation::Vertical));
     
