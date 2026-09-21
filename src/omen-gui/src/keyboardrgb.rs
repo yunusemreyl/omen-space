@@ -273,7 +273,16 @@ fn build_interactive_keyboard(
         });
         effects_box.append(&btn);
     }
-    kb_card.append(&effects_box);
+    
+    let effects_scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Automatic)
+        .vscrollbar_policy(gtk::PolicyType::Never)
+        .propagate_natural_width(true)
+        .propagate_natural_height(true)
+        .max_content_width(760)
+        .child(&effects_box)
+        .build();
+    kb_card.append(&effects_scroll);
 
     // 2. Selection Tools
     let sel_mode = Rc::new(RefCell::new(SelectionMode::Key));
@@ -340,6 +349,7 @@ fn build_interactive_keyboard(
                 };
                 key_colors.borrow_mut().insert(name.to_string(), def_color);
 
+                let k_height = if *name == "+" || *name == "Ent" { height * 2.0 + margin } else { height };
                 keys.push(KeyGeom {
                     id: global_idx,
                     name: name.to_string(),
@@ -347,7 +357,7 @@ fn build_interactive_keyboard(
                     x: current_x,
                     y: current_y,
                     w: width - margin,
-                    h: height,
+                    h: k_height,
                 });
                 global_idx += 1;
             }
@@ -444,102 +454,113 @@ fn build_interactive_keyboard(
     });
     drawing_area.add_controller(motion);
 
+    let paint_color = Rc::new(RefCell::new("#0099ED".to_string()));
+    
     let click = gtk::GestureClick::new();
     click.set_button(0);
     let keys_click = keys_rc.clone();
-    let sel_state = selected_keys.clone();
     let da_click = drawing_area.clone();
     let sm_click = sel_mode.clone();
-    click.connect_pressed(move |g, _n_press, x, y| {
+    
+    let p_color_c = paint_color.clone();
+    let kc_c = key_colors.clone();
+    let pk_c = per_key_colors.clone();
+    let zc_c = zone_colors.clone();
+    
+    click.connect_pressed(move |_g, _n_press, x, y| {
         let mode = *sm_click.borrow();
-        if mode == SelectionMode::All {
-            let mut s = sel_state.borrow_mut();
-            s.clear();
-            for k in keys_click.iter() { s.push(k.name.clone()); }
-            da_click.queue_draw();
-            return;
-        }
-
-        let lx = x - 10.0;
-        let ly = y - 10.0;
-        let mut hit = None;
-        for k in keys_click.iter() {
-            if lx >= k.x && lx <= k.x + k.w && ly >= k.y && ly <= k.y + k.h {
-                hit = Some(k.clone());
-                break;
-            }
-        }
-
-        let mut mods = gtk::gdk::ModifierType::empty();
-        if let Some(event) = g.current_event() { mods = event.modifier_state(); }
+        let hex = p_color_c.borrow().clone();
         
-        let mut s = sel_state.borrow_mut();
-        if !mods.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
-            s.clear();
-        }
-
-        if let Some(k) = hit {
-            match mode {
-                SelectionMode::Key => {
-                    if !s.contains(&k.name) { s.push(k.name.clone()); }
+        let mut hit_names = Vec::new();
+        
+        if mode == SelectionMode::All {
+            for k in keys_click.iter() { hit_names.push(k.name.clone()); }
+        } else {
+            let lx = x - 10.0;
+            let ly = y - 10.0;
+            let mut hit = None;
+            for k in keys_click.iter() {
+                if lx >= k.x && lx <= k.x + k.w && ly >= k.y && ly <= k.y + k.h {
+                    hit = Some(k.clone());
+                    break;
                 }
-                SelectionMode::Row => {
-                    let y_target = k.y;
-                    for other in keys_click.iter() {
-                        if (other.y - y_target).abs() < 5.0 && !s.contains(&other.name) {
-                            s.push(other.name.clone());
+            }
+            if let Some(k) = hit {
+                match mode {
+                    SelectionMode::Key => hit_names.push(k.name.clone()),
+                    SelectionMode::Row => {
+                        let y_target = k.y;
+                        for other in keys_click.iter() {
+                            if (other.y - y_target).abs() < 5.0 { hit_names.push(other.name.clone()); }
                         }
                     }
-                }
-                SelectionMode::Zone => {
-                    let z_target = get_zone_for_key(&k.name);
-                    for other in keys_click.iter() {
-                        if get_zone_for_key(&other.name) == z_target && !s.contains(&other.name) {
-                            s.push(other.name.clone());
+                    SelectionMode::Zone => {
+                        let z_target = get_zone_for_key(&k.name);
+                        for other in keys_click.iter() {
+                            if get_zone_for_key(&other.name) == z_target { hit_names.push(other.name.clone()); }
                         }
                     }
+                    _ => {}
                 }
-                _ => {}
             }
         }
-        da_click.queue_draw();
+        
+        if !hit_names.is_empty() {
+            let mut kc_mut = kc_c.borrow_mut();
+            let mut pk_mut = pk_c.borrow_mut();
+            let mut zc_mut = zc_c.borrow_mut();
+            let mut zones_changed = Vec::new();
+            
+            for n in &hit_names {
+                kc_mut.insert(n.clone(), hex.clone());
+                if detected_mode == KeyboardMode::Omen4Zone {
+                    let z = get_zone_for_key(n);
+                    zc_mut[(z-1) as usize] = hex.clone();
+                    if !zones_changed.contains(&z) { zones_changed.push(z); }
+                } else if detected_mode == KeyboardMode::PerKey {
+                    if let Some(k) = keys_click.iter().find(|x| &x.name == n) {
+                        if k.id < pk_mut.len() { pk_mut[k.id] = hex.clone(); }
+                    }
+                } else if detected_mode == KeyboardMode::Victus1Zone {
+                    zc_mut[0] = hex.clone();
+                    if !zones_changed.contains(&1) { zones_changed.push(1); }
+                }
+            }
+            
+            if detected_mode == KeyboardMode::PerKey {
+                crate::daemon_client::set_per_key_colors_sync(pk_mut.clone());
+            } else if detected_mode == KeyboardMode::Omen4Zone {
+                for z in zones_changed { crate::daemon_client::set_color_sync(z-1, hex.clone()); }
+            } else if detected_mode == KeyboardMode::Victus1Zone {
+                if !zones_changed.is_empty() { crate::daemon_client::set_color_sync(8, hex.clone()); }
+            }
+            da_click.queue_draw();
+        }
     });
     drawing_area.add_controller(click);
 
     let drag = gtk::GestureDrag::new();
     let keys_drag = keys_rc.clone();
-    let sel_state_drag = selected_keys.clone();
     let da_drag = drawing_area.clone();
     let drag_start = Rc::new(RefCell::new((0.0, 0.0)));
-    let initial_selection = Rc::new(RefCell::new(Vec::new()));
     let sm_drag = sel_mode.clone();
 
     let ds_start = drag_start.clone();
-    let init_sel = initial_selection.clone();
-    let ss_drag = sel_state_drag.clone();
-    let sm_d1 = sm_drag.clone();
-    let keys_d1 = keys_rc.clone();
-    drag.connect_drag_begin(move |g, x, y| {
+    drag.connect_drag_begin(move |_g, x, y| {
         *ds_start.borrow_mut() = (x - 10.0, y - 10.0);
-        let mut mods = gtk::gdk::ModifierType::empty();
-        if let Some(event) = g.current_event() { mods = event.modifier_state(); }
-        if !mods.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
-            ss_drag.borrow_mut().clear();
-        }
-        if *sm_d1.borrow() == SelectionMode::All {
-            let mut s = ss_drag.borrow_mut();
-            s.clear();
-            for k in keys_d1.iter() { s.push(k.name.clone()); }
-        }
-        *init_sel.borrow_mut() = ss_drag.borrow().clone();
     });
 
+    // We store painted keys during the drag to avoid redundant daemon calls
+    let painted_during_drag = Rc::new(RefCell::new(Vec::new()));
+    
     let ds_update = drag_start.clone();
-    let init_sel_u = initial_selection.clone();
     let keys_drag_u = keys_drag.clone();
-    let ss_drag_u = sel_state_drag.clone();
     let da_drag_u = da_drag.clone();
     let sm_d2 = sm_drag.clone();
+    let p_color_u = paint_color.clone();
+    let kc_u = key_colors.clone();
+    let painted_u = painted_during_drag.clone();
+    
     drag.connect_drag_update(move |_, dx, dy| {
         if *sm_d2.borrow() == SelectionMode::All { return; }
         let (sx, sy) = *ds_update.borrow();
@@ -550,23 +571,18 @@ fn build_interactive_keyboard(
         let rw = (sx - ex).abs();
         let rh = (sy - ey).abs();
 
-        let mut s = ss_drag_u.borrow_mut();
-        *s = init_sel_u.borrow().clone();
-
         let mode = *sm_d2.borrow();
+        let hex = p_color_u.borrow().clone();
         let mut hit_names = Vec::new();
 
         for k in keys_drag_u.iter() {
             let overlaps = !(k.x + k.w < rx || k.x > rx + rw || k.y + k.h < ry || k.y > ry + rh);
-            if overlaps {
-                hit_names.push(k.name.clone());
-            }
+            if overlaps { hit_names.push(k.name.clone()); }
         }
-
+        
+        let mut final_hits = Vec::new();
         match mode {
-            SelectionMode::Key => {
-                for n in hit_names { if !s.contains(&n) { s.push(n); } }
-            }
+            SelectionMode::Key => { final_hits = hit_names; }
             SelectionMode::Row => {
                 let mut hit_y = Vec::new();
                 for n in &hit_names {
@@ -575,9 +591,7 @@ fn build_interactive_keyboard(
                     }
                 }
                 for k in keys_drag_u.iter() {
-                    if hit_y.iter().any(|y| (k.y - y).abs() < 5.0) && !s.contains(&k.name) {
-                        s.push(k.name.clone());
-                    }
+                    if hit_y.iter().any(|y| (k.y - y).abs() < 5.0) { final_hits.push(k.name.clone()); }
                 }
             }
             SelectionMode::Zone => {
@@ -587,16 +601,68 @@ fn build_interactive_keyboard(
                     if !hit_z.contains(&z) { hit_z.push(z); }
                 }
                 for k in keys_drag_u.iter() {
-                    let z = get_zone_for_key(&k.name);
-                    if hit_z.contains(&z) && !s.contains(&k.name) {
-                        s.push(k.name.clone());
-                    }
+                    if hit_z.contains(&get_zone_for_key(&k.name)) { final_hits.push(k.name.clone()); }
                 }
             }
             _ => {}
         }
-        da_drag_u.queue_draw();
+        
+        let mut changed = false;
+        let mut kc_mut = kc_u.borrow_mut();
+        let mut painted = painted_u.borrow_mut();
+        
+        for n in final_hits {
+            if !painted.contains(&n) {
+                kc_mut.insert(n.clone(), hex.clone());
+                painted.push(n);
+                changed = true;
+            }
+        }
+        
+        if changed { da_drag_u.queue_draw(); }
     });
+    
+    let pk_d = per_key_colors.clone();
+    let zc_d = zone_colors.clone();
+    let keys_d = keys_rc.clone();
+    let painted_d = painted_during_drag.clone();
+    let hex_d = paint_color.clone();
+    
+    drag.connect_drag_end(move |_, _, _| {
+        let painted = painted_d.borrow().clone();
+        if painted.is_empty() { return; }
+        
+        let hex = hex_d.borrow().clone();
+        let mut pk_mut = pk_d.borrow_mut();
+        let mut zc_mut = zc_d.borrow_mut();
+        let mut zones_changed = Vec::new();
+        
+        for n in &painted {
+            if detected_mode == KeyboardMode::Omen4Zone {
+                let z = get_zone_for_key(n);
+                zc_mut[(z-1) as usize] = hex.clone();
+                if !zones_changed.contains(&z) { zones_changed.push(z); }
+            } else if detected_mode == KeyboardMode::PerKey {
+                if let Some(k) = keys_d.iter().find(|x| &x.name == n) {
+                    if k.id < pk_mut.len() { pk_mut[k.id] = hex.clone(); }
+                }
+            } else if detected_mode == KeyboardMode::Victus1Zone {
+                zc_mut[0] = hex.clone();
+                if !zones_changed.contains(&1) { zones_changed.push(1); }
+            }
+        }
+        
+        if detected_mode == KeyboardMode::PerKey {
+            crate::daemon_client::set_per_key_colors_sync(pk_mut.clone());
+        } else if detected_mode == KeyboardMode::Omen4Zone {
+            for z in zones_changed { crate::daemon_client::set_color_sync(z-1, hex.clone()); }
+        } else if detected_mode == KeyboardMode::Victus1Zone {
+            if !zones_changed.is_empty() { crate::daemon_client::set_color_sync(8, hex.clone()); }
+        }
+        
+        painted_d.borrow_mut().clear();
+    });
+
     drawing_area.add_controller(drag);
 
     kb_card.append(&drawing_area);
@@ -612,71 +678,20 @@ fn build_interactive_keyboard(
     if let Some(display) = gtk::gdk::Display::default() {
         gtk::style_context_add_provider_for_display(&display, &dyn_prov_g, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
     }
+    dyn_prov_g.load_from_string(&format!("#global_color_btn {{ background: {}; background-image: none; border: 1px solid rgba(255,255,255,0.4); }}", "#0099ED"));
     
-    let apply_btn = gtk::Button::builder().label("Apply Color").build();
-    apply_btn.add_css_class("suggested-action");
-
-    let zc_g = zone_colors.clone();
-    let kc_g = key_colors.clone();
-    let pk_g = per_key_colors.clone();
-    let kr_g = keys_rc.clone();
     let dyn_prov_clone = dyn_prov_g.clone();
-    let da_c = drawing_area.clone();
-    let sk_apply = selected_keys.clone();
-    
-    apply_btn.connect_clicked(move |btn| {
-        let zc_local = zc_g.clone();
-        let kc_local = kc_g.clone();
-        let pk_local = pk_g.clone();
-        let kr_local = kr_g.clone();
+    let paint_color_btn = paint_color.clone();
+    global_color_btn.connect_clicked(move |btn| {
         let dyn_local = dyn_prov_clone.clone();
-        let da_local = da_c.clone();
-        let sk_local = sk_apply.clone();
-        
+        let pc_local = paint_color_btn.clone();
         show_color_picker_popover(btn, Rc::new(move |hex| {
+            *pc_local.borrow_mut() = hex.clone();
             dyn_local.load_from_string(&format!("#global_color_btn {{ background: {}; background-image: none; border: 1px solid rgba(255,255,255,0.4); }}", hex));
-            
-            let mut pk_mut = pk_local.borrow_mut();
-            let mut zc_mut = zc_local.borrow_mut();
-            
-            if sk_local.borrow().is_empty() {
-                // If nothing selected, apply globally
-                if detected_mode == KeyboardMode::Victus1Zone {
-                    zc_mut[0] = hex.clone();
-                    crate::daemon_client::set_color_sync(8, hex.clone());
-                } else if detected_mode == KeyboardMode::Omen4Zone {
-                    for i in 0..4 { zc_mut[i] = hex.clone(); crate::daemon_client::set_color_sync(i as i32, hex.clone()); }
-                } else if detected_mode == KeyboardMode::PerKey {
-                    for i in 0..pk_mut.len() { pk_mut[i] = hex.clone(); }
-                    crate::daemon_client::set_per_key_colors_sync(pk_mut.clone());
-                }
-                for k in kr_local.iter() { kc_local.borrow_mut().insert(k.name.clone(), hex.clone()); }
-            } else {
-                // Apply to selected keys
-                for sel in sk_local.borrow().iter() {
-                    kc_local.borrow_mut().insert(sel.clone(), hex.clone());
-                    if detected_mode == KeyboardMode::Omen4Zone {
-                        let z = get_zone_for_key(sel);
-                        zc_mut[(z-1) as usize] = hex.clone();
-                        crate::daemon_client::set_color_sync(z-1, hex.clone());
-                    } else if detected_mode == KeyboardMode::PerKey {
-                        if let Some(k) = kr_local.iter().find(|k| &k.name == sel) {
-                            if k.id < pk_mut.len() { pk_mut[k.id] = hex.clone(); }
-                        }
-                    } else if detected_mode == KeyboardMode::Victus1Zone {
-                        zc_mut[0] = hex.clone();
-                        crate::daemon_client::set_color_sync(8, hex.clone());
-                    }
-                }
-                if detected_mode == KeyboardMode::PerKey {
-                    crate::daemon_client::set_per_key_colors_sync(pk_mut.clone());
-                }
-            }
-            da_local.queue_draw();
         }));
     });
 
-    bottom_box.append(&apply_btn);
+    bottom_box.append(&gtk::Label::builder().label("Color:").css_classes(["dim-label"]).build());
     bottom_box.append(&global_color_btn);
 
     // Speed and Brightness in bottom box
@@ -710,8 +725,9 @@ fn build_interactive_keyboard(
             }
         }
     });
-    speed_box.append(&speed_scale);
-
+    bottom_box.append(&speed_box);
+    bottom_box.append(&gtk::Separator::new(gtk::Orientation::Vertical));
+    
     let bright_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).build();
     bright_box.append(&gtk::Label::builder().label(crate::i18n::t("kb_brightness")).build());
     let bright_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
@@ -727,10 +743,6 @@ fn build_interactive_keyboard(
         crate::daemon_client::set_global_sync(val > 0, val, "ltr");
     });
     bright_box.append(&bright_scale);
-
-    bottom_box.append(&gtk::Separator::new(gtk::Orientation::Vertical));
-    bottom_box.append(&speed_box);
-    bottom_box.append(&gtk::Separator::new(gtk::Orientation::Vertical));
     bottom_box.append(&bright_box);
 
     kb_card.append(&bottom_box);
