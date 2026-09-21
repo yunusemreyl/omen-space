@@ -494,89 +494,39 @@ pub fn build_page(is_general: bool) -> gtk::Box {
         sec.append(&graph_row);
     }
 
-    // ── Daemon Offline Banner ────────────────────────────────────────────────
-    // Shown whenever the telemetry D-Bus stream drops (daemon stopped/crashed).
-    // Two action buttons:
-    //   • "Yeniden Başlat" — restarts omen-space-daemon via pkexec/systemctl
-    //   • "İptal"          — hides the banner for this session
-    //
-    // The banner uses adw::Banner which is pinned at the top of the page and
-    // automatically hides when the daemon comes back online.
+
+    // ── Daemon Offline Dialog ────────────────────────────────────────────────
     use libadwaita as adw;
     use libadwaita::prelude::*;
 
-    let daemon_banner = adw::Banner::builder()
-        .title("⚠️  Daemon çalışmıyor — Fan verileri alınamıyor")
-        .button_label("Yeniden Başlat")
-        .revealed(false) // Hidden until we detect Offline
-        .build();
-
-    // "İptal" button: just hide the banner
-    let banner_dismiss = daemon_banner.clone();
-    let dismiss_btn = gtk::Button::builder()
-        .label("İptal")
-        .css_classes(["flat"])
-        .valign(gtk::Align::Center)
-        .build();
-    dismiss_btn.connect_clicked(move |_| {
-        banner_dismiss.set_revealed(false);
-    });
-
-    // Inject the "İptal" button into the banner's internal box.
-    // adw::Banner doesn't expose a second button, so we find its last child
-    // action area and pack ours there.
-    {
-        let dismiss_btn_clone = dismiss_btn.clone();
-        // adw::Banner's content child is a GtkBox; we wrap ours in the button_widget slot
-        // by using the banner's action area. As a simple workaround, overlay the dismiss
-        // button on the parent sec later — see note below.
-        let _ = dismiss_btn_clone; // used below
-    }
-
-    // "Yeniden Başlat" button action
-    let banner_ref = daemon_banner.clone();
-    daemon_banner.connect_button_clicked(move |_| {
-        // Try pkexec first (graphical auth), fall back to direct systemctl
-        // (works if already root or polkit grants it).
-        let spawned = std::process::Command::new("pkexec")
-            .args(["systemctl", "restart", "omen-space-daemon"])
-            .spawn();
-        if spawned.is_err() {
-            let _ = std::process::Command::new("systemctl")
-                .args(["restart", "omen-space-daemon"])
-                .spawn();
-        }
-        banner_ref.set_title("⏳  Daemon yeniden başlatılıyor…");
-        // Banner hides automatically when daemon comes back online (Online event)
-    });
-
-    // Place banner + dismiss button in a horizontal wrapper at the top
-    let banner_row = gtk::Box::builder()
-        .orientation(gtk::Orientation::Horizontal)
-        .spacing(4)
-        .build();
-    banner_row.append(&daemon_banner);
-    banner_row.append(&dismiss_btn);
-    // Sync dismiss button visibility with banner revealed state
-    let dismiss_btn2 = dismiss_btn.clone();
-    // Sync dismiss visibility with banner
-    daemon_banner.connect_revealed_notify(move |b| {
-        dismiss_btn2.set_visible(b.is_revealed());
-    });
-    dismiss_btn.set_visible(false);
-    sec.append(&banner_row);
-
-    // Subscribe to daemon online/offline transitions
-    let banner_offline = daemon_banner.clone();
+    let sec_clone = sec.clone();
     crate::daemon_client::subscribe_daemon_status(move |status| {
         use crate::daemon_client::DaemonStatus;
-        match status {
-            DaemonStatus::Offline => {
-                banner_offline.set_title("⚠️  Daemon çalışmıyor — Fan verileri alınamıyor");
-                banner_offline.set_revealed(true);
-            }
-            DaemonStatus::Online => {
-                banner_offline.set_revealed(false);
+        if status == DaemonStatus::Offline {
+            if let Some(win) = sec_clone.root().and_downcast::<gtk::Window>() {
+                let dialog = adw::MessageDialog::new(
+                    Some(&win),
+                    Some("Daemon Çalışmıyor"),
+                    Some("Daemon şu an çalışmıyor. Fan RPM'leri alınamıyor.\nDaemonu yeniden başlatmak ister misiniz?")
+                );
+                dialog.add_response("cancel", "İptal");
+                dialog.add_response("restart", "Yeniden Başlat");
+                dialog.set_response_appearance("restart", adw::ResponseAppearance::Suggested);
+                
+                dialog.connect_response(None, |d, response| {
+                    if response == "restart" {
+                        let spawned = std::process::Command::new("pkexec")
+                            .args(["systemctl", "restart", "omen-space-daemon"])
+                            .spawn();
+                        if spawned.is_err() {
+                            let _ = std::process::Command::new("systemctl")
+                                .args(["restart", "omen-space-daemon"])
+                                .spawn();
+                        }
+                    }
+                    d.close();
+                });
+                dialog.present();
             }
         }
     });
