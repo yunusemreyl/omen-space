@@ -453,8 +453,17 @@ fn build_interactive_keyboard(
                 r = nr; g = ng; b = nb;
             }
 
+            let active_sel = *sel_mode_draw.borrow();
             let is_sel = sel.contains(&k.name);
-            let is_hov = hov.as_ref() == Some(&k.name);
+            let is_hov = if active_sel == SelectionMode::Zone {
+                if let Some(h_name) = hov.as_ref() {
+                    get_zone_for_key(h_name) == get_zone_for_key(&k.name)
+                } else {
+                    false
+                }
+            } else {
+                hov.as_ref() == Some(&k.name)
+            };
             
             cr.set_line_width(1.0);
             cr.set_source_rgb(r, g, b);
@@ -485,38 +494,6 @@ fn build_interactive_keyboard(
                 );
                 let _ = cr.show_text(&k.display);
             }
-        }
-        
-        let active_sel = *sel_mode_draw.borrow();
-        if active_sel == SelectionMode::Zone {
-            // Draw zone bounding boxes
-            for z in 1..=4 {
-                let mut min_x = f64::MAX;
-                let mut min_y = f64::MAX;
-                let mut max_x = f64::MIN;
-                let mut max_y = f64::MIN;
-                let mut found = false;
-                for k in keys_draw.iter() {
-                    if get_zone_for_key(&k.name) == z {
-                        if k.x < min_x { min_x = k.x; }
-                        if k.y < min_y { min_y = k.y; }
-                        if k.x + k.w > max_x { max_x = k.x + k.w; }
-                        if k.y + k.h > max_y { max_y = k.y + k.h; }
-                        found = true;
-                    }
-                }
-                if found {
-                    cr.set_source_rgba(1.0, 1.0, 1.0, 0.4);
-                    cr.set_line_width(2.0);
-                    // cr.set_dash(&[4.0, 4.0], 0.0);
-                    draw_rounded_rect(cr, min_x - 2.0, min_y - 2.0, (max_x - min_x) + 4.0, (max_y - min_y) + 4.0, 6.0);
-                    let _ = cr.stroke();
-                }
-            }
-        } else if active_sel == SelectionMode::Key {
-             // In Key mode, maybe draw a faint dash around all keys to signify they are individual?
-             // Actually, the stroke on each key is enough, but we can make it slightly brighter if needed.
-             // But let's leave it, the keys already have individual strokes.
         }
     });
 
@@ -761,8 +738,19 @@ fn build_interactive_keyboard(
     kb_card.append(&drawing_area);
 
     // 4. Color Pickers and Controls at the Bottom
-    let bottom_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(16).margin_top(12).halign(gtk::Align::Center).build();
+    let bottom_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).margin_top(12).halign(gtk::Align::Center).build();
 
+    let instructions = gtk::Label::builder()
+        .label("İlk renk seçiminizi yapıp boyamak istediğiniz tuşlara/bölgelere tıklayın.")
+        .css_classes(["dim-label"])
+        .build();
+    bottom_box.append(&instructions);
+    
+    let controls_row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(16).halign(gtk::Align::Center).build();
+
+    let color_container = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).valign(gtk::Align::Center).build();
+    color_container.append(&gtk::Label::builder().label("Color:").css_classes(["dim-label"]).build());
+    
     let global_color_btn = gtk::Button::builder().width_request(32).height_request(32).build();
     global_color_btn.add_css_class("circular");
     global_color_btn.set_widget_name("global_color_btn");
@@ -781,18 +769,11 @@ fn build_interactive_keyboard(
             dyn_local.load_from_string(&format!("#global_color_btn {{ background: {}; background-image: none; border: 1px solid rgba(255,255,255,0.4); }}", hex));
         }));
     });
+    color_container.append(&global_color_btn);
+    controls_row.append(&color_container);
 
-    let instructions = gtk::Label::builder()
-        .label("İlk renk seçiminizi yapıp boyamak istediğiniz tuşlara/bölgelere tıklayın.")
-        .css_classes(["dim-label"])
-        .margin_end(16)
-        .build();
-    bottom_box.append(&instructions);
-    
-    bottom_box.append(&gtk::Label::builder().label("Color:").css_classes(["dim-label"]).build());
-    bottom_box.append(&global_color_btn);
+    controls_row.append(&gtk::Separator::new(gtk::Orientation::Vertical));
 
-    // Speed and Brightness in bottom box
     let speed_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).build();
     speed_box.append(&gtk::Label::builder().label(crate::i18n::t("kb_effect_speed")).build());
     let speed_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
@@ -844,9 +825,9 @@ fn build_interactive_keyboard(
     let sliders_container = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).build();
     sliders_container.append(&speed_box);
     sliders_container.append(&bright_box);
+    controls_row.append(&sliders_container);
     
-    bottom_box.append(&gtk::Separator::new(gtk::Orientation::Vertical));
-    bottom_box.append(&sliders_container);
+    bottom_box.append(&controls_row);
 
     kb_card.append(&bottom_box);
 
