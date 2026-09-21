@@ -118,6 +118,7 @@ pub fn show_color_picker_popover(
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum SelectionMode {
+    Off,
     Key,
     Row,
     Zone,
@@ -215,8 +216,42 @@ fn build_interactive_keyboard(
         ),
     };
 
-    let effects_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(0).halign(gtk::Align::Center).build();
-    effects_box.add_css_class("linked");
+    let top_bar = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).build();
+
+    // -- Selection Tools (Left-aligned) --
+    let sel_mode = Rc::new(RefCell::new(SelectionMode::Key));
+    let sel_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).build();
+    let sel_label = gtk::Label::builder().label("Select:").css_classes(["dim-label"]).build();
+    sel_box.append(&sel_label);
+    
+    let sel_btns_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(0).build();
+    sel_btns_box.add_css_class("linked");
+    
+    let btn_off = gtk::ToggleButton::builder().label("Off").build();
+    let btn_key = gtk::ToggleButton::builder().label("Key").active(true).build();
+    let btn_zone = gtk::ToggleButton::builder().label("Zone").build();
+    let btn_all = gtk::ToggleButton::builder().label("All").build();
+    btn_key.set_group(Some(&btn_off));
+    btn_zone.set_group(Some(&btn_off));
+    btn_all.set_group(Some(&btn_off));
+    
+    let sm_o = sel_mode.clone(); btn_off.connect_toggled(move |b| if b.is_active() { *sm_o.borrow_mut() = SelectionMode::Off; });
+    let sm_k = sel_mode.clone(); btn_key.connect_toggled(move |b| if b.is_active() { *sm_k.borrow_mut() = SelectionMode::Key; });
+    let sm_z = sel_mode.clone(); btn_zone.connect_toggled(move |b| if b.is_active() { *sm_z.borrow_mut() = SelectionMode::Zone; });
+    let sm_a = sel_mode.clone(); btn_all.connect_toggled(move |b| if b.is_active() { *sm_a.borrow_mut() = SelectionMode::All; });
+    
+    sel_btns_box.append(&btn_off);
+    sel_btns_box.append(&btn_key);
+    sel_btns_box.append(&btn_zone);
+    sel_btns_box.append(&btn_all);
+    sel_box.append(&sel_btns_box);
+    top_bar.append(&sel_box);
+
+    // Spacer to push effects dropdown to the right
+    let spacer = gtk::Box::builder().hexpand(true).build();
+    top_bar.append(&spacer);
+
+    // -- Effects Dropdown (Right-aligned) --
     let active_mode_idx = Rc::new(RefCell::new(0));
 
     let mut current_mode_str = "static".to_string();
@@ -238,78 +273,47 @@ fn build_interactive_keyboard(
     let aa_hook = apply_anim_rc.clone();
     let msl_c: Vec<String> = mode_str_list.iter().map(|s| s.to_string()).collect();
 
-    let mut first_btn = None;
-    for (i, label) in effect_labels.iter().enumerate() {
-        let btn = gtk::ToggleButton::builder().label(*label).build();
-        if let Some(fb) = &first_btn { btn.set_group(Some(fb)); } else { first_btn = Some(btn.clone()); }
-        if msl_c[i] == current_mode_str {
-            btn.set_active(true);
-            *active_mode_idx.borrow_mut() = i;
-        }
-        
-        let am_idx = active_mode_idx.clone();
-        let msl_local = msl_c.clone();
-        let aa_local = aa_hook.clone();
-        let speed_ref = speed_rc.clone();
-        btn.connect_toggled(move |b| {
-            if b.is_active() {
-                *am_idx.borrow_mut() = i;
-                let m = &msl_local[i];
-                let speed = *speed_ref.borrow();
-                if m == "wave_ltr" {
-                    crate::daemon_client::set_mode_sync("wave", speed as i32);
-                    crate::daemon_client::set_global_sync(true, 100, "ltr");
-                } else if m == "wave_rtl" {
-                    crate::daemon_client::set_mode_sync("wave", speed as i32);
-                    crate::daemon_client::set_global_sync(true, 100, "rtl");
-                } else {
-                    crate::daemon_client::set_mode_sync(m, speed as i32);
-                }
-                if let Some(anim_func) = &*aa_local.borrow() {
-                    let anim_m = if m.starts_with("wave_") { "wave" } else { m.as_str() };
-                    anim_func(anim_m, speed);
-                }
-            }
-        });
-        effects_box.append(&btn);
-    }
-    
-    let effects_scroll = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Automatic)
-        .vscrollbar_policy(gtk::PolicyType::Never)
-        .propagate_natural_width(true)
-        .propagate_natural_height(true)
-        .max_content_width(760)
-        .child(&effects_box)
+    let effect_model = gtk::StringList::new(&effect_labels);
+    let effects_dropdown = gtk::DropDown::builder()
+        .model(&effect_model)
+        .valign(gtk::Align::Center)
         .build();
-    kb_card.append(&effects_scroll);
 
-    // 2. Selection Tools
-    let sel_mode = Rc::new(RefCell::new(SelectionMode::Key));
-    let sel_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).halign(gtk::Align::Center).build();
-    let sel_label = gtk::Label::builder().label("Select:").css_classes(["dim-label"]).build();
-    sel_box.append(&sel_label);
-    
-    let sel_btns_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(0).build();
-    sel_btns_box.add_css_class("linked");
-    
-    let btn_key = gtk::ToggleButton::builder().label("Key").active(true).build();
-    let btn_row = gtk::ToggleButton::builder().label("Row").build();
-    let btn_zone = gtk::ToggleButton::builder().label("Zone").build();
-    let btn_all = gtk::ToggleButton::builder().label("All").build();
-    btn_row.set_group(Some(&btn_key));
-    btn_zone.set_group(Some(&btn_key));
-    btn_all.set_group(Some(&btn_key));
-    
-    let sm_k = sel_mode.clone(); btn_key.connect_toggled(move |b| if b.is_active() { *sm_k.borrow_mut() = SelectionMode::Key; });
-    let sm_r = sel_mode.clone(); btn_row.connect_toggled(move |b| if b.is_active() { *sm_r.borrow_mut() = SelectionMode::Row; });
-    let sm_z = sel_mode.clone(); btn_zone.connect_toggled(move |b| if b.is_active() { *sm_z.borrow_mut() = SelectionMode::Zone; });
-    let sm_a = sel_mode.clone();
-    btn_all.connect_toggled(move |b| if b.is_active() { *sm_a.borrow_mut() = SelectionMode::All; });
-    
-    sel_btns_box.append(&btn_key); sel_btns_box.append(&btn_row); sel_btns_box.append(&btn_zone); sel_btns_box.append(&btn_all);
-    sel_box.append(&sel_btns_box);
-    kb_card.append(&sel_box);
+    if let Some(pos) = msl_c.iter().position(|s| s == &current_mode_str) {
+        effects_dropdown.set_selected(pos as u32);
+        *active_mode_idx.borrow_mut() = pos;
+    }
+
+    let am_idx = active_mode_idx.clone();
+    let msl_local = msl_c.clone();
+    let aa_local = aa_hook.clone();
+    let speed_ref = speed_rc.clone();
+    effects_dropdown.connect_selected_notify(move |dd| {
+        let i = dd.selected() as usize;
+        if i < msl_local.len() {
+            *am_idx.borrow_mut() = i;
+            let m = &msl_local[i];
+            let speed = *speed_ref.borrow();
+            if m == "wave_ltr" {
+                crate::daemon_client::set_mode_sync("wave", speed as i32);
+                crate::daemon_client::set_global_sync(true, 100, "ltr");
+            } else if m == "wave_rtl" {
+                crate::daemon_client::set_mode_sync("wave", speed as i32);
+                crate::daemon_client::set_global_sync(true, 100, "rtl");
+            } else {
+                crate::daemon_client::set_mode_sync(m, speed as i32);
+            }
+            if let Some(anim_func) = &*aa_local.borrow() {
+                let anim_m = if m.starts_with("wave_") { "wave" } else { m.as_str() };
+                anim_func(anim_m, speed);
+            }
+        }
+    });
+
+    top_bar.append(&gtk::Label::builder().label("Effect:").css_classes(["dim-label"]).build());
+    top_bar.append(&effects_dropdown);
+
+    kb_card.append(&top_bar);
 
     // 3. Canvas
     let layout_def = vec![
