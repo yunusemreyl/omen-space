@@ -719,6 +719,28 @@ impl FanService {
             _ => return false,
         };
 
+        // FIX #3: Hard-block software fan modes (auto/custom/performance) when the
+        // board's capability DB says WMI fan writes are unsupported. On abort-prone
+        // boards (878A etc.), falling through to pwm1_enable=1 causes endless 0x2E
+        // floods. Force EC (BIOS thermal) mode with user notification instead.
+        let board_id = std::fs::read_to_string("/sys/class/dmi/id/board_name").unwrap_or_default();
+        let board_id = board_id.trim();
+        let caps = crate::capabilities::detect(board_id, "", "");
+        
+        let only_ec_safe = caps.supports_fan_control_ec && !caps.supports_fan_control_wmi;
+        if only_ec_safe && matches!(mode, "auto" | "custom" | "performance") {
+            warn!("Board {} supports only EC fan control (WMI 0x2E writes proven rejected by BIOS). Forcing EC mode.", board_id);
+            // (a) Override mode
+            let _ = Box::pin(Self::set_mode_internal(state, "ec")).await;
+            // (b) User-visible notification
+            crate::notifier::DesktopNotifier::send_notification(
+                "Omen Space",
+                "Auto/Custom/Performance fan modes are not supported on your OMEN BIOS. Fan control switched to Hardware (EC) mode.",
+                0,
+            ).await;
+            return true;
+        }
+
         if mode == "ec" {
             tokio::spawn(async move {
                 DesktopNotifier::send_notification("Omen Space", "Donanım (EC) kontrolü devredildi. Watchdog mekanizması nedeniyle fanların BIOS'a teslim edilmesi 120 saniye kadar sürebilir.", 0).await;

@@ -344,10 +344,41 @@ impl UndervoltService {
                 let max_temp = 100 - val;
                 let _ = std::process::Command::new("ryzenadj").arg(format!("--tctl-temp={}", max_temp)).output();
             } else {
-                // MSR 0x1a2: TCC offset is in bits [29:24]
-                // Write (100 - target_temp) << 24 → same formula as Python set_temperature()
-                let msr_val = (100u64 - val as u64).wrapping_shl(24);
-                if !write_msr(msr_val, MSR_TEMPERATURE) {
+                // FIX #7: Proper read-modify-write for MSR 0x1a2 (Temperature Target).
+                // We must preserve Tj_max (bits 15:8) and reserved bits. A blind write
+                // sets Tj_max to 0, which the CPU silicon rejects with a #GP fault.
+                // On Comet Lake (and most modern Intel), TCC Activation Offset is bits 27:24.
+                let mut write_ok = true;
+                let cpu_count = count_cpus();
+                for cpu in 0..cpu_count {
+                    let path = msr_path(cpu);
+                    if let Ok(mut f) = std::fs::OpenOptions::new().read(true).write(true).open(&path) {
+                        use std::io::{Seek, SeekFrom, Read, Write};
+                        if f.seek(SeekFrom::Start(MSR_TEMPERATURE)).is_ok() {
+                            let mut bytes = [0u8; 8];
+                            if f.read_exact(&mut bytes).is_ok() {
+                                let cur_val = u64::from_le_bytes(bytes);
+                                // Clear bits 27:24 (mask 0x0F000000), then set them to the new offset
+                                let new_val = (cur_val & !0x0F000000u64) | ((val as u64 & 0x0F) << 24);
+                                if f.seek(SeekFrom::Start(MSR_TEMPERATURE)).is_ok() {
+                                    if f.write_all(&new_val.to_le_bytes()).is_err() {
+                                        warn!("SetTccOffset: MSR 0x1a2 write failed on CPU {}", cpu);
+                                        write_ok = false;
+                                    }
+                                } else {
+                                    write_ok = false;
+                                }
+                            } else {
+                                write_ok = false;
+                            }
+                        } else {
+                            write_ok = false;
+                        }
+                    } else {
+                        write_ok = false;
+                    }
+                }
+                if !write_ok {
                     warn!("SetTccOffset: MSR 0x1a2 write failed");
                 }
             }

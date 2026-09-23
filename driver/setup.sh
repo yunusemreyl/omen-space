@@ -458,7 +458,15 @@ do_install() {
     # listing it explicitly guarantees the DKMS version (in updates/) loads
     # before the dependency resolver runs for hp_omen_extra.
     info "Configuring auto-load on boot..."
-    printf 'hp_wmi\nhp_omen_extra\n' > /etc/modules-load.d/hp-omen-extra.conf
+    # FIX #4: Never explicitly load hp_wmi via modules-load.d on abort-prone boards
+    # (early WMI calls during systemd-modules-load.service hang EC). The hp-omen-extra
+    # module exports symbols that pull hp_wmi in automatically when needed.
+    if [ -z "${FORCE_EARLY_HP_WMI_LOAD:-}" ]; then
+        printf 'hp_omen_extra\n' > /etc/modules-load.d/hp-omen-extra.conf
+    else
+        # Explicit early load only for Tegra/VM/testing environments that need it
+        printf 'hp_wmi\nhp_omen_extra\n' > /etc/modules-load.d/hp-omen-extra.conf
+    fi
 
     echo ""
 }

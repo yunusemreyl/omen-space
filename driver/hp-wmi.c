@@ -1697,6 +1697,17 @@ static umode_t hp_wmi_attrs_is_visible(struct kobject *kobj,
 	 * We test with the same {1,0,0,0} payload used at read time.
 	 */
 	if (attr == &dev_attr_chassis_temp.attr) {
+		/* OMEN_878A_CHASSIS_TEMP_GUARD: do NOT run the init-time 0x23 chassis-temp WMI
+		 * probe on WMBA-abort-prone boards. It is the only remaining init-time WMI call
+		 * versus the known-bootable v2.0.3 call profile.
+		 */
+		{
+			const char *omen_board = dmi_get_system_info(DMI_BOARD_NAME);
+			if (omen_board && (!strcmp(omen_board, "878A") || !strcmp(omen_board, "8BCD") ||
+					   !strcmp(omen_board, "8C75") || !strcmp(omen_board, "8BAC")))
+				return 0;
+		}
+
 		u8 out[4] = {0};
 		u8 q[4] = {1, 0, 0, 0};
 		int r = hp_wmi_perform_query(HPWMI_CHASSIS_TEMP_QUERY,
@@ -3417,6 +3428,25 @@ static int hp_wmi_setup_fan_settings(struct hp_wmi_hwmon_priv *priv)
 			hp_wmi_set_fallback_fan_limits(priv);
 			priv->uses_victus_s_fan_commands = false;
 		}
+		return 0;
+	}
+
+	/* OMEN_878A_FAN_PROBE_GUARD — FIX for GH#195 boot-hang (board 878A and siblings):
+	 * Boards listed in victus_s_thermal_profile_boards[] purely so they get
+	 * HP_NO_THERMAL_PROFILE_OFFSET (i.e. skip EC thermal-profile reads) must
+	 * NOT run the Victus-S fan WMI probing below. On WMBA-abort-prone boards
+	 * (878A/8BCD/8C75/8BAC/...) those probes (0x2F/0x2D/0x11) flood
+	 * _SB.WMID.WMBA with AE_AML_BUFFER_LIMIT during early boot and can lock
+	 * the EC. fan_speed_available=false also hard-blocks the 0x2E write path,
+	 * so a mis-configured daemon cannot flood the EC at runtime either.
+	 */
+	if (active_thermal_profile_params &&
+	    active_thermal_profile_params->ec_tp_offset == HP_NO_THERMAL_PROFILE_OFFSET) {
+		pr_info("%s: board %s uses no-EC thermal params; skipping Victus-S fan probes and blocking 0x2E writes\n",
+			KBUILD_MODNAME, dmi_get_system_info(DMI_BOARD_NAME));
+		hp_wmi_set_fallback_fan_limits(priv);
+		priv->uses_victus_s_fan_commands = false;
+		priv->fan_speed_available = false;
 		return 0;
 	}
 

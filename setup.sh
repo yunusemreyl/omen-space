@@ -58,7 +58,21 @@ install_dependencies() {
                 fi
             fi
         fi
-        pacman -S --needed --noconfirm "${ARCH_PKGS[@]}" || true
+        # FIX #5: Hard guard against partial systemd upgrade (#211 adjacent).
+        # pacman -S --needed systemd dbus with stale sync DB + old installed = partial
+        # upgrade = next boot → systemd crash → emergency mode. Require user to run
+        # a FULL pacman -Syu first.
+        if command -v pacman >/dev/null 2>&1; then
+            echo "=> Arch-based system detected: verifying packages are fully up-to-date to avoid partial systemd upgrade risk"
+            if pacman -Qu 2>/dev/null | grep -qE '^(systemd|dbus|glibc|linux-cachyos|linux) '; then
+                echo "ERROR: Your system has pending core updates that would cause a partial upgrade. Run:"
+                echo " sudo pacman -Syu"
+                echo "then reboot (to confirm updated systemd/kernel boots fine) and re-run setup.sh."
+                exit 1
+            fi
+            # Now safe to install packages
+            pacman -S --needed --noconfirm "${ARCH_PKGS[@]}" || true
+        fi
     elif command -v zypper &> /dev/null; then
         echo "Detected openSUSE. Installing dependencies via zypper..."
         zypper install -y gcc make pkgconfig gtk4-devel libadwaita-devel systemd-devel dbus-1-devel kernel-devel dkms libhidapi-devel
