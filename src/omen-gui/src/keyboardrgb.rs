@@ -1098,7 +1098,7 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
     let mut lb_group_ret = None;
     let mut lb_preview_group_ret = None;
 
-    let is_omen_brand = is_omen || detected_mode == KeyboardMode::DesktopRgb;
+    let is_omen_brand = true; // Make UI visible for all, gray out if unsupported
     if is_omen_brand {
         let lb_group = adw::PreferencesGroup::builder()
             .title(crate::i18n::t("lightbar_group"))
