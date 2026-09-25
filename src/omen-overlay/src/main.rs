@@ -53,6 +53,7 @@ fn acquire_single_instance_lock() -> Option<std::fs::File> {
 }
 
 fn main() {
+    std::env::set_var("GDK_BACKEND", "wayland,x11");
     env_logger::init();
     let args = Args::parse();
 
