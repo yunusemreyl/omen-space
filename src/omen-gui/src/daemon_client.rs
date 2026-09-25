@@ -498,8 +498,7 @@ where
                         if let Ok(mut stream) = proxy.receive_telemetry_updated().await {
                             // We successfully connected — broadcast Online if we weren't before
                             if !was_online {
-                                was_online = true;
-                                broadcast_daemon_status(DaemonStatus::Online);
+                                          broadcast_daemon_status(DaemonStatus::Online);
                             }
                             while let Some(signal) = stream.next().await {
                                 if let Ok(args) = signal.args() {

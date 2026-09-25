@@ -199,6 +199,7 @@ pub fn build_page() -> gtk::Box {
         let u_sync = updating_ext.clone();
 
         glib::timeout_add_local(std::time::Duration::from_millis(1500), move || {
+            #[allow(deprecated)]
             let (tx, rx) = glib::MainContext::channel::<(String, String)>(glib::Priority::default());
             let eco_c2 = eco_c.clone();
             let bal_c2 = bal_c.clone();

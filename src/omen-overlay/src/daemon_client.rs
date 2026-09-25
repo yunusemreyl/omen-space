@@ -136,16 +136,9 @@ pub async fn get_fan_mode() -> String {
     "auto".to_string()
 }
 
-pub async fn send_toggle_overlay_signal() -> Result<(), zbus::Error> {
-    let conn = get_conn().await?;
-    let proxy = PlatformProxy::new(&conn).await?;
-    let _ = proxy.toggle_overlay().await;
-    Ok(())
-}
-
 // ── Telemetry and Hotkey Subscribers ─────────────────────────────────────────
 
-static TELEMETRY_SENDERS: OnceLock<std::sync::Mutex<Vec<glib::Sender<SystemStats>>>> = OnceLock::new();
+static TELEMETRY_SENDERS: std::sync::OnceLock<std::sync::Mutex<Vec<glib::Sender<SystemStats>>>> = std::sync::OnceLock::new();
 static TELEMETRY_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[allow(deprecated)]
@@ -179,51 +172,6 @@ where
                                             for tx in senders.iter() {
                                                 let _ = tx.send(stats.clone());
                                             }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-            }
-        });
-    }
-}
-
-static HOTKEY_SENDERS: OnceLock<std::sync::Mutex<Vec<glib::Sender<String>>>> = OnceLock::new();
-static HOTKEY_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-#[allow(deprecated)]
-pub fn subscribe_hotkey<F>(mut callback: F)
-where
-    F: FnMut(String) + 'static,
-{
-    let (tx, rx) = glib::MainContext::channel(glib::Priority::default());
-    rx.attach(None, move |key_name| {
-        callback(key_name);
-        glib::ControlFlow::Continue
-    });
-
-    let senders = HOTKEY_SENDERS.get_or_init(|| std::sync::Mutex::new(Vec::new()));
-    senders.lock().unwrap_or_else(|e| e.into_inner()).push(tx);
-
-    if !HOTKEY_STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
-        let rt = get_runtime();
-        rt.spawn(async move {
-            use futures::StreamExt;
-            loop {
-                if let Ok(conn) = get_conn().await {
-                    if let Ok(proxy) = PlatformProxy::new(&conn).await {
-                        if let Ok(mut stream) = proxy.receive_macro_key_pressed().await {
-                            while let Some(signal) = stream.next().await {
-                                if let Ok(args) = signal.args() {
-                                    let key = args.key_name().to_string();
-                                    if let Some(mutex) = HOTKEY_SENDERS.get() {
-                                        let senders = mutex.lock().unwrap_or_else(|e| e.into_inner());
-                                        for tx in senders.iter() {
-                                            let _ = tx.send(key.clone());
                                         }
                                     }
                                 }

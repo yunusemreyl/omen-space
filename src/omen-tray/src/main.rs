@@ -88,7 +88,7 @@ fn spawn_gui() {
 }
 
 fn spawn_overlay() {
-    let is_running = Command::new("pgrep")
+    let is_running = std::process::Command::new("pgrep")
         .arg("-x")
         .arg("omen-overlay")
         .output()
@@ -96,7 +96,7 @@ fn spawn_overlay() {
         .unwrap_or(false);
 
     if is_running {
-        let _ = Command::new("pkill").arg("-TERM").arg("-x").arg("omen-overlay").output();
+        let _ = std::process::Command::new("pkill").arg("-TERM").arg("-x").arg("omen-overlay").output();
         return;
     }
 
@@ -105,7 +105,7 @@ fn spawn_overlay() {
         .and_then(|p| p.parent().map(|dir| dir.join("omen-overlay")))
         .and_then(|overlay_path| {
             if overlay_path.exists() {
-                Command::new(overlay_path)
+                std::process::Command::new(overlay_path)
                     .stdin(std::process::Stdio::null())
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
@@ -116,7 +116,7 @@ fn spawn_overlay() {
             }
         })
         .or_else(|| {
-            Command::new("omen-overlay")
+            std::process::Command::new("omen-overlay")
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())

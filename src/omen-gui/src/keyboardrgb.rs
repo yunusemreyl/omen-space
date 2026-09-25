@@ -757,6 +757,7 @@ fn build_interactive_keyboard(
     
     let dyn_prov_g = gtk::CssProvider::new();
     dyn_prov_g.load_from_string(&format!("#global_color_btn {{ background: {}; background-image: none; border: 1px solid rgba(255,255,255,0.4); }}", "#0099ED"));
+    #[allow(deprecated)]
     global_color_btn.style_context().add_provider(&dyn_prov_g, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
     
     let dyn_prov_clone = dyn_prov_g.clone();
@@ -1217,6 +1218,12 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
                 }
             }
         }
+        
+        // Force show if hardware is not supported so the user can explicitly see the "Unsupported" message.
+        if !has_lightbar_hardware {
+            show_lightbar = true;
+        }
+
         lb_group.set_visible(show_lightbar);
         lb_preview_group.set_visible(show_lightbar);
 

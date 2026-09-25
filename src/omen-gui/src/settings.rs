@@ -18,9 +18,8 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
     let mut init_appearance_mode = 0u32;
     
     let specs = crate::daemon_client::get_hardware_specs_sync();
-    let prod_lower = specs.product_name.to_lowercase();
-    let mut init_lightbar = prod_lower.contains("desktop") || prod_lower.contains("transcend") || prod_lower.contains("max");
-    let mut init_overlay_enabled = true;
+    let _prod_lower = specs.product_name.to_lowercase();
+    let mut init_lightbar = true; // Always show by default so users see "Unsupported" explicitly
 
     if let Ok(home) = std::env::var("HOME") {
         let path = format!("{}/.config/omenspace/settings.json", home);
@@ -34,7 +33,6 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
                 if let Some(zo) = json.get("zone_override").and_then(|v| v.as_u64()) { init_zone_override = zo as u32; }
                 if let Some(am) = json.get("appearance_mode").and_then(|v| v.as_u64()) { init_appearance_mode = am as u32; }
                 if let Some(lb) = json.get("lightbar_enabled").and_then(|v| v.as_bool()) { init_lightbar = lb; }
-                if let Some(ov) = json.get("overlay_enabled").and_then(|v| v.as_bool()) { init_overlay_enabled = ov; }
             }
         }
     }
@@ -231,50 +229,6 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
 
     page.append(&perf_group);
 
-    // ── Overlay / Quick HUD group ─────────────────────────────
-    let overlay_group = adw::PreferencesGroup::builder()
-        .title(i18n::t("overlay_group"))
-        .build();
-
-    let overlay_enable_row = adw::SwitchRow::builder()
-        .title(i18n::t("overlay_enable"))
-        .subtitle(i18n::t("overlay_enable_sub"))
-        .build();
-    overlay_enable_row.set_active(init_overlay_enabled);
-    overlay_group.add(&overlay_enable_row);
-
-    let overlay_launch_row = adw::ActionRow::builder()
-        .title(i18n::t("overlay_launch_now"))
-        .subtitle(i18n::t("overlay_launch_now_sub"))
-        .build();
-    let launch_btn = gtk::Button::builder()
-        .label(i18n::t("overlay_launch_btn"))
-        .icon_name("preferences-desktop-display-symbolic")
-        .css_classes(["suggested-action"])
-        .valign(gtk::Align::Center)
-        .build();
-    launch_btn.connect_clicked(|_| {
-        let rt = crate::daemon_client::get_runtime();
-        rt.spawn(async {
-            let _ = crate::daemon_client::send_toggle_overlay_signal().await;
-        });
-    });
-    overlay_launch_row.add_suffix(&launch_btn);
-    overlay_group.add(&overlay_launch_row);
-
-    let shortcuts_row = adw::ActionRow::builder()
-        .title(i18n::t("overlay_shortcuts_title"))
-        .subtitle(i18n::t("overlay_shortcuts_sub"))
-        .build();
-    let badge_f2 = gtk::Label::builder()
-        .label("Shift + F2")
-        .css_classes(["badge-ok"])
-        .valign(gtk::Align::Center)
-        .build();
-    shortcuts_row.add_suffix(&badge_f2);
-    overlay_group.add(&shortcuts_row);
-
-    page.append(&overlay_group);
 
     // Save logic for all
     let hb_spin_clone = hb_spin.clone();
@@ -284,7 +238,6 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
     let thm_row_clone = thermal_row.clone();
     let zone_row_clone = zone_override_row.clone();
     let lb_row_clone = lightbar_row.clone();
-    let ov_row_clone = overlay_enable_row.clone();
 
     let save_settings = move || {
         let hb = hb_spin_clone.value();
@@ -294,7 +247,6 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
         let ta = thm_row_clone.is_active();
         let zo = zone_row_clone.selected();
         let lb = lb_row_clone.is_active();
-        let ov = ov_row_clone.is_active();
         if let Ok(home) = std::env::var("HOME") {
             let dir = format!("{}/.config/omenspace", home);
             let _ = std::fs::create_dir_all(&dir);
@@ -306,8 +258,7 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
                 "battery_care": bc,
                 "thermal_alerts": ta,
                 "zone_override": zo,
-                "lightbar_enabled": lb,
-                "overlay_enabled": ov
+                "lightbar_enabled": lb
             });
             let _ = std::fs::write(path, serde_json::to_string_pretty(&json).unwrap_or_default());
         }
@@ -353,11 +304,6 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
         if let Some(pgrp) = &lb_preview_group_opt {
             pgrp.set_visible(is_active);
         }
-    });
-
-    let s8 = save_settings_rc.clone();
-    overlay_enable_row.connect_active_notify(move |_| {
-        s8();
     });
 
     // ── Fan Control group ─────────────────────────────────────

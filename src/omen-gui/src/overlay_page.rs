@@ -204,136 +204,33 @@ pub fn build_page(_window: &adw::ApplicationWindow) -> gtk::Box {
         .build();
 
     launch_btn.connect_clicked(|_| {
-        let rt = daemon_client::get_runtime();
-        rt.spawn(async {
-            let _ = daemon_client::send_toggle_overlay_signal().await;
-        });
+        let is_running = std::process::Command::new("pgrep")
+            .arg("-x")
+            .arg("omen-overlay")
+            .output()
+            .map(|o| o.status.success() && !o.stdout.is_empty())
+            .unwrap_or(false);
+
+        if is_running {
+            let _ = std::process::Command::new("pkill").arg("-TERM").arg("-x").arg("omen-overlay").output();
+            if let Ok(mut child) = std::process::Command::new("omen-overlay")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn() {
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+            }
+        }
     });
 
     launch_row.add_suffix(&launch_btn);
     hero_group.add(&launch_row);
     page.append(&hero_group);
 
-    // ── 3. Position Picker ────────────────────────────────────────────────────
-    let pos_group = adw::PreferencesGroup::builder()
-        .title(i18n::t("overlay_position_group"))
-        .build();
-
-    // Grid picker row: 3×3 toggle buttons
-    let pos_row = adw::ActionRow::builder()
-        .title(i18n::t("overlay_position_title"))
-        .subtitle(i18n::t("overlay_position_sub"))
-        .build();
-
-    let grid_box = gtk::Box::builder()
-        .orientation(gtk::Orientation::Vertical)
-        .spacing(0)
-        .valign(gtk::Align::Center)
-        .build();
-
-    // Position labels in order
-    let pos_labels = [
-        "overlay_pos_top_left",    "overlay_pos_top_center",    "overlay_pos_top_right",
-        "overlay_pos_center_left", "overlay_pos_center",        "overlay_pos_center_right",
-        "overlay_pos_bottom_left", "overlay_pos_bottom_center", "overlay_pos_bottom_right",
-    ];
-
-    // Position emojis / icons for each cell
-    let pos_icons = ["↖", "↑", "↗", "←", "✛", "→", "↙", "↓", "↘"];
-
-    // Build 3 rows × 3 cols
-    let mut pos_btns: Vec<gtk::ToggleButton> = Vec::new();
-
-    for row_i in 0..3usize {
-        let hbox = gtk::Box::builder()
-            .orientation(gtk::Orientation::Horizontal)
-            .spacing(0)
-            .build();
-        for col_i in 0..3usize {
-            let idx = (row_i * 3 + col_i) as u32;
-            let icon = pos_icons[idx as usize];
-            let lbl_key = pos_labels[idx as usize];
-
-            let btn = gtk::ToggleButton::builder()
-                .tooltip_text(i18n::t(lbl_key))
-                .css_classes(["pos-grid-btn"])
-                .build();
-
-            let inner = gtk::Box::builder()
-                .orientation(gtk::Orientation::Vertical)
-                .spacing(1)
-                .halign(gtk::Align::Center)
-                .valign(gtk::Align::Center)
-                .build();
-            inner.append(&gtk::Label::builder().label(icon).css_classes(["pos-grid-icon"]).build());
-            inner.append(&gtk::Label::builder()
-                .label(i18n::t(lbl_key))
-                .css_classes(["pos-grid-label"])
-                .build());
-            btn.set_child(Some(&inner));
-
-            // On toggle: save position
-            btn.connect_toggled(move |b| {
-                if b.is_active() {
-                    let (h, v) = index_to_pos_str(idx);
-                    patch_settings(|s| {
-                        s["overlay_halign"] = serde_json::json!(h);
-                        s["overlay_valign"] = serde_json::json!(v);
-                    });
-                }
-            });
-
-            pos_btns.push(btn.clone());
-            hbox.append(&btn);
-        }
-        grid_box.append(&hbox);
-    }
-
-    // Group all buttons to first, then set active
-    if pos_btns.len() > 1 {
-        for btn in pos_btns.iter().skip(1) {
-            btn.set_group(Some(&pos_btns[0]));
-        }
-    }
-    if let Some(btn) = pos_btns.get(init_pos_idx as usize) {
-        btn.set_active(true);
-    } else if let Some(btn) = pos_btns.first() {
-        btn.set_active(true);
-    }
-
-    pos_row.add_suffix(&grid_box);
-    pos_group.add(&pos_row);
-
-    // ── Margin slider row ─────────────────────────────────────────────────────
-    let margin_row = adw::ActionRow::builder()
-        .title(i18n::t("overlay_margin_title"))
-        .subtitle(i18n::t("overlay_margin_sub"))
-        .build();
-
-    let margin_box = gtk::Box::builder()
-        .orientation(gtk::Orientation::Horizontal)
-        .spacing(8)
-        .valign(gtk::Align::Center)
-        .build();
-
-    let margin_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 80.0, 4.0);
-    margin_scale.set_value(init_margin);
-    margin_scale.set_width_request(160);
-    margin_scale.set_draw_value(true);
-    margin_scale.set_value_pos(gtk::PositionType::Right);
-
-    margin_scale.connect_value_changed(|s| {
-        let val = s.value() as u64;
-        patch_settings(|settings| {
-            settings["overlay_margin"] = serde_json::json!(val);
-        });
-    });
-
-    margin_box.append(&margin_scale);
-    margin_row.add_suffix(&margin_box);
-    pos_group.add(&margin_row);
-
-    page.append(&pos_group);
+    // (Position Picker and Margin Slider removed due to Wayland compositor black-screen restrictions.
+    // Users must rely on Window Manager rules for positioning in Wayland.)
 
     // ── 4. Hotkey Customization ───────────────────────────────────────────────
     let hk_group = adw::PreferencesGroup::builder()
