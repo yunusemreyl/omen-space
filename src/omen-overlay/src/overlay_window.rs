@@ -385,6 +385,7 @@ impl OverlayWindow {
             tag_label,
         });
 
+        overlay.apply_position();
         overlay.setup_interactions();
         overlay
     }
