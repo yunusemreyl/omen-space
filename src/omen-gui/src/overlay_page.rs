@@ -348,30 +348,21 @@ pub fn build_page(_window: &adw::ApplicationWindow) -> gtk::Box {
         .subtitle(i18n::t("overlay_hotkey_sub"))
         .build();
 
-    // Current hotkey badge
-    let hk_badge = gtk::Label::builder()
-        .label(&init_hotkey)
-        .css_classes(["badge-accent"])
-        .valign(gtk::Align::Center)
-        .build();
-
-    // Record button
+    // The button that acts as both display and trigger for recording
     let record_btn = gtk::Button::builder()
-        .label(i18n::t("overlay_hotkey_record_btn"))
-        .css_classes(["pill"])
+        .label(&init_hotkey)
+        .css_classes(["suggested-action", "pill"])
         .valign(gtk::Align::Center)
         .build();
 
     // Reset button
     let reset_btn = gtk::Button::builder()
-        .label(i18n::t("overlay_hotkey_reset"))
-        .css_classes(["pill"])
+        .icon_name("edit-undo-symbolic")
+        .css_classes(["circular", "flat"])
+        .tooltip_text(i18n::t("overlay_hotkey_reset"))
         .valign(gtk::Align::Center)
         .build();
 
-    // Key capture: we attach an EventControllerKey to the row when recording
-    let hk_badge_c  = hk_badge.clone();
-    let record_btn_c = record_btn.clone();
     let reset_btn_c  = reset_btn.clone();
     let hk_label_c   = hotkey_label.clone();
     let recording_c  = recording.clone();
@@ -380,15 +371,13 @@ pub fn build_page(_window: &adw::ApplicationWindow) -> gtk::Box {
     record_btn.connect_clicked(move |btn| {
         if recording_c.get() { return; }
         recording_c.set(true);
-        hk_badge_c.set_label(i18n::t("overlay_hotkey_recording"));
-        hk_badge_c.remove_css_class("badge-accent");
-        hk_badge_c.add_css_class("badge-warn");
-        btn.set_sensitive(false);
+        btn.set_label("Tuşa basın... (ESC ile iptal)");
+        btn.remove_css_class("suggested-action");
+        btn.add_css_class("destructive-action");
         reset_btn_c.set_sensitive(false);
 
         // Attach key controller
         let controller = gtk::EventControllerKey::new();
-        let hk_badge2   = hk_badge_c.clone();
         let rec2        = recording_c.clone();
         let rec_btn2    = btn.clone();
         let rst_btn2    = reset_btn_c.clone();
@@ -401,13 +390,11 @@ pub fn build_page(_window: &adw::ApplicationWindow) -> gtk::Box {
 
             // ESC cancels recording
             if key_name.to_lowercase() == "escape" {
-                hk_badge2.set_label(&hk_label2.borrow());
-                hk_badge2.remove_css_class("badge-warn");
-                hk_badge2.add_css_class("badge-accent");
+                rec_btn2.set_label(&hk_label2.borrow());
+                rec_btn2.remove_css_class("destructive-action");
+                rec_btn2.add_css_class("suggested-action");
                 rec2.set(false);
-                rec_btn2.set_sensitive(true);
                 rst_btn2.set_sensitive(true);
-                // Detach controller
                 ctrl.widget().remove_controller(ctrl);
                 return glib::Propagation::Stop;
             }
@@ -437,11 +424,10 @@ pub fn build_page(_window: &adw::ApplicationWindow) -> gtk::Box {
             *hk_label2.borrow_mut() = combo.clone();
             patch_settings(|s| { s["overlay_hotkey"] = serde_json::json!(&combo); });
 
-            hk_badge2.set_label(&combo);
-            hk_badge2.remove_css_class("badge-warn");
-            hk_badge2.add_css_class("badge-accent");
+            rec_btn2.set_label(&combo);
+            rec_btn2.remove_css_class("destructive-action");
+            rec_btn2.add_css_class("suggested-action");
             rec2.set(false);
-            rec_btn2.set_sensitive(true);
             rst_btn2.set_sensitive(true);
             ctrl.widget().remove_controller(ctrl);
             glib::Propagation::Stop
@@ -450,7 +436,6 @@ pub fn build_page(_window: &adw::ApplicationWindow) -> gtk::Box {
         hk_row_c.add_controller(controller);
     });
 
-    let hk_badge_r = hk_badge.clone();
     let hk_label_r = hotkey_label.clone();
     let recording_r = recording.clone();
     let record_btn_r = record_btn.clone();
@@ -458,9 +443,7 @@ pub fn build_page(_window: &adw::ApplicationWindow) -> gtk::Box {
         if recording_r.get() { return; }
         let default = "Shift+F2".to_string();
         *hk_label_r.borrow_mut() = default.clone();
-        hk_badge_r.set_label(&default);
-        hk_badge_r.remove_css_class("badge-warn");
-        hk_badge_r.add_css_class("badge-accent");
+        record_btn_r.set_label(&default);
         patch_settings(|s| { s["overlay_hotkey"] = serde_json::json!(&default); });
         record_btn_r.set_sensitive(true);
     });
@@ -470,7 +453,6 @@ pub fn build_page(_window: &adw::ApplicationWindow) -> gtk::Box {
         .spacing(8)
         .valign(gtk::Align::Center)
         .build();
-    suffix_box.append(&hk_badge);
     suffix_box.append(&record_btn);
     suffix_box.append(&reset_btn);
 
@@ -478,62 +460,7 @@ pub fn build_page(_window: &adw::ApplicationWindow) -> gtk::Box {
     hk_group.add(&hk_row);
     page.append(&hk_group);
 
-    // ── 5. Keybindings Cheatsheet (overlay-internal) ──────────────────────────
-    let shortcuts_group = adw::PreferencesGroup::builder()
-        .title(i18n::t("overlay_shortcuts_title"))
-        .description(i18n::t("overlay_shortcuts_sub"))
-        .build();
-
-    // Read current hotkey for global toggle row
-    let current_hotkey = hotkey_label.borrow().clone();
-    let sc_items = [
-        (current_hotkey.as_str(), "Global Hotkey", "Toggles the on-screen overlay HUD anywhere, including in games", "badge-ok"),
-        ("1 / 2 / 3", "Power Modes", "1: Quiet (Eco) • 2: Balanced (Default) • 3: Performance (Max Power)", "badge-accent"),
-        ("Q / W / E", "Fan Modes", "Q: Auto (Smart Curve) • W: Max (100% Turbo) • E: Custom Preset", "badge-accent"),
-        ("Esc", "Close HUD", "Dismisses overlay and returns immediate focus to game or app", "badge-warn"),
-    ];
-
-    for (key, title, desc, badge_style) in sc_items.iter() {
-        let row = adw::ActionRow::builder()
-            .title(*title)
-            .subtitle(*desc)
-            .build();
-        let badge = gtk::Label::builder()
-            .label(*key)
-            .css_classes([*badge_style])
-            .valign(gtk::Align::Center)
-            .build();
-        row.add_suffix(&badge);
-        shortcuts_group.add(&row);
-    }
-
-    page.append(&shortcuts_group);
-
-    // ── 6. Capabilities Card ──────────────────────────────────────────────────
-    let feat_group = adw::PreferencesGroup::builder()
-        .title(i18n::t("overlay_preview_title"))
-        .description(i18n::t("overlay_preview_desc"))
-        .build();
-
-    let feat_telemetry = adw::ActionRow::builder()
-        .title("Real-Time Cyber Telemetry")
-        .subtitle("Displays live CPU & GPU temperatures (°C), wattage (W), dual fan RPMs, and memory usage without taking focus away from games.")
-        .build();
-    feat_group.add(&feat_telemetry);
-
-    let feat_sync = adw::ActionRow::builder()
-        .title("Bidirectional System Synchronization")
-        .subtitle("Instant real-time sync with OMEN Space GUI, OMEN Tray, CLI, and Hardware Daemon.")
-        .build();
-    feat_group.add(&feat_sync);
-
-    let feat_lock = adw::ActionRow::builder()
-        .title("Zero-Lag Resident Architecture")
-        .subtitle("Resident GTK4 / Libadwaita single-instance daemon guarantees instant (<10ms) overlay appearance.")
-        .build();
-    feat_group.add(&feat_lock);
-
-    page.append(&feat_group);
+    // Sections 5 and 6 (Cheatsheet & Capabilities) have been removed for a cleaner UI
 
     page
 }

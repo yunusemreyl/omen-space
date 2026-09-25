@@ -1205,7 +1205,8 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
             lb_preview_group_c.set_visible(is_active);
         });
         let lb_prod_lower = specs.product_name.to_lowercase();
-        let mut show_lightbar = detected_mode == KeyboardMode::DesktopRgb || lb_prod_lower.contains("desktop") || lb_prod_lower.contains("transcend") || lb_prod_lower.contains("max");
+        let has_lightbar_hardware = detected_mode == KeyboardMode::DesktopRgb || lb_prod_lower.contains("desktop") || lb_prod_lower.contains("transcend") || lb_prod_lower.contains("max");
+        let mut show_lightbar = true;
         if let Ok(home) = std::env::var("HOME") {
             let path = format!("{}/.config/omenspace/settings.json", home);
             if let Ok(json_str) = std::fs::read_to_string(&path) {
@@ -1218,6 +1219,12 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
         }
         lb_group.set_visible(show_lightbar);
         lb_preview_group.set_visible(show_lightbar);
+
+        if !has_lightbar_hardware {
+            lb_group.set_sensitive(false);
+            lb_preview_group.set_sensitive(false);
+            lb_group.set_description(Some(crate::i18n::t("lightbar_unsupported")));
+        }
 
         lb_group_ret = Some(lb_group);
         lb_preview_group_ret = Some(lb_preview_group);

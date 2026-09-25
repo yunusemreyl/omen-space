@@ -71,6 +71,8 @@ impl OverlayWindow {
         window.init_layer_shell();
         window.set_layer(Layer::Overlay);
         window.set_keyboard_mode(KeyboardMode::OnDemand);
+        window.set_namespace("omen-overlay");
+        window.set_exclusive_zone(-1);
 
         window.connect_close_request(|win| {
             win.set_visible(false);
@@ -608,7 +610,6 @@ impl OverlayWindow {
             self.apply_position();
             self.refresh_initial_state();
             self.window.set_visible(true);
-            self.window.present();
         }
     }
 }
