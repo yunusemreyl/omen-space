@@ -87,7 +87,7 @@ fn spawn_gui() {
     }
 }
 
-fn ensure_overlay_running() {
+fn spawn_overlay() {
     let is_running = Command::new("pgrep")
         .arg("-x")
         .arg("omen-overlay")
@@ -95,50 +95,44 @@ fn ensure_overlay_running() {
         .map(|o| o.status.success() && !o.stdout.is_empty())
         .unwrap_or(false);
 
-    if !is_running {
-        let spawned = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|dir| dir.join("omen-overlay")))
-            .and_then(|overlay_path| {
-                if overlay_path.exists() {
-                    Command::new(overlay_path)
-                        .arg("--daemon")
-                        .stdin(std::process::Stdio::null())
-                        .stdout(std::process::Stdio::null())
-                        .stderr(std::process::Stdio::null())
-                        .spawn()
-                        .ok()
-                } else {
-                    None
-                }
-            });
+    if is_running {
+        let _ = Command::new("pkill").arg("-TERM").arg("-x").arg("omen-overlay").output();
+        return;
+    }
 
-        if spawned.is_none() {
-            let _ = Command::new("omen-overlay")
-                .arg("--daemon")
+    let spawned: Option<std::process::Child> = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|dir| dir.join("omen-overlay")))
+        .and_then(|overlay_path| {
+            if overlay_path.exists() {
+                Command::new(overlay_path)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                    .ok()
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            Command::new("omen-overlay")
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .spawn()
-                .or_else(|_| {
-                    Command::new("/usr/bin/omen-overlay")
-                        .arg("--daemon")
-                        .stdin(std::process::Stdio::null())
-                        .stdout(std::process::Stdio::null())
-                        .stderr(std::process::Stdio::null())
-                        .spawn()
-                });
-        }
+                .ok()
+        });
+
+    if let Some(mut child) = spawned {
+        spawn_task(async move {
+            let _ = child.wait();
+        });
     }
 }
 
 async fn toggle_overlay() {
-    ensure_overlay_running();
-    if let Ok(conn) = get_conn().await {
-        if let Ok(proxy) = PlatformProxy::new(&conn).await {
-            let _ = proxy.toggle_overlay().await;
-        }
-    }
+    spawn_overlay();
 }
 
 #[derive(Debug, Clone)]
@@ -524,7 +518,7 @@ async fn main() {
     let handle = service.handle();
     service.spawn();
 
-    ensure_overlay_running();
+    // No longer holding overlay in background
 
     // Listen for OMEN key presses from the zero-overhead hotkey monitor
     tokio::spawn(async move {
@@ -534,9 +528,13 @@ async fn main() {
                 if let Ok(mut stream) = proxy.receive_macro_key_pressed().await {
                     while let Some(msg) = stream.next().await {
                         if let Ok(args) = msg.args() {
-                            if *args.key_name() == "omen" {
-                                info!("OMEN tuşu algılandı, GUI başlatılıyor/kapatılıyor...");
+                            let key_name = args.key_name();
+                            if *key_name == "omen" {
+                                info!("OMEN key detected, launching GUI...");
                                 spawn_gui();
+                            } else if *key_name == "overlay" {
+                                info!("Overlay hotkey detected, toggling overlay...");
+                                spawn_overlay();
                             }
                         }
                     }

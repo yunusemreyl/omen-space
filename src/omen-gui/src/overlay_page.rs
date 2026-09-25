@@ -340,7 +340,7 @@ pub fn build_page(_window: &adw::ApplicationWindow) -> gtk::Box {
         .title(i18n::t("overlay_hotkey_group"))
         .build();
 
-    let hotkey_label = std::rc::Rc::new(std::cell::RefCell::new(init_hotkey.clone()));
+    let hotkey_state = std::rc::Rc::new(std::cell::RefCell::new(init_hotkey.clone()));
     let recording = std::rc::Rc::new(std::cell::Cell::new(false));
 
     let hk_row = adw::ActionRow::builder()
@@ -348,14 +348,18 @@ pub fn build_page(_window: &adw::ApplicationWindow) -> gtk::Box {
         .subtitle(i18n::t("overlay_hotkey_sub"))
         .build();
 
-    // The button that acts as both display and trigger for recording
-    let record_btn = gtk::Button::builder()
-        .label(&init_hotkey)
-        .css_classes(["suggested-action", "pill"])
+    let hk_label = gtk::ShortcutLabel::builder()
+        .accelerator(&init_hotkey)
         .valign(gtk::Align::Center)
         .build();
 
-    // Reset button
+    let record_btn = gtk::Button::builder()
+        .icon_name("document-edit-symbolic")
+        .css_classes(["circular", "flat"])
+        .tooltip_text(i18n::t("overlay_hotkey_record_btn"))
+        .valign(gtk::Align::Center)
+        .build();
+
     let reset_btn = gtk::Button::builder()
         .icon_name("edit-undo-symbolic")
         .css_classes(["circular", "flat"])
@@ -364,42 +368,44 @@ pub fn build_page(_window: &adw::ApplicationWindow) -> gtk::Box {
         .build();
 
     let reset_btn_c  = reset_btn.clone();
-    let hk_label_c   = hotkey_label.clone();
+    let hk_label_c   = hk_label.clone();
     let recording_c  = recording.clone();
     let hk_row_c     = hk_row.clone();
+    let record_btn_c = record_btn.clone();
+    let hk_state_c   = hotkey_state.clone();
 
-    record_btn.connect_clicked(move |btn| {
+    record_btn.connect_clicked(move |_| {
         if recording_c.get() { return; }
         recording_c.set(true);
-        btn.set_label("Tuşa basın... (ESC ile iptal)");
-        btn.remove_css_class("suggested-action");
-        btn.add_css_class("destructive-action");
+        hk_label_c.set_disabled_text("...");
+        hk_label_c.set_accelerator("");
+        hk_row_c.set_subtitle(i18n::t("overlay_hotkey_recording"));
+        record_btn_c.add_css_class("suggested-action");
         reset_btn_c.set_sensitive(false);
 
-        // Attach key controller
         let controller = gtk::EventControllerKey::new();
         let rec2        = recording_c.clone();
-        let rec_btn2    = btn.clone();
         let rst_btn2    = reset_btn_c.clone();
-        let hk_label2   = hk_label_c.clone();
+        let hk_lbl2     = hk_label_c.clone();
+        let row2        = hk_row_c.clone();
+        let rec_btn2    = record_btn_c.clone();
+        let state2      = hk_state_c.clone();
 
         controller.connect_key_pressed(move |ctrl, key, _code, state| {
             if !rec2.get() { return glib::Propagation::Proceed; }
 
             let key_name = key.name().unwrap_or_default().to_string();
 
-            // ESC cancels recording
             if key_name.to_lowercase() == "escape" {
-                rec_btn2.set_label(&hk_label2.borrow());
-                rec_btn2.remove_css_class("destructive-action");
-                rec_btn2.add_css_class("suggested-action");
+                hk_lbl2.set_accelerator(&state2.borrow());
+                row2.set_subtitle(i18n::t("overlay_hotkey_sub"));
+                rec_btn2.remove_css_class("suggested-action");
                 rec2.set(false);
                 rst_btn2.set_sensitive(true);
                 ctrl.widget().remove_controller(ctrl);
                 return glib::Propagation::Stop;
             }
 
-            // Skip modifier-only presses
             let is_modifier = matches!(key_name.to_lowercase().as_str(),
                 "shift_l" | "shift_r" | "control_l" | "control_r" |
                 "alt_l" | "alt_r" | "super_l" | "super_r" | "meta_l" | "meta_r" |
@@ -407,7 +413,6 @@ pub fn build_page(_window: &adw::ApplicationWindow) -> gtk::Box {
             );
             if is_modifier { return glib::Propagation::Stop; }
 
-            // Build combo string
             let mut parts: Vec<&str> = Vec::new();
             if state.contains(gtk::gdk::ModifierType::CONTROL_MASK) { parts.push("Ctrl"); }
             if state.contains(gtk::gdk::ModifierType::SUPER_MASK)   { parts.push("Super"); }
@@ -420,13 +425,12 @@ pub fn build_page(_window: &adw::ApplicationWindow) -> gtk::Box {
                 format!("{}+{}", parts.join("+"), formatted_key)
             };
 
-            // Save
-            *hk_label2.borrow_mut() = combo.clone();
+            *state2.borrow_mut() = combo.clone();
             patch_settings(|s| { s["overlay_hotkey"] = serde_json::json!(&combo); });
 
-            rec_btn2.set_label(&combo);
-            rec_btn2.remove_css_class("destructive-action");
-            rec_btn2.add_css_class("suggested-action");
+            hk_lbl2.set_accelerator(&combo);
+            row2.set_subtitle(i18n::t("overlay_hotkey_sub"));
+            rec_btn2.remove_css_class("suggested-action");
             rec2.set(false);
             rst_btn2.set_sensitive(true);
             ctrl.widget().remove_controller(ctrl);
@@ -436,23 +440,24 @@ pub fn build_page(_window: &adw::ApplicationWindow) -> gtk::Box {
         hk_row_c.add_controller(controller);
     });
 
-    let hk_label_r = hotkey_label.clone();
+    let hk_state_r = hotkey_state.clone();
     let recording_r = recording.clone();
-    let record_btn_r = record_btn.clone();
+    let hk_label_r = hk_label.clone();
+    
     reset_btn.connect_clicked(move |_| {
         if recording_r.get() { return; }
         let default = "Shift+F2".to_string();
-        *hk_label_r.borrow_mut() = default.clone();
-        record_btn_r.set_label(&default);
+        *hk_state_r.borrow_mut() = default.clone();
+        hk_label_r.set_accelerator(&default);
         patch_settings(|s| { s["overlay_hotkey"] = serde_json::json!(&default); });
-        record_btn_r.set_sensitive(true);
     });
 
     let suffix_box = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)
-        .spacing(8)
+        .spacing(12)
         .valign(gtk::Align::Center)
         .build();
+    suffix_box.append(&hk_label);
     suffix_box.append(&record_btn);
     suffix_box.append(&reset_btn);
 

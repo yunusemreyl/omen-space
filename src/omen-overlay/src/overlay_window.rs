@@ -1,4 +1,5 @@
 use gtk::prelude::*;
+use libadwaita as adw;
 use std::rc::Rc;
 use std::cell::RefCell;
 use crate::daemon_client::{self, SystemStats};
@@ -43,7 +44,6 @@ fn load_overlay_config() -> OverlayConfig {
 
 pub struct OverlayWindow {
     pub window: gtk::Window,
-    last_toggle: Rc<RefCell<std::time::Instant>>,
     active_power: Rc<RefCell<String>>,
     active_fan: Rc<RefCell<String>>,
     power_btns: Rc<RefCell<Vec<(String, gtk::Button)>>>,
@@ -56,10 +56,11 @@ pub struct OverlayWindow {
 }
 
 impl OverlayWindow {
-    pub fn new() -> Rc<Self> {
+    pub fn new(app: adw::Application) -> Rc<Self> {
         let cfg = load_overlay_config();
 
         let window = gtk::Window::builder()
+            .application(&app)
             .title("OMEN Quick Overlay")
             .decorated(false)
             .resizable(false)
@@ -74,16 +75,6 @@ impl OverlayWindow {
         window.set_namespace("omen-overlay");
         window.set_exclusive_zone(-1);
 
-        window.connect_close_request(|win| {
-            win.set_visible(false);
-            glib::Propagation::Stop
-        });
-
-        let last_toggle = Rc::new(RefCell::new(
-            std::time::Instant::now()
-                .checked_sub(std::time::Duration::from_secs(10))
-                .unwrap_or_else(std::time::Instant::now),
-        ));
         let active_power = Rc::new(RefCell::new("Default".to_string()));
         let active_fan = Rc::new(RefCell::new("auto".to_string()));
         let power_btns = Rc::new(RefCell::new(Vec::new()));
@@ -128,9 +119,9 @@ impl OverlayWindow {
             .icon_name("window-close-symbolic")
             .css_classes(["overlay-close-btn"])
             .build();
-        let win_clone = window.clone();
+        let app_c = app.clone();
         close_btn.connect_clicked(move |_| {
-            win_clone.set_visible(false);
+            app_c.quit();
         });
         header.append(&close_btn);
 
@@ -373,7 +364,6 @@ impl OverlayWindow {
 
         let overlay = Rc::new(Self {
             window,
-            last_toggle,
             active_power,
             active_fan,
             power_btns,
@@ -385,7 +375,8 @@ impl OverlayWindow {
             tag_label,
         });
 
-        overlay.apply_position();
+        overlay.apply_position(&cfg);
+        overlay.refresh_initial_state();
         overlay.setup_interactions();
         overlay
     }
@@ -416,17 +407,7 @@ impl OverlayWindow {
             let key_val = key.name().unwrap_or_default().to_lowercase();
             let has_shift = state.contains(gtk::gdk::ModifierType::SHIFT_MASK);
 
-            // Shift + F2 toggles overlay
-            if key_val == "f2" && has_shift {
-                this.toggle_visibility();
-                return glib::Propagation::Stop;
-            }
-
-            // Escape closes overlay
-            if key_val == "escape" {
-                this.window.set_visible(false);
-                return glib::Propagation::Stop;
-            }
+            // Escape/F2 triggers app quit, handled in main.rs key controller
 
             match key_val.as_str() {
                 "1" | "kp_1" => {
@@ -562,9 +543,7 @@ impl OverlayWindow {
         });
     }
 
-    /// Compute and apply window position based on config.
-    fn apply_position(&self) {
-        let cfg = load_overlay_config();
+    fn apply_position(&self, cfg: &OverlayConfig) {
         self.tag_label.set_label(&cfg.hotkey.to_uppercase());
 
         let halign = cfg.halign.as_str();
@@ -573,44 +552,18 @@ impl OverlayWindow {
 
         if valign == "start" {
             self.window.set_anchor(Edge::Top, true);
-            self.window.set_anchor(Edge::Bottom, false);
             self.window.set_margin(Edge::Top, mg);
         } else if valign == "end" {
             self.window.set_anchor(Edge::Bottom, true);
-            self.window.set_anchor(Edge::Top, false);
             self.window.set_margin(Edge::Bottom, mg);
-        } else {
-            self.window.set_anchor(Edge::Top, false);
-            self.window.set_anchor(Edge::Bottom, false);
         }
 
         if halign == "start" {
             self.window.set_anchor(Edge::Left, true);
-            self.window.set_anchor(Edge::Right, false);
             self.window.set_margin(Edge::Left, mg);
         } else if halign == "end" {
             self.window.set_anchor(Edge::Right, true);
-            self.window.set_anchor(Edge::Left, false);
             self.window.set_margin(Edge::Right, mg);
-        } else {
-            self.window.set_anchor(Edge::Left, false);
-            self.window.set_anchor(Edge::Right, false);
-        }
-    }
-
-    pub fn toggle_visibility(self: &Rc<Self>) {
-        let mut last = self.last_toggle.borrow_mut();
-        if last.elapsed() < std::time::Duration::from_millis(300) {
-            return;
-        }
-        *last = std::time::Instant::now();
-
-        if self.window.is_visible() {
-            self.window.set_visible(false);
-        } else {
-            self.apply_position();
-            self.refresh_initial_state();
-            self.window.set_visible(true);
         }
     }
 }
