@@ -2,6 +2,7 @@ use gtk::prelude::*;
 use std::rc::Rc;
 use std::cell::RefCell;
 use crate::daemon_client::{self, SystemStats};
+use gtk4_layer_shell::{LayerShell, Edge, Layer, KeyboardMode};
 
 // ── Overlay config (position, hotkey, margin) ─────────────────────────────────
 
@@ -66,6 +67,10 @@ impl OverlayWindow {
             .default_height(420)
             .css_classes(["omen-overlay-window"])
             .build();
+
+        window.init_layer_shell();
+        window.set_layer(Layer::Overlay);
+        window.set_keyboard_mode(KeyboardMode::OnDemand);
 
         window.connect_close_request(|win| {
             win.set_visible(false);
@@ -557,42 +562,36 @@ impl OverlayWindow {
     /// Compute and apply window position based on config.
     fn apply_position(&self) {
         let cfg = load_overlay_config();
-        // Update hotkey tag label
         self.tag_label.set_label(&cfg.hotkey.to_uppercase());
 
-        // Get display geometry
-        let Some(display) = gtk::gdk::Display::default() else { return };
-
-        // Use the first monitor's geometry
-        let monitor = display.monitors().item(0)
-            .and_downcast::<gtk::gdk::Monitor>();
-        let (screen_w, screen_h) = if let Some(m) = monitor {
-            let geo = m.geometry();
-            (geo.width(), geo.height())
-        } else {
-            (1920, 1080) // safe fallback
-        };
-
-        let win_w = self.window.default_width();
-        let win_h = self.window.default_height();
+        let halign = cfg.halign.as_str();
+        let valign = cfg.valign.as_str();
         let mg = cfg.margin;
 
-        let x = match cfg.halign.as_str() {
-            "start"  => mg,
-            "center" => (screen_w - win_w) / 2,
-            _        => screen_w - win_w - mg,  // "end" = right
-        };
-        let y = match cfg.valign.as_str() {
-            "start"  => mg,
-            "center" => (screen_h - win_h) / 2,
-            _        => screen_h - win_h - mg,  // "end" = bottom
-        };
+        if valign == "start" {
+            self.window.set_anchor(Edge::Top, true);
+            self.window.set_anchor(Edge::Bottom, false);
+            self.window.set_margin(Edge::Top, mg);
+        } else if valign == "end" {
+            self.window.set_anchor(Edge::Bottom, true);
+            self.window.set_anchor(Edge::Top, false);
+            self.window.set_margin(Edge::Bottom, mg);
+        } else {
+            self.window.set_anchor(Edge::Top, false);
+            self.window.set_anchor(Edge::Bottom, false);
+        }
 
-        // Store position hints as window data — X11 WM can pick these up via startup notifier.
-        // On Wayland the compositor controls placement; we set margin hints via CSS instead.
-        unsafe {
-            self.window.set_data("overlay_x", x);
-            self.window.set_data("overlay_y", y);
+        if halign == "start" {
+            self.window.set_anchor(Edge::Left, true);
+            self.window.set_anchor(Edge::Right, false);
+            self.window.set_margin(Edge::Left, mg);
+        } else if halign == "end" {
+            self.window.set_anchor(Edge::Right, true);
+            self.window.set_anchor(Edge::Left, false);
+            self.window.set_margin(Edge::Right, mg);
+        } else {
+            self.window.set_anchor(Edge::Left, false);
+            self.window.set_anchor(Edge::Right, false);
         }
     }
 
