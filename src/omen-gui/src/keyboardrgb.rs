@@ -1051,9 +1051,7 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
         }
     };
 
-    let std_kb_group = adw::PreferencesGroup::builder()
-        .title("Omen Workspace")
-        .build();
+    let std_kb_group = adw::PreferencesGroup::builder().build();
 
     let zone_colors = Rc::new(RefCell::new(vec!["#0099ED".to_string(); 7]));
     let per_key_colors = Rc::new(RefCell::new(vec!["#0099ED".to_string(); 104]));
@@ -1120,10 +1118,18 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
             crate::i18n::t("effect_breathing"),
             crate::i18n::t("effect_cycle"),
         ]);
+        let lb_speed_rc = Rc::new(RefCell::new(50.0));
+        let lb_speed_rc_c1 = lb_speed_rc.clone();
+        
         let lb_effect_row = adw::ComboRow::builder()
             .title(crate::i18n::t("lightbar_effect"))
             .model(&lb_effect_model)
             .build();
+            
+        let lb_effect_row_rc = Rc::new(lb_effect_row.clone());
+        let lber_c = lb_effect_row_rc.clone();
+        let lbs_c2 = lb_speed_rc.clone();
+        
         lb_effect_row.connect_selected_notify(move |row| {
             let mode = match row.selected() {
                 1 => "wave",
@@ -1131,9 +1137,34 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
                 3 => "cycle",
                 _ => "static",
             };
-            crate::daemon_client::set_mode_sync(mode, 50);
+            crate::daemon_client::set_mode_sync(mode, *lbs_c2.borrow() as i32);
         });
         lb_group.add(&lb_effect_row);
+
+        let lb_speed_row = adw::ActionRow::builder().title(crate::i18n::t("kb_effect_speed")).build();
+        let lb_speed_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
+        lb_speed_scale.set_value(50.0);
+        lb_speed_scale.set_draw_value(true);
+        lb_speed_scale.set_hexpand(false);
+        lb_speed_scale.set_size_request(250, -1);
+        lb_speed_scale.set_margin_start(12);
+        lb_speed_scale.set_margin_end(12);
+        lb_speed_scale.set_valign(gtk::Align::Center);
+        lb_speed_row.add_suffix(&lb_speed_scale);
+        lb_group.add(&lb_speed_row);
+        
+        lb_speed_scale.connect_value_changed(move |scale| {
+            let speed = scale.value();
+            *lb_speed_rc_c1.borrow_mut() = speed;
+            let row = &*lber_c;
+            let mode = match row.selected() {
+                1 => "wave",
+                2 => "breathing",
+                3 => "cycle",
+                _ => "static",
+            };
+            crate::daemon_client::set_mode_sync(mode, speed as i32);
+        });
 
         let lb_bright_row = adw::ActionRow::builder().title(crate::i18n::t("lightbar_brightness")).build();
         let lb_bright_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
@@ -1163,11 +1194,13 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
 
         let lb_effect_row_c = lb_effect_row.clone();
         let lb_bright_row_c = lb_bright_row.clone();
+        let lb_speed_row_c = lb_speed_row.clone();
         let lb_preview_group_c = lb_preview_group.clone();
 
         lb_enable_row.connect_active_notify(move |row| {
             let is_active = row.is_active();
             lb_effect_row_c.set_visible(is_active);
+            lb_speed_row_c.set_visible(is_active);
             lb_bright_row_c.set_visible(is_active);
             lb_preview_group_c.set_visible(is_active);
         });

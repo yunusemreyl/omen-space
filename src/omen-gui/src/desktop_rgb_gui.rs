@@ -133,10 +133,50 @@ pub fn build_desktop_rgb_card(
     // Call initially
     update_css();
 
-    let apply_anim = Rc::new(move |_mode: &str, _speed: f64| {
-        // Desktop handles animation in hardware, we don't need CSS animations here!
-        // The daemon handles mode changing via set_mode_sync
+    let controls_row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(16).margin_top(12).margin_bottom(12).margin_start(16).margin_end(16).build();
+    let sliders_container = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).hexpand(true).build();
+    let label_sg = gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal);
+
+    let speed_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).build();
+    let speed_label = gtk::Label::builder().label("Efekt Hızı").xalign(0.0).build();
+    label_sg.add_widget(&speed_label);
+    speed_box.append(&speed_label);
+    let speed_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
+    speed_scale.set_value(50.0);
+    speed_scale.set_size_request(150, -1);
+    speed_scale.set_valign(gtk::Align::Center);
+    speed_scale.connect_value_changed(|sc| {
+        // Desktop daemon handles set_mode_sync
+        crate::daemon_client::set_mode_sync("wave", sc.value() as i32);
+    });
+    speed_box.append(&speed_scale);
+
+    let bright_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).build();
+    let bright_label = gtk::Label::builder().label("Parlaklık").xalign(0.0).build();
+    label_sg.add_widget(&bright_label);
+    bright_box.append(&bright_label);
+    let bright_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
+    bright_scale.set_value(100.0);
+    bright_scale.set_size_request(150, -1);
+    bright_scale.set_valign(gtk::Align::Center);
+    bright_scale.connect_value_changed(|sc| {
+        let val = sc.value() as i32;
+        crate::daemon_client::set_global_sync(val > 0, val, "ltr");
+    });
+    bright_box.append(&bright_scale);
+
+    sliders_container.append(&speed_box);
+    sliders_container.append(&bright_box);
+    
+    controls_row.append(&global_color_box);
+    controls_row.append(&gtk::Separator::new(gtk::Orientation::Vertical));
+    controls_row.append(&sliders_container);
+
+    card.append(&controls_row);
+
+    let apply_anim = Rc::new(move |_mode: &str, speed: f64| {
+        speed_scale.set_value(speed);
     });
 
-    (card, apply_anim, global_color_box)
+    (card, apply_anim, gtk::Box::new(gtk::Orientation::Horizontal, 0))
 }
