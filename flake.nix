@@ -32,6 +32,7 @@
               glib
               gtk4
               libadwaita
+              systemd # provides libudev for hidapi
             ];
 
             buildPhase = ''
@@ -68,6 +69,22 @@
 
               # Fix systemd paths
               find $out/lib/systemd/system -type f -exec sed -i "s|/usr/libexec|$out/libexec|g" {} +
+
+              substituteInPlace $out/lib/systemd/system/omen-space-daemon.service \
+                --replace-fail "ExecStartPre=/bin/sleep 2" "ExecStartPre=${pkgs.coreutils}/bin/sleep 2" \
+                --replace-fail "ReadWritePaths=/sys /etc/omen-space" "ReadWritePaths=/sys -/etc/omen-space"
+
+              # Fix udev rules paths for NixOS
+              substituteInPlace $out/lib/udev/rules.d/99-omen-space.rules \
+                --replace-fail "/usr/bin/chmod" "${pkgs.coreutils}/bin/chmod" \
+                --replace-fail "/usr/bin/chgrp" "${pkgs.coreutils}/bin/chgrp" \
+                --replace-fail "/usr/bin/sh" "${pkgs.bash}/bin/sh" \
+                --replace-fail "&& chgrp " "&& ${pkgs.coreutils}/bin/chgrp " \
+                --replace-fail "&& chmod " "&& ${pkgs.coreutils}/bin/chmod "
+
+              # Fix D-Bus service paths
+              substituteInPlace $out/share/dbus-1/services/org.hp.OmenSpace.service \
+                --replace-fail "/usr/bin/omen-gui" "$out/bin/omen-gui"
             '';
           };
 
@@ -99,6 +116,7 @@
                 pname = "omen-space-driver";
                 version = "2.1.0";
                 src = "${self.packages.${pkgs.system}.omen-space.src}/driver";
+                hardeningDisable = [ "pic" ];
                 nativeBuildInputs = kernel.moduleBuildDependencies;
                 makeFlags = [
                   "KERNELRELEASE=${kernel.modDirVersion}"
