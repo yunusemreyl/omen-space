@@ -199,6 +199,9 @@ pub fn build_page() -> gtk::Box {
         let u_sync = updating_ext.clone();
 
         glib::timeout_add_local(std::time::Duration::from_millis(1500), move || {
+            if !eco_c.is_mapped() {
+                return glib::ControlFlow::Continue;
+            }
             #[allow(deprecated)]
             let (tx, rx) = glib::MainContext::channel::<(String, String)>(glib::Priority::default());
             let eco_c2 = eco_c.clone();

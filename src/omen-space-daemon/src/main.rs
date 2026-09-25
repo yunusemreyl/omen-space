@@ -108,6 +108,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let iface_ref = _conn.object_server().interface::<_, sysmon::SysMonInterface>("/org/hp/omen/SysMon").await?;
     let signal_ctx = iface_ref.signal_context().clone();
+    
+    let fan_ref = _conn.object_server().interface::<_, fan::FanService>("/org/hp/omen/Fan").await?;
+    fan_service.set_signal_ctx(fan_ref.signal_context().clone());
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;

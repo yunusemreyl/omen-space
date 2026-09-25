@@ -364,12 +364,12 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
         .build();
     dsdt_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
 
-    let per_key_wizard_row = adw::ActionRow::builder()
-        .title(i18n::t("per_key_wiz_title"))
-        .subtitle(i18n::t("per_key_wiz_sub"))
+    let triage_row = adw::ActionRow::builder()
+        .title(i18n::t("triage_title"))
+        .subtitle(i18n::t("triage_sub"))
         .activatable(true)
         .build();
-    per_key_wizard_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
+    triage_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
 
     // ── Callbacks for Diagnostics ──
     let win_clone1 = window.clone();
@@ -460,106 +460,63 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
             dialog_clone.add_response("ok", i18n::t("btn_close"));
         });
     });
-
     let win_clone3 = window.clone();
-    per_key_wizard_row.connect_activated(move |_| {
+    triage_row.connect_activated(move |_| {
         let dialog = adw::MessageDialog::builder()
-            .heading(i18n::t("per_key_wiz_title"))
-            .body("We will light up each of the 104 keys one by one.\nPlease type the name of the key that is currently lit (e.g. 'W', 'Esc', 'Space').")
+            .heading(i18n::t("triage_running"))
+            .body(i18n::t("triage_running_body"))
             .transient_for(&win_clone3)
             .build();
+        let spinner = gtk::Spinner::builder().spinning(true).halign(gtk::Align::Center).margin_top(12).margin_bottom(12).build();
+        dialog.set_extra_child(Some(&spinner));
+        dialog.present();
+        
+        let dialog_clone = dialog.clone();
+        glib::spawn_future_local(async move {
+            let res = crate::daemon_client::generate_triage_bundle_async().await;
+            spinner.set_spinning(false);
             
-        let entry = gtk::Entry::builder()
-            .placeholder_text(i18n::t("wiz_key_name_ph"))
-            .hexpand(true)
-            .margin_top(12)
-            .build();
-            
-        dialog.set_extra_child(Some(&entry));
-        
-        dialog.add_response("cancel", i18n::t("btn_cancel"));
-        dialog.add_response("next", i18n::t("btn_start_next"));
-        dialog.set_response_appearance("next", adw::ResponseAppearance::Suggested);
-        
-        let current_index = std::rc::Rc::new(std::cell::RefCell::new(0u32));
-        
-        dialog.connect_response(None, move |d: &adw::MessageDialog, response| {
-            if response == "cancel" {
-                d.close();
-                return;
-            }
-            if response == "next" {
-                let mut idx = current_index.borrow_mut();
-                if *idx == 105 {
-                    if let Some(tv) = d.extra_child().and_then(|c| c.downcast::<gtk::ScrolledWindow>().ok()) {
-                        if let Some(text_view) = tv.child().and_then(|c| c.downcast::<gtk::TextView>().ok()) {
-                            let buf = text_view.buffer();
-                            let report = buf.text(&buf.start_iter(), &buf.end_iter(), false).to_string();
-                            
+            match res {
+                Ok(report) => {
+                    dialog_clone.set_heading(Some(i18n::t("diag_report_ready")));
+                    dialog_clone.set_body(i18n::t("diag_report_body"));
+                    let tv = gtk::TextView::builder()
+                        .editable(false)
+                        .wrap_mode(gtk::WrapMode::WordChar)
+                        .monospace(true)
+                        .hexpand(true)
+                        .vexpand(true)
+                        .build();
+                    tv.buffer().set_text(&report);
+                    let sw = gtk::ScrolledWindow::builder().child(&tv).min_content_height(400).min_content_width(600).build();
+                    dialog_clone.set_extra_child(Some(&sw));
+
+                    dialog_clone.add_response("issue", i18n::t("btn_create_gh_issue"));
+                    dialog_clone.set_response_appearance("issue", adw::ResponseAppearance::Suggested);
+                    let report_clone = report.clone();
+                    dialog_clone.connect_response(None, move |d: &adw::MessageDialog, response| {
+                        if response == "issue" {
                             use urlencoding::encode;
-                            let url = format!("https://github.com/yunusemreyl/omen-space/issues/new?title=Per-Key+Mapping+Data&body={}", encode(&report));
+                            let url = format!("https://github.com/yunusemreyl/omen-space/issues/new?title=Hardware+Triage+Report&body={}", encode(&report_clone));
                             let _ = gtk::gio::AppInfo::launch_default_for_uri(&url, None::<&gtk::gio::AppLaunchContext>);
                         }
-                    }
-                    d.close();
-                    return;
-                }
-                if *idx == 0 {
-                    *idx = 1;
-                    let dialog_c = d.clone();
-                    let entry_c = entry.clone();
-                    glib::spawn_future_local(async move {
-                        let _ = crate::daemon_client::start_per_key_wizard_async().await;
-                        let _ = crate::daemon_client::light_key_index_async(1, "#FFFFFF").await;
-                        dialog_c.set_body(i18n::t("wiz_key_lit"));
-                        dialog_c.set_response_label("next", "Next");
-                        entry_c.grab_focus();
+                        d.close();
                     });
-                    return;
+                },
+                Err(e) => {
+                    dialog_clone.set_heading(Some(i18n::t("error_generic")));
+                    dialog_clone.set_body(&format!("{}: {}", i18n::t("error_generic"), e));
+                    dialog_clone.connect_response(None, |d: &adw::MessageDialog, _| d.close());
                 }
-                
-                let key_name = entry.text().to_string();
-                if key_name.trim().is_empty() {
-                    return;
-                }
-                
-                let prev_idx = *idx;
-                *idx += 1;
-                let next_idx = *idx;
-                entry.set_text("");
-                
-                let dialog_c = d.clone();
-                let entry_c = entry.clone();
-                glib::spawn_future_local(async move {
-                    let _ = crate::daemon_client::record_key_mapping_async(prev_idx, &key_name).await;
-                    
-                    if next_idx > 104 {
-                        let report = crate::daemon_client::export_keymap_report_async().await.unwrap_or_default();
-                        dialog_c.set_heading(Some(i18n::t("wiz_complete")));
-                        dialog_c.set_body(i18n::t("wiz_complete_body"));
-                        
-                        let tv = gtk::TextView::builder().editable(false).wrap_mode(gtk::WrapMode::WordChar).hexpand(true).vexpand(true).build();
-                        tv.buffer().set_text(&report);
-                        let sw = gtk::ScrolledWindow::builder().child(&tv).min_content_height(300).min_content_width(500).build();
-                        dialog_c.set_extra_child(Some(&sw));
-                        
-                        dialog_c.set_response_label("next", i18n::t("btn_create_gh_issue"));
-                        return;
-                    }
-                    
-                    let _ = crate::daemon_client::light_key_index_async(next_idx, "#FFFFFF").await;
-                    dialog_c.set_body(&format!("{} / 104 is lit. What is it?", next_idx));
-                    entry_c.grab_focus();
-                });
             }
+            dialog_clone.add_response("ok", i18n::t("btn_close"));
         });
-        
-        dialog.present();
     });
+
 
     trouble_group.add(&rgb_issue_row);
     trouble_group.add(&dsdt_row);
-    trouble_group.add(&per_key_wizard_row);
+    trouble_group.add(&triage_row);
     page.append(&trouble_group);
 
     let specs = crate::daemon_client::get_hardware_specs_sync();

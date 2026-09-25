@@ -63,26 +63,6 @@ impl DesktopNotifier {
         }
     }
 
-    /// Convenience: extract JSON "error" field and notify if present.
-    /// Returns true if an error was detected and notification was sent.
-    pub async fn check_and_notify(context: &str, json_response: &str) -> bool {
-        if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_response) {
-            if let Some(err) = val.get("error").and_then(|e| e.as_str()) {
-                if !err.is_empty() && err != "null" {
-                    Self::notify_error(context, err).await;
-                    return true;
-                }
-            }
-            if let Some(status) = val.get("status").and_then(|s| s.as_str()) {
-                if status == "error" {
-                    let msg = val.get("message").and_then(|m| m.as_str()).unwrap_or("Bilinmeyen hata");
-                    Self::notify_error(context, msg).await;
-                    return true;
-                }
-            }
-        }
-        false
-    }
 
     /// Open path or URL in the logged in user's graphical desktop session
     pub fn open_in_user_session(target: &str) {

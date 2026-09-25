@@ -1589,6 +1589,7 @@ dependencies = [
  "gtk4",
  "libadwaita",
  "libc",
+ "omen-types",
  "serde",
  "serde_json",
  "tokio",
@@ -1608,6 +1609,7 @@ dependencies = [
  "libadwaita",
  "libc",
  "log",
+ "omen-types",
  "serde",
  "serde_json",
  "tokio",
@@ -1624,8 +1626,10 @@ dependencies = [
  "glob",
  "hidapi",
  "lazy_static",
+ "libc",
  "log",
  "nvml-wrapper",
+ "omen-types",
  "serde",
  "serde_json",
  "tokio",
@@ -1642,9 +1646,18 @@ dependencies = [
  "ksni",
  "libc",
  "log",
+ "omen-types",
  "serde",
  "serde_json",
  "tokio",
+ "zbus",
+]
+
+[[package]]
+name = "omen-types"
+version = "0.1.0"
+dependencies = [
+ "serde",
  "zbus",
 ]
 

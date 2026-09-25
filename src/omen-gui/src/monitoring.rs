@@ -518,10 +518,17 @@ pub fn build_page(is_general: bool) -> gtk::Box {
                         let spawned = std::process::Command::new("pkexec")
                             .args(["systemctl", "restart", "omen-space-daemon"])
                             .spawn();
-                        if spawned.is_err() {
-                            let _ = std::process::Command::new("systemctl")
-                                .args(["restart", "omen-space-daemon"])
-                                .spawn();
+                        match spawned {
+                            Ok(mut child) => {
+                                std::thread::spawn(move || { let _ = child.wait(); });
+                            }
+                            Err(_) => {
+                                if let Ok(mut child) = std::process::Command::new("systemctl")
+                                    .args(["restart", "omen-space-daemon"])
+                                    .spawn() {
+                                    std::thread::spawn(move || { let _ = child.wait(); });
+                                }
+                            }
                         }
                     }
                     d.close();

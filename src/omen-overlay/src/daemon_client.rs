@@ -1,68 +1,6 @@
-use zbus::proxy;
 use tokio::runtime::Runtime;
 use std::sync::OnceLock;
-use serde::{Serialize, Deserialize};
-
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
-pub struct SystemStats {
-    pub cpu_temp: i32,
-    pub cpu_load: f64,
-    pub cpu_pwr: f64,
-    pub fan_rpm: i32,
-    pub fan1_rpm: i32,
-    pub fan2_rpm: i32,
-    pub gpu_temp: i32,
-    pub gpu_load: f64,
-    pub gpu_pwr: f64,
-    pub ram_used_gb: f64,
-    pub ram_total_gb: f64,
-    pub ram_frac: f64,
-    pub total_pwr: f64,
-}
-
-// ── Proxies ──────────────────────────────────────────────────────────────────
-
-#[proxy(
-    interface = "org.hp.omen.Power",
-    default_service = "org.hp.omen",
-    default_path = "/org/hp/omen/Power"
-)]
-pub trait Power {
-    async fn set_power_profile(&self, profile: &str) -> zbus::Result<String>;
-    async fn get_power_profile(&self) -> zbus::Result<String>;
-}
-
-#[proxy(
-    interface = "org.hp.omen.Fan",
-    default_service = "org.hp.omen",
-    default_path = "/org/hp/omen/Fan"
-)]
-pub trait Fan {
-    async fn set_fan_mode(&self, mode: &str) -> zbus::Result<String>;
-    async fn get_fan_mode(&self) -> zbus::Result<String>;
-}
-
-#[proxy(
-    interface = "org.hp.omen.SysMon",
-    default_service = "org.hp.omen",
-    default_path = "/org/hp/omen/SysMon"
-)]
-pub trait SysMon {
-    #[zbus(signal)]
-    fn telemetry_updated(&self, json_stats: &str) -> zbus::Result<()>;
-}
-
-#[proxy(
-    interface = "org.hp.omen.Platform",
-    default_service = "org.hp.omen",
-    default_path = "/org/hp/omen/Platform"
-)]
-pub trait Platform {
-    async fn toggle_overlay(&self) -> zbus::Result<String>;
-
-    #[zbus(signal)]
-    fn macro_key_pressed(&self, key_name: &str) -> zbus::Result<()>;
-}
+pub use omen_types::*;
 
 // ── Runtime Management ───────────────────────────────────────────────────────
 

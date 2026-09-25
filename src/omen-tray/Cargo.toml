@@ -14,3 +14,4 @@ serde_json = "1.0"
 glib = "0.18"
 libc = "0.2"
 futures = "0.3.34"
+omen-types = { version = "0.1.0", path = "../omen-types" }

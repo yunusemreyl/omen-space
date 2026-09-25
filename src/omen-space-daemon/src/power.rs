@@ -544,8 +544,19 @@ impl PowerService {
     /// GetPowerProfile — returns JSON matching Python GetPowerProfile().
     async fn get_power_profile(&self) -> String {
         let cfg = self.config.lock().await.clone();
-        let active = Self::detect_current_profile().await;
+        let mut active = Self::detect_current_profile().await;
         
+        let available_profiles = Self::get_available_profiles().await;
+        
+        // If hardware doesn't support power-saver natively but user selected it,
+        // report it back so the UI doesn't bounce to "Balanced". Software limits (PL1/PL2, GPU)
+        // are still applied under the hood.
+        if active == "balanced" && cfg.power_profile == "power-saver" {
+            if !available_profiles.iter().any(|c| c == "power-saver" || c == "low-power" || c == "quiet" || c == "cool") {
+                active = "power-saver".to_string();
+            }
+        }
+
         let mut real_pl1 = cfg.pl1_w;
         let mut real_pl2 = cfg.pl2_w;
         if let Some(val) = sysfs_read_async("/sys/class/powercap/intel-rapl/intel-rapl:0/constraint_0_power_limit_uw").await {

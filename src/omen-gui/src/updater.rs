@@ -10,26 +10,25 @@ use crate::i18n;
 pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     let page = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
-        .spacing(20)
         .build();
 
-    // Header
-    let hdr = gtk::Box::builder()
-        .orientation(gtk::Orientation::Vertical)
-        .spacing(4)
-        .margin_bottom(4)
+    let status_page = adw::StatusPage::builder()
+        .icon_name("software-update-available-symbolic")
+        .title(i18n::t("title_updater"))
+        .description(i18n::t("updater_desc"))
+        .margin_top(24)
+        .margin_bottom(12)
         .build();
-    hdr.append(&gtk::Label::builder()
-        .label(i18n::t("title_updater"))
-        .css_classes(["page-title"])
-        .halign(gtk::Align::Start)
-        .build());
-    hdr.append(&gtk::Label::builder()
-        .label(i18n::t("updater_desc"))
-        .css_classes(["os-section-desc"])
-        .halign(gtk::Align::Start)
-        .build());
-    page.append(&hdr);
+    page.append(&status_page);
+
+    let content_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(24)
+        .margin_start(24)
+        .margin_end(24)
+        .margin_bottom(32)
+        .build();
+    page.append(&content_box);
 
     // ── OmenSpace update card ────────────────────────────────
     let app_group = adw::PreferencesGroup::builder()
@@ -40,27 +39,47 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
         .title(i18n::t("current_version"))
         .subtitle(i18n::t("last_checked"))
         .build();
-    ver_row.add_suffix(&gtk::Label::builder()
+    let app_icon = gtk::Image::builder()
+        .icon_name("application-x-executable-symbolic")
+        .css_classes(["accent"])
+        .pixel_size(32)
+        .margin_end(12)
+        .build();
+    ver_row.add_prefix(&app_icon);
+    
+    let version_badge = gtk::Label::builder()
         .label(format!("v{}", env!("CARGO_PKG_VERSION")))
-        .css_classes(["os-section-desc"])
+        .css_classes(["os-chip-btn", "accent"])
         .valign(gtk::Align::Center)
-        .build());
+        .build();
+    ver_row.add_suffix(&version_badge);
     app_group.add(&ver_row);
 
     let check_row = adw::ActionRow::builder()
         .title(i18n::t("check_updates"))
-        .activatable(true)
         .build();
-    check_row.add_suffix(&gtk::Image::builder()
-        .icon_name("go-next-symbolic")
-        .build());
+    let check_icon = gtk::Image::builder()
+        .icon_name("view-refresh-symbolic")
+        .pixel_size(24)
+        .margin_end(12)
+        .build();
+    check_row.add_prefix(&check_icon);
+    
+    let check_btn = gtk::Button::builder()
+        .label(&*i18n::t("check_updates"))
+        .css_classes(["suggested-action", "pill"])
+        .valign(gtk::Align::Center)
+        .build();
+        
     let win_clone = window.clone();
-    check_row.connect_activated(move |_| {
+    check_btn.connect_clicked(move |_| {
         show_update_modal(&win_clone, false);
     });
+    check_row.add_suffix(&check_btn);
+    
     app_group.add(&check_row);
 
-    page.append(&app_group);
+    content_box.append(&app_group);
 
     // ── Firmware group ────────────────────────────────────────
     let specs = crate::daemon_client::get_hardware_specs_sync();
@@ -69,30 +88,48 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
         .description(i18n::t("firmware_desc"))
         .build();
 
-    for (device, ver) in [
+    let icons = ["firmware-motherboard-symbolic", "cpu-symbolic", "video-display-symbolic"];
+    for (i, (device, ver)) in [
         ("HP BIOS",          specs.bios_version.as_str()),
         ("HP EC Firmware",   specs.ec_version.as_str()),
         ("NVIDIA vBIOS",     specs.vbios_version.as_str()),
-    ] {
-        let row = adw::ActionRow::builder().title(device).subtitle(ver).build();
+    ].iter().enumerate() {
+        let row = adw::ActionRow::builder().title(*device).subtitle(*ver).build();
+        let icon = gtk::Image::builder()
+            .icon_name(icons[i])
+            .pixel_size(24)
+            .margin_end(12)
+            .build();
+        row.add_prefix(&icon);
         fw_group.add(&row);
     }
 
     let fwupd_row = adw::ActionRow::builder()
         .title(i18n::t("scan_fwupd"))
         .subtitle(i18n::t("scan_fwupd_sub"))
-        .activatable(true)
         .build();
-    fwupd_row.add_suffix(&gtk::Image::builder()
-        .icon_name("go-next-symbolic")
-        .build());
+    let fwupd_icon = gtk::Image::builder()
+        .icon_name("system-software-update-symbolic")
+        .pixel_size(24)
+        .margin_end(12)
+        .build();
+    fwupd_row.add_prefix(&fwupd_icon);
+    
+    let fwupd_btn = gtk::Button::builder()
+        .label(&*i18n::t("scan_fwupd"))
+        .css_classes(["suggested-action", "pill"])
+        .valign(gtk::Align::Center)
+        .build();
+        
     let win_clone2 = window.clone();
-    fwupd_row.connect_activated(move |_| {
+    fwupd_btn.connect_clicked(move |_| {
         show_update_modal(&win_clone2, true);
     });
+    fwupd_row.add_suffix(&fwupd_btn);
+    
     fw_group.add(&fwupd_row);
 
-    page.append(&fw_group);
+    content_box.append(&fw_group);
 
     page
 }
@@ -385,8 +422,8 @@ fn start_update_process(vbox: gtk::Box, dialog: gtk::Window) {
                 }
             };
 
-        let stdout = if let Some(s) = cmd.stdout.take() { s } else { return; };
-        let stderr = if let Some(s) = cmd.stderr.take() { s } else { return; };
+        let stdout = if let Some(s) = cmd.stdout.take() { s } else { pulse_source.remove(); return; };
+        let stderr = if let Some(s) = cmd.stderr.take() { s } else { pulse_source.remove(); return; };
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         let tx1 = tx.clone();
