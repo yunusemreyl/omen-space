@@ -1,0 +1,45 @@
+[Unit]
+Description=Podswietlenie klawiatury HP OMEN (HID LampArray)
+Documentation=file:///usr/local/share/doc/omen-kbd/README.md
+After=multi-user.target
+
+[Service]
+Type=simple
+# Demon dziala jako osobny, nieuprzywilejowany uzytkownik systemowy. To jest
+# sedno modelu bezpieczenstwa: strumien nacisniec klawiszy jest czytelny tylko
+# dla tego uid. Procesy zalogowanego uzytkownika moga rozmawiac z demonem po
+# gniezdzie (zmieniac kolory), ale nie maja dostepu do /dev/input/*.
+User=omenkbd
+Group=omenkbd
+# Grupa dajaca dostep do nacisniec klawiszy. Istnieje tylko przy instalacji
+# z --with-reactive; bez niej systemd po prostu ja pomija.
+SupplementaryGroups=omenkbd-input
+
+ExecStart=/usr/local/bin/omen-kbd-daemon
+Restart=on-failure
+RestartSec=2
+
+# /run/omen-kbd — gniazdo. Tryb 0750 z grupa omenkbd pozwala wejsc do katalogu
+# czlonkom grupy, czyli tobie.
+RuntimeDirectory=omen-kbd
+RuntimeDirectoryMode=0750
+# /var/lib/omen-kbd — stan i profile. /var/cache/omen-kbd — cache mapy lampek.
+StateDirectory=omen-kbd
+CacheDirectory=omen-kbd
+
+# Zadnych gniazd sieciowych: proces nie jest w stanie niczego wyslac na zewnatrz.
+RestrictAddressFamilies=AF_UNIX
+NoNewPrivileges=yes
+PrivateNetwork=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+DevicePolicy=closed
+DeviceAllow=char-hidraw rw
+DeviceAllow=char-input r
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target

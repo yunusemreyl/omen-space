@@ -1,0 +1,174 @@
+======== 0003:0D62:54BF.0004  (rzeczywisty rozmiar deskryptora: 47 bajtow) ========
+0600ff0901a1010902150026ff007508954081020903150026ff007508954091
+020904150026ff0075089540b102c0
+-- interfejs USB: 3-9:1.0
+-- hidraw: hidraw3 
+-- >>> VENDOR-DEFINED USAGE PAGE OBECNA (kandydat na kanal RGB)
+
+======== 0003:0D62:54BF.0005  (rzeczywisty rozmiar deskryptora: 59 bajtow) ========
+05010906a1010508150025011901290375019503910295059101050719e029e7
+75019508810295088101150026ff0019002aff00750895068100c0
+-- interfejs USB: 3-9:1.1
+-- hidraw: hidraw4 
+-- (brak vendor-defined usage page)
+
+======== 0003:0D62:54BF.0006  (rzeczywisty rozmiar deskryptora: 179 bajtow) ========
+05010902a10185010901a1000509150025011901290575019505810295038101
+050116018026ff7f093009317510950281061581257f0938750895018106050c
+0a380295018106c0c0050c0901a101850319002aff07150026ff079501751081
+00c00602ff0901a1018504150026ff000903750895038100c00501090ca10185
+081500250109c695017501810675078103c005010906a1018505050795017508
+810395e87501150025010507190029e78100c0
+-- interfejs USB: 3-9:1.2
+-- hidraw: hidraw5 
+-- >>> VENDOR-DEFINED USAGE PAGE OBECNA (kandydat na kanal RGB)
+
+======== 0003:0D62:54BF.0007  (rzeczywisty rozmiar deskryptora: 31 bajtow) ========
+0601ff0901a101150026ff0075089540092081020921910209229508b102c0
+-- interfejs USB: 3-9:1.3
+-- hidraw: hidraw6 
+-- >>> VENDOR-DEFINED USAGE PAGE OBECNA (kandydat na kanal RGB)
+
+======== 0003:0D62:54BF.0008  (rzeczywisty rozmiar deskryptora: 292 bajtow) ========
+05590901a10185010902a1020903150027ffff000095017510b1030904090509
+060907090827ffffff7f95057520b103c085020920a102092127ffff00009501
+7510b102c085030922a1020921b1020923092409250927092627ffffff7f9505
+7520b10209280929092a092b092c092d26ff0095067508b102c085040950a102
+090325089501b10209552501b102092127ffff000095087510b1020951095209
+5309540951095209530954095109520953095409510952095309540951095209
+53095409510952095309540951095209530954095109520953095426ff009520
+7508b102c085050960a102095525019501b1020961096227ffff000095027510
+b102095109520953095426ff0095047508b102c085060970a102097125019501
+b102c0c0
+-- interfejs USB: 3-9:1.4
+-- hidraw: hidraw7 
+-- (brak vendor-defined usage page)
+
+======== rozmiary raportow wg hidraw (do czego mozna pisac) ========
+/dev/hidraw3 -> 
+/dev/hidraw4 -> 
+/dev/hidraw5 -> 
+/dev/hidraw6 -> 
+/dev/hidraw7 -> 
+
+======== SSDT15: co robi komenda 0x2000B ========
+5908-                        Buffer (0x80){}
+5909-                    }
+5910-                CreateField (DerefOf (Local0 [0x02]), Zero, 0x0400, BUFS)
+5911-                WHWB = BUFS /* \_SB_.WMID.TC00.BUFS */
+5912:                GHWI (Zero, 0x0002000B)
+5913-                BUFS = WHWB /* \_SB_.WMID.WHWB */
+5914-                Return (Local0)
+5915-            }
+5916-
+5917-            Method (TC01, 1, NotSerialized)
+5918-            {
+5919-                Local0 = Buffer (0x80){}
+5920-                CreateDWordField (Local0, Zero, BUF0)
+5921-                CreateDWordField (Arg0, 0x10, BUF1)
+5922-                BUF0 = BUF1 /* \_SB_.WMID.TC01.BUF1 */
+5923-                HWBF = Local0
+5924:                GHWI (One, 0x0002000B)
+5925-                Local1 = Package (0x03)
+5926-                    {
+5927-                        Zero, 
+5928-                        0x80, 
+5929-                        Buffer (0x80){}
+5930-                    }
+5931-                CreateField (DerefOf (Local1 [0x02]), Zero, 0x0400, BUFS)
+5932-                Local2 = Buffer (0x80){}
+5933-                Local2 = HWBF /* \_SB_.WMID.HWBF */
+5934-                BUFS = Local2
+5935-                Return (Local1)
+5936-            }
+5937-
+5938-            Method (TC02, 1, NotSerialized)
+5939-            {
+5940-                Local0 = Package (0x02)
+5941-                    {
+5942-                        Zero, 
+5943-                        Zero
+5944-                    }
+5945-                Return (Local0)
+5946-            }
+5947-
+5948-            Method (TC03, 1, NotSerialized)
+5949-            {
+--
+5951-                CreateDWordField (Local0, Zero, BUF0)
+5952-                CreateDWordField (Arg0, 0x10, BUF1)
+5953-                BUF0 = BUF1 /* \_SB_.WMID.TC03.BUF1 */
+5954-                HWBF = Local0
+5955:                GHWI (0x03, 0x0002000B)
+5956-                Local1 = Package (0x03)
+5957-                    {
+5958-                        Zero, 
+5959-                        0x04, 
+5960-                        Buffer (0x04){}
+5961-                    }
+5962-                CreateField (DerefOf (Local1 [0x02]), Zero, 0x20, BUF2)
+5963-                Local2 = Buffer (0x04){}
+5964-                Local2 = HWBF /* \_SB_.WMID.HWBF */
+5965-                CreateWordField (Local2, Zero, HWD1)
+5966-                BUF2 = Local2
+5967-                Return (Local1)
+5968-            }
+5969-
+5970-            Method (TC04, 1, NotSerialized)
+5971-            {
+5972-                Local0 = Buffer (0x80){}
+5973-                CreateDWordField (Local0, Zero, BUF0)
+5974-                CreateDWordField (Arg0, 0x10, BUF1)
+5975-                BUF0 = BUF1 /* \_SB_.WMID.TC04.BUF1 */
+5976-                HWBF = Local0
+5977:                GHWI (0x04, 0x0002000B)
+5978-                Local1 = Package (0x03)
+5979-                    {
+5980-                        Zero, 
+5981-                        0x04, 
+5982-                        Buffer (0x04){}
+5983-                    }
+5984-                CreateField (DerefOf (Local1 [0x02]), Zero, 0x20, BUF2)
+5985-                Local2 = Buffer (0x04){}
+5986-                Local2 = HWBF /* \_SB_.WMID.HWBF */
+5987-                CreateWordField (Local2, Zero, HWD1)
+5988-                BUF2 = Local2
+5989-                Return (Local1)
+5990-            }
+5991-
+5992-            Method (WHCM, 2, Serialized)
+5993-            {
+5994-                CreateDWordField (Arg1, Zero, SNIN)
+5995-                CreateDWordField (Arg1, 0x04, COMD)
+5996-                CreateDWordField (Arg1, 0x08, CMTP)
+5997-                CreateDWordField (Arg1, 0x0C, DASI)
+5998-                Switch (Arg0)
+5999-                {
+6000-                    Case (One)
+6001-                    {
+6002-                        Local0 = Zero
+--
+6078-                        {
+6079-                            Local2 = LDCF (CMTP, DAIN)
+6080-                            RTCD = RTCC /* \_SB_.WMID.RTCC */
+6081-                        }
+6082:                        Case (0x0002000B)
+6083-                        {
+6084-                            Switch (CMTP)
+6085-                            {
+6086-                                Case (Zero)
+6087-                                {
+6088-                                    Local2 = TC00 ()
+6089-                                    RTCD = Zero
+6090-                                }
+6091-                                Case (One)
+6092-                                {
+6093-                                    Local2 = TC01 (Arg1)
+6094-                                    RTCD = Zero
+6095-                                }
+6096-
+6097-                            }
+6098-                        }
+6099-
+6100-                    }
+6101-                }

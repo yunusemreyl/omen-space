@@ -1,0 +1,32 @@
+# UWAGA: ta regula otwiera NACISNIECIA KLAWISZY wbudowanej klawiatury.
+# Instalowana tylko jawnie:  bash packaging/install.sh --with-reactive
+# Potrzebna wylacznie do efektu reagujacego na pisanie, ktory jest z definicji
+# keyloggerem — nie da sie go zrobic bez czytania klawiszy.
+#
+# GROUP="omenkbd-input" i NIC WIECEJ. Do tej grupy nalezy tylko uzytkownik
+# systemowy 'omenkbd', pod ktorym chodzi demon. Zalogowany uzytkownik do niej
+# NIE nalezy, wiec jego aplikacje — notatniki, przegladarki, pakiety z npm —
+# nie maja jak przeczytac klawiszy. Wayland kieruje im tylko to, co sam wpiszesz
+# w ich okno, i ta regula tego nie zmienia.
+#
+# Swiadomie BEZ TAG+="uaccess": uaccess nadaje ACL UZYTKOWNIKOWI, wiec dalby
+# dostep kazdemu procesowi dzialajacemu jako ty — dokladnie temu, przed czym
+# ma chronic separacja na osobny uid.
+#
+# Dopasowanie przez ENV z tego samego powodu co w regule dla diod: wlasciwosci
+# sa ustawiane na samym urzadzeniu event*, wiec nie ma pulapki wspolnego rodzica.
+#
+# Zawezenia:
+#   ID_USB_VENDOR_ID + ID_USB_MODEL_ID — tylko TA klawiatura. Touchpad,
+#                                        klawiatury zewnetrzne (BY Tech, Compx,
+#                                        Bluetooth) i przyszle urzadzenia
+#                                        zostaja niedostepne.
+#   ID_INPUT_KEYBOARD=="1"             — z szesciu urzadzen wejsciowych tej
+#                                        klawiatury tylko dwa przenosza pisanie.
+#                                        Wskaznik dotykowy, klawisze
+#                                        multimedialne i sterowanie radiem
+#                                        zostaja poza regula.
+# Jawny wpis ACL dla grupy — z tego samego powodu co w regule dla diod: gdy na
+# wezle wisi ACL, uprawnienie grupy wlascicielskiej moze byc puste (group::---)
+# mimo poprawnie ustawionej grupy i trybu.
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", ENV{ID_USB_VENDOR_ID}=="0d62", ENV{ID_USB_MODEL_ID}=="54bf", GROUP="omenkbd-input", MODE="0640", RUN+="/usr/bin/setfacl -m g:omenkbd-input:r $env{DEVNAME}"

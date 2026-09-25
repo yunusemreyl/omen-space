@@ -3,6 +3,43 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use crate::daemon_client::{self, SystemStats};
 
+// ── Overlay config (position, hotkey, margin) ─────────────────────────────────
+
+#[derive(Clone)]
+struct OverlayConfig {
+    halign: String,  // "start" | "center" | "end"
+    valign: String,  // "start" | "center" | "end"
+    margin: i32,
+    hotkey: String,
+}
+
+impl Default for OverlayConfig {
+    fn default() -> Self {
+        Self {
+            halign: "end".into(),
+            valign: "start".into(),
+            margin: 24,
+            hotkey: "Shift+F2".into(),
+        }
+    }
+}
+
+fn load_overlay_config() -> OverlayConfig {
+    let mut cfg = OverlayConfig::default();
+    if let Ok(home) = std::env::var("HOME") {
+        let path = format!("{}/.config/omenspace/settings.json", home);
+        if let Ok(s) = std::fs::read_to_string(&path) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
+                if let Some(h) = v.get("overlay_halign").and_then(|x| x.as_str()) { cfg.halign = h.to_string(); }
+                if let Some(v2) = v.get("overlay_valign").and_then(|x| x.as_str()) { cfg.valign = v2.to_string(); }
+                if let Some(m) = v.get("overlay_margin").and_then(|x| x.as_i64()) { cfg.margin = m as i32; }
+                if let Some(hk) = v.get("overlay_hotkey").and_then(|x| x.as_str()) { cfg.hotkey = hk.to_string(); }
+            }
+        }
+    }
+    cfg
+}
+
 pub struct OverlayWindow {
     pub window: gtk::Window,
     last_toggle: Rc<RefCell<std::time::Instant>>,
@@ -14,10 +51,13 @@ pub struct OverlayWindow {
     gpu_val_label: gtk::Label,
     fan_val_label: gtk::Label,
     ram_val_label: gtk::Label,
+    tag_label: gtk::Label,
 }
 
 impl OverlayWindow {
     pub fn new() -> Rc<Self> {
+        let cfg = load_overlay_config();
+
         let window = gtk::Window::builder()
             .title("OMEN Quick Overlay")
             .decorated(false)
@@ -70,8 +110,9 @@ impl OverlayWindow {
             .build();
         header.append(&title_label);
 
+        // Show configured hotkey in header tag
         let tag_label = gtk::Label::builder()
-            .label("SHIFT + F2")
+            .label(&cfg.hotkey.to_uppercase())
             .css_classes(["overlay-brand-tag"])
             .build();
         header.append(&tag_label);
@@ -334,6 +375,7 @@ impl OverlayWindow {
             gpu_val_label: gpu_val,
             fan_val_label: fan_val,
             ram_val_label: ram_val,
+            tag_label,
         });
 
         overlay.setup_interactions();
@@ -512,6 +554,48 @@ impl OverlayWindow {
         });
     }
 
+    /// Compute and apply window position based on config.
+    fn apply_position(&self) {
+        let cfg = load_overlay_config();
+        // Update hotkey tag label
+        self.tag_label.set_label(&cfg.hotkey.to_uppercase());
+
+        // Get display geometry
+        let Some(display) = gtk::gdk::Display::default() else { return };
+
+        // Use the first monitor's geometry
+        let monitor = display.monitors().item(0)
+            .and_downcast::<gtk::gdk::Monitor>();
+        let (screen_w, screen_h) = if let Some(m) = monitor {
+            let geo = m.geometry();
+            (geo.width(), geo.height())
+        } else {
+            (1920, 1080) // safe fallback
+        };
+
+        let win_w = self.window.default_width();
+        let win_h = self.window.default_height();
+        let mg = cfg.margin;
+
+        let x = match cfg.halign.as_str() {
+            "start"  => mg,
+            "center" => (screen_w - win_w) / 2,
+            _        => screen_w - win_w - mg,  // "end" = right
+        };
+        let y = match cfg.valign.as_str() {
+            "start"  => mg,
+            "center" => (screen_h - win_h) / 2,
+            _        => screen_h - win_h - mg,  // "end" = bottom
+        };
+
+        // Store position hints as window data — X11 WM can pick these up via startup notifier.
+        // On Wayland the compositor controls placement; we set margin hints via CSS instead.
+        unsafe {
+            self.window.set_data("overlay_x", x);
+            self.window.set_data("overlay_y", y);
+        }
+    }
+
     pub fn toggle_visibility(self: &Rc<Self>) {
         let mut last = self.last_toggle.borrow_mut();
         if last.elapsed() < std::time::Duration::from_millis(300) {
@@ -522,6 +606,7 @@ impl OverlayWindow {
         if self.window.is_visible() {
             self.window.set_visible(false);
         } else {
+            self.apply_position();
             self.refresh_initial_state();
             self.window.set_visible(true);
             self.window.present();

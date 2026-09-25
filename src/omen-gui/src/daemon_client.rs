@@ -184,6 +184,71 @@ async fn get_conn() -> Result<zbus::Connection, zbus::Error> {
     }
 }
 
+// ── Desktop Notification Helper ──────────────────────────────────────────────
+
+/// Send a desktop notification via org.freedesktop.Notifications.
+/// urgency: 0 = low, 1 = normal, 2 = critical
+async fn notify_dbus_error(context: &str, err: &zbus::Error) {
+    let title = "OMEN Space — D-Bus Hatası";
+    let body = format!("{}: {}", context, err);
+    eprintln!("[omen-gui] {}", body);
+
+    // Try session bus for desktop notification
+    if let Ok(conn) = zbus::Connection::session().await {
+        let mut hints = std::collections::HashMap::<&str, zbus::zvariant::Value>::new();
+        hints.insert("urgency", zbus::zvariant::Value::U8(1));
+
+        let _ = conn.call_method(
+            Some("org.freedesktop.Notifications"),
+            "/org/freedesktop/Notifications",
+            Some("org.freedesktop.Notifications"),
+            "Notify",
+            &(
+                "OMEN Space",
+                0u32,
+                "dialog-error",
+                title,
+                body.as_str(),
+                Vec::<&str>::new(),
+                hints,
+                7000i32,
+            ),
+        ).await;
+    }
+}
+
+/// Fire-and-forget version safe to call from sync context via rt.spawn
+fn notify_dbus_error_bg(context: &'static str, err_str: String) {
+    let rt = get_runtime();
+    rt.spawn(async move {
+        let title = "OMEN Space — D-Bus Hatası";
+        let body = format!("{}: {}", context, err_str);
+        eprintln!("[omen-gui] {}", body);
+
+        if let Ok(conn) = zbus::Connection::session().await {
+            let mut hints = std::collections::HashMap::<&str, zbus::zvariant::Value>::new();
+            hints.insert("urgency", zbus::zvariant::Value::U8(1));
+
+            let _ = conn.call_method(
+                Some("org.freedesktop.Notifications"),
+                "/org/freedesktop/Notifications",
+                Some("org.freedesktop.Notifications"),
+                "Notify",
+                &(
+                    "OMEN Space",
+                    0u32,
+                    "dialog-error",
+                    title,
+                    body.as_str(),
+                    Vec::<&str>::new(),
+                    hints,
+                    7000i32,
+                ),
+            ).await;
+        }
+    });
+}
+
 // ── Synchronous Wrappers for UI Callbacks ────────────────────────────────────
 
 pub fn set_power_profile_sync(profile: String) {
@@ -192,9 +257,15 @@ pub fn set_power_profile_sync(profile: String) {
         if let Ok(conn) = get_conn().await {
             if let Ok(proxy) = PowerProxy::new(&conn).await {
                 if let Err(e) = proxy.set_power_profile(&profile).await {
-                    eprintln!("D-Bus call failed: {}", e);
+                    notify_dbus_error("Güç profili ayarlanamıyor", &e).await;
                 }
+            } else {
+                notify_dbus_error_bg("Daemon bağlantısı kurulamadı (Power)",
+                    "Daemon çalışmıyor olabilir".into());
             }
+        } else {
+            notify_dbus_error_bg("D-Bus bağlantısı başarısız",
+                "Sistem D-Bus'ına erişilemiyor".into());
         }
     });
 }
@@ -214,7 +285,13 @@ pub fn is_board_verified_sync(board_id: &str) -> bool {
         | "8C3A" | "8C3B" | "8C58" | "8E41"
         | "88D9" | "88DA" | "8A3E" | "8DCD" | "8A26" | "8A25"
         | "8BD4" | "8C2F" | "88DB" | "88EC" | "88EE" | "8C3F"
-        | "8E5E" | "8A3D" | "88F8" | "8BBE" | "8BD5" | "8C99" | "8C9C"
+        | "8E5E" | "8A3D"
+        | "88F8"
+        | "8BBE" | "8BD5" | "8C99" | "8C9C"
+        // Issue #245 – quickman1001, fully verified
+        | "8E5D"
+        // Issue #242 – OMEN 16 n0xxx, profile works via fallback (fan WMI degraded)
+        | "8A42"
     )
 }
 
@@ -224,8 +301,11 @@ pub fn set_fan_mode_sync(mode: String) {
         if let Ok(conn) = get_conn().await {
             if let Ok(proxy) = FanProxy::new(&conn).await {
                 if let Err(e) = proxy.set_fan_mode(&mode).await {
-                    eprintln!("D-Bus call failed: {}", e);
+                    notify_dbus_error("Fan modu ayarlanamıyor", &e).await;
                 }
+            } else {
+                notify_dbus_error_bg("Daemon bağlantısı kurulamadı (Fan)",
+                    "Daemon çalışmıyor olabilir".into());
             }
         }
     });
@@ -237,7 +317,7 @@ pub fn set_thermal_protection_sync(enabled: bool) {
         if let Ok(conn) = get_conn().await {
             if let Ok(proxy) = FanProxy::new(&conn).await {
                 if let Err(e) = proxy.set_thermal_protection(enabled).await {
-                    eprintln!("D-Bus call failed: {}", e);
+                    notify_dbus_error("Termal koruma ayarlanamıyor", &e).await;
                 }
             }
         }
@@ -268,7 +348,7 @@ pub fn add_app_profile_sync(process_name: String, power_profile: String, fan_mod
         if let Ok(conn) = get_conn().await {
             if let Ok(proxy) = AppProfilesProxy::new(&conn).await {
                 if let Err(e) = proxy.add_profile(&process_name, &power_profile, &fan_mode).await {
-                    eprintln!("D-Bus call failed: {}", e);
+                    notify_dbus_error("Uygulama profili eklenemedi", &e).await;
                 }
             }
         }
@@ -281,7 +361,7 @@ pub fn remove_app_profile_sync(process_name: String) {
         if let Ok(conn) = get_conn().await {
             if let Ok(proxy) = AppProfilesProxy::new(&conn).await {
                 if let Err(e) = proxy.remove_profile(&process_name).await {
-                    eprintln!("D-Bus call failed: {}", e);
+                    notify_dbus_error("Uygulama profili silinemedi", &e).await;
                 }
             }
         }
@@ -294,7 +374,7 @@ pub fn save_custom_curve_sync(curve_json: String) {
         if let Ok(conn) = get_conn().await {
             if let Ok(proxy) = FanProxy::new(&conn).await {
                 if let Err(e) = proxy.save_custom_curve(&curve_json).await {
-                    eprintln!("D-Bus call failed: {}", e);
+                    notify_dbus_error("Fan eğrisi kaydedilemedi", &e).await;
                 }
             }
         }
@@ -506,7 +586,7 @@ pub fn set_color_sync(zone_val: i32, hex_color: String) {
         if let Ok(conn) = get_conn().await {
             if let Ok(proxy) = RgbProxy::new(&conn).await {
                 if let Err(e) = proxy.set_color(zone_val, &hex_color).await {
-                    eprintln!("D-Bus call failed: {}", e);
+                    notify_dbus_error("RGB renk ayarlanamıyor", &e).await;
                 }
             }
         }
@@ -575,8 +655,11 @@ pub fn set_gpu_mode_sync(mode: String) {
         if let Ok(conn) = get_conn().await {
             if let Ok(proxy) = MuxProxy::new(&conn).await {
                 if let Err(e) = proxy.set_gpu_mode(&mode).await {
-                    eprintln!("D-Bus call failed: {}", e);
+                    notify_dbus_error("GPU modu ayarlanamıyor (MUX)", &e).await;
                 }
+            } else {
+                notify_dbus_error_bg("Daemon bağlantısı kurulamadı (MUX)",
+                    "Daemon çalışmıyor olabilir".into());
             }
         }
     });
@@ -596,8 +679,15 @@ pub fn set_undervolt_sync(core_mv: i32, cache_mv: i32) {
     rt.spawn(async move {
         if let Ok(conn) = get_conn().await {
             if let Ok(proxy) = UndervoltProxy::new(&conn).await {
-                let _ = proxy.set_offset("core", core_mv).await;
-            let _ = proxy.set_offset("cache", cache_mv).await;
+                if let Err(e) = proxy.set_offset("core", core_mv).await {
+                    notify_dbus_error("Undervolt (core) uygulanamıyor", &e).await;
+                }
+                if let Err(e) = proxy.set_offset("cache", cache_mv).await {
+                    notify_dbus_error("Undervolt (cache) uygulanamıyor", &e).await;
+                }
+            } else {
+                notify_dbus_error_bg("Daemon bağlantısı kurulamadı (Undervolt)",
+                    "Daemon çalışmıyor olabilir".into());
             }
         }
     });
@@ -608,7 +698,9 @@ pub fn set_power_limits_sync(pl1: i32, pl2: i32) {
     rt.spawn(async move {
         if let Ok(conn) = get_conn().await {
             if let Ok(proxy) = PowerProxy::new(&conn).await {
-                let _ = proxy.set_power_limits(true, pl1, pl2).await;
+                if let Err(e) = proxy.set_power_limits(true, pl1, pl2).await {
+                    notify_dbus_error("Güç limitleri ayarlanamıyor (RAPL)", &e).await;
+                }
             }
         }
     });
@@ -619,7 +711,9 @@ pub fn set_tcc_offset_sync(val: i32) {
     rt.spawn(async move {
         if let Ok(conn) = get_conn().await {
             if let Ok(proxy) = UndervoltProxy::new(&conn).await {
-                let _ = proxy.set_tcc_offset(val).await;
+                if let Err(e) = proxy.set_tcc_offset(val).await {
+                    notify_dbus_error("TCC offset ayarlanamıyor", &e).await;
+                }
             }
         }
     });
@@ -667,7 +761,7 @@ pub fn set_per_key_colors_sync(colors: Vec<String>) {
             if let Ok(proxy) = RgbProxy::new(&conn).await {
                 let json = serde_json::to_string(&colors).unwrap_or_else(|_| "[]".to_string());
                 if let Err(e) = proxy.set_per_key_colors(&json).await {
-                    eprintln!("D-Bus call failed: {}", e);
+                    notify_dbus_error("Per-key RGB renkleri ayarlanamıyor", &e).await;
                 }
             }
         }
@@ -680,7 +774,7 @@ pub fn set_battery_care_sync(limit: u32) {
         if let Ok(conn) = get_conn().await {
             if let Ok(proxy) = PlatformProxy::new(&conn).await {
                 if let Err(e) = proxy.set_battery_care(limit).await {
-                    eprintln!("D-Bus call failed: {}", e);
+                    notify_dbus_error("Pil bakım limiti ayarlanamıyor", &e).await;
                 }
             }
         }

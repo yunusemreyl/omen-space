@@ -33,6 +33,57 @@ impl DesktopNotifier {
         }
     }
 
+    /// Send an error notification (urgency=critical, icon=dialog-error, 10s timeout).
+    /// Use for hardware command failures, permission errors, D-Bus method errors.
+    pub async fn notify_error(context: &str, err_msg: &str) {
+        let title = "OMEN Space — Hata";
+        let body = format!("{}\n\nHata kodu: {}", context, err_msg);
+        warn!("notify_error: {} | {}", context, err_msg);
+
+        if let Ok(connection) = Connection::session().await {
+            let mut hints = std::collections::HashMap::new();
+            hints.insert("urgency", zbus::zvariant::Value::U8(2u8)); // critical
+
+            let _ = connection.call_method(
+                Some("org.freedesktop.Notifications"),
+                "/org/freedesktop/Notifications",
+                Some("org.freedesktop.Notifications"),
+                "Notify",
+                &(
+                    "OMEN Space",
+                    0u32,
+                    "dialog-error",
+                    title,
+                    body.as_str(),
+                    Vec::<&str>::new(),
+                    hints,
+                    10000i32, // 10 seconds — errors should be readable
+                ),
+            ).await;
+        }
+    }
+
+    /// Convenience: extract JSON "error" field and notify if present.
+    /// Returns true if an error was detected and notification was sent.
+    pub async fn check_and_notify(context: &str, json_response: &str) -> bool {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_response) {
+            if let Some(err) = val.get("error").and_then(|e| e.as_str()) {
+                if !err.is_empty() && err != "null" {
+                    Self::notify_error(context, err).await;
+                    return true;
+                }
+            }
+            if let Some(status) = val.get("status").and_then(|s| s.as_str()) {
+                if status == "error" {
+                    let msg = val.get("message").and_then(|m| m.as_str()).unwrap_or("Bilinmeyen hata");
+                    Self::notify_error(context, msg).await;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Open path or URL in the logged in user's graphical desktop session
     pub fn open_in_user_session(target: &str) {
         info!("Opening target in user desktop session: {}", target);

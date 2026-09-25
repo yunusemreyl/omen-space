@@ -945,6 +945,12 @@ impl FanService {
             Self::save_config(mode_to_save, custom_curve_json).await;
             "OK".to_string()
         } else {
+            let err_msg = format!(
+                "Fan modu '{}' uygulanamadı. EC (Embedded Controller) komut arayüzüne erişilemiyor.",
+                mode
+            );
+            warn!("{}", err_msg);
+            crate::notifier::DesktopNotifier::notify_error("Fan Modu Değiştirilemedi", &err_msg).await;
             "FAIL".to_string()
         }
     }
@@ -978,6 +984,10 @@ impl FanService {
             Self::save_config(mode_to_save, custom_curve_json).await;
             "OK".to_string()
         } else {
+            crate::notifier::DesktopNotifier::notify_error(
+                "Özel Fan Eğrisi Kaydedilemedi",
+                "Gönderilen eğri verisi geçersiz JSON formatında. Lütfen tekrar deneyin.",
+            ).await;
             "FAIL".to_string()
         }
     }

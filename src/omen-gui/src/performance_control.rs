@@ -29,10 +29,41 @@ pub fn build_page() -> gtk::Box {
         .css_classes(["daemon-pill"])
         .valign(gtk::Align::Center)
         .build();
-    daemon_pill.append(&gtk::Label::builder().label("●").css_classes(["daemon-dot-on"]).build());
-    daemon_pill.append(&gtk::Label::builder().label(i18n::t("daemon_label")).css_classes(["daemon-pill-text"]).build());
+    let daemon_dot = gtk::Label::builder().label("●").build();
+    let daemon_text = gtk::Label::builder()
+        .label(i18n::t("daemon_label"))
+        .css_classes(["daemon-pill-text"])
+        .build();
+    daemon_pill.append(&daemon_dot);
+    daemon_pill.append(&daemon_text);
     header_row.append(&daemon_pill);
     page.append(&header_row);
+
+    // Subscribe to daemon status — update pill reactively
+    {
+        let dot = daemon_dot.clone();
+        crate::daemon_client::subscribe_daemon_status(move |status| {
+            use crate::daemon_client::DaemonStatus;
+            if status == DaemonStatus::Online {
+                dot.remove_css_class("daemon-dot-off");
+                dot.add_css_class("daemon-dot-on");
+            } else {
+                dot.remove_css_class("daemon-dot-on");
+                dot.add_css_class("daemon-dot-off");
+            }
+        });
+        // Set initial state based on ping
+        let dot_init = daemon_dot.clone();
+        glib::timeout_add_local_once(std::time::Duration::from_millis(200), move || {
+            if crate::daemon_client::ping_daemon_sync() {
+                dot_init.remove_css_class("daemon-dot-off");
+                dot_init.add_css_class("daemon-dot-on");
+            } else {
+                dot_init.remove_css_class("daemon-dot-on");
+                dot_init.add_css_class("daemon-dot-off");
+            }
+        });
+    }
 
     page.append(&gtk::Label::builder()
         .label(i18n::t("system_profiles_desc"))

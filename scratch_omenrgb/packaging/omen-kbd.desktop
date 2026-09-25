@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=OMEN Keyboard
+GenericName=Sterowanie podświetleniem klawiatury
+Comment=Kolory, jasność i efekty podświetlenia klawiatury HP OMEN
+Exec=omen-kbd-gui
+Icon=omen-kbd
+Terminal=false
+Categories=Settings;HardwareSettings;Qt;
+Keywords=rgb;keyboard;backlight;led;omen;podświetlenie;klawiatura;
+StartupNotify=true
+StartupWMClass=omen-kbd
+SingleMainWindow=true

@@ -1,0 +1,30 @@
+#!/bin/sh
+# /usr/lib/systemd/system-sleep/omen-kbd
+#
+# Po wyjsciu z S3 kontroler klawiatury wraca do AutonomousMode=1 i po cichu
+# ignoruje kolory z hosta. Trzeba przejac kontrole ponownie.
+#
+# Hook systemowy zamiast jednostki uzytkownika WantedBy=sleep.target, bo menedzer
+# uzytkownika nie dostaje propagacji celow uspienia w kazdej wersji systemd.
+# Root moze pisac do gniazda uzytkownika mimo trybu 0600.
+#
+# Wywolanie: $1 = pre|post, $2 = suspend|hibernate|hybrid-sleep|suspend-then-hibernate
+
+[ "$1" = post ] || exit 0
+
+poke() {
+    # Demon jest usluga systemowa: gniazdo w /run/omen-kbd. Sciezki w
+    # /run/user/* zostaja dla demona uruchomionego z reki przy pracy nad kodem.
+    for sock in /run/omen-kbd/omen-kbd.sock /run/user/*/omen-kbd.sock; do
+        [ -S "$sock" ] || continue
+        printf '{"cmd":"resume"}\n' | timeout 3 socat - "UNIX-CONNECT:$sock" >/dev/null 2>&1 \
+            || python3 -c 'import socket,sys
+s=socket.socket(socket.AF_UNIX); s.settimeout(3)
+s.connect(sys.argv[1]); s.sendall(b"{\"cmd\":\"resume\"}\n"); s.recv(4096)' "$sock" >/dev/null 2>&1
+    done
+}
+
+# Pierwsza proba od razu, druga po zwloce: kontroler USB bywa gotowy dopiero
+# po ~2 s od wybudzenia. W tle, zeby nie opozniac konca transakcji resume.
+{ poke; sleep 2; poke; } &
+exit 0

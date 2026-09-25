@@ -1,0 +1,173 @@
+
+==================== 1. Platforma / DMI ====================
+sys_vendor      : HP
+product_name    : OMEN MAX Gaming Laptop 16-ah0xxx
+product_family  : 103C_5335M7 HP OMEN
+board_name      : 8D41
+board_version   : 38.45
+bios_version    : F.20
+bios_date       : 10/23/2025
+kernel          : 7.1.10-200.fc44.x86_64
+distro          : Fedora Linux 44 (KDE Plasma Desktop Edition)
+
+==================== 2. Moduly / komunikaty jadra ====================
+snd_rawmidi            57344  2 snd_usbmidi_lib,snd_ump
+snd_seq_device         16384  3 snd_seq,snd_ump,snd_rawmidi
+snd                   159744  41 snd_ctl_led,snd_hda_codec_generic,snd_seq,snd_seq_device,snd_hda_codec_hdmi,snd_hwdep,snd_hda_intel,snd_usb_audio,snd_usbmidi_lib,snd_hda_codec,snd_sof,snd_soc_sdca,snd_timer,snd_hda_codec_realtek_lib,snd_compress,snd_soc_sdw_utils,snd_hda_codec_alc269,snd_soc_core,snd_ump,snd_pcm,snd_rawmidi
+wmi_bmof               12288  0
+nvidia_wmi_ec_backlight    12288  0
+hp_wmi                 65536  0
+sparse_keymap          12288  1 hp_wmi
+rfkill                 45056  9 hp_wmi,bluetooth,cfg80211
+video                  81920  4 nvidia_wmi_ec_backlight,xe,i915,nvidia_modeset
+wmi                    45056  6 hp_wmi,video,nvidia_wmi_ec_backlight,hp_bioscfg,hp_rgb_lighting,wmi_bmof
+--- dmesg ---
+
+==================== 3. Urzadzenia WMI (szukamy GUID BIOS 5FB7F034-2C63-45e9-BE91-3D44E2C707E4) ====================
+05901221-D566-11D1-B2F0-00A0C9062910-12  obiekt=AB  driver=wmi-bmof
+05901221-D566-11D1-B2F0-00A0C9062910-3  obiekt=CC  driver=wmi-bmof
+05901221-D566-11D1-B2F0-00A0C9062910-5  obiekt=CC  driver=wmi-bmof
+05901221-D566-11D1-B2F0-00A0C9062910-8  obiekt=BB  driver=wmi-bmof
+14EA9746-CE1F-4098-A0E0-7045CB4DA745-16  obiekt=BE  driver=driver
+1F13AB7F-6220-4210-8F8E-8BB5E71EE969-4  obiekt=DE  driver=driver
+1F4C91EB-DC5C-460B-951D-C7CB9B4B8D5E-13  obiekt=BA  driver=driver
+2B814318-4BE8-4707-9D84-A190A859B5D0-11  obiekt=  driver=driver
+2BC49DEF-7B15-4F05-8BB7-EE37B9547C0B-1  obiekt=DE  driver=driver
+2D114B49-2DFB-4130-B8FE-4A3C09E75133-14  obiekt=BC  driver=driver
+322F2028-0F84-4901-988E-015176049E2D-17  obiekt=BF  driver=driver
+5FB7F034-2C63-45E9-BE91-3D44E2C707E4-9  obiekt=AA  driver=hp-bioscfg
+603E9613-EF25-4338-A3D0-C46177516DB7-0  obiekt=AA  driver=driver
+8232DE3D-663D-4327-A8F4-E293ADB9BF05-18  obiekt=BG  driver=driver
+8A5318A3-7393-4D54-979C-89483522E383-7  obiekt=  driver=driver
+928B5A30-AD7C-4C36-946A-1300A80CE7E1-6  obiekt=BB  driver=driver
+95F24279-4D7B-4334-9387-ACCDC67EF61C-10  obiekt=  driver=driver
+988D08E3-68F4-4C35-AF3E-6A1B8106F83C-15  obiekt=BD  driver=driver
+A6FEA33E-DABF-46F5-BFC8-460D961BEC9F-2  obiekt=  driver=driver
+
+==================== 4. Interfejsy LED w sysfs ====================
+enp130s0-0::lan
+enp130s0-1::lan
+enp130s0-2::lan
+enp130s0-3::lan
+input11::mute
+input18::capslock
+input18::numlock
+input18::scrolllock
+input24::capslock
+input24::compose
+input24::kana
+input24::numlock
+input24::scrolllock
+input32::capslock
+input32::compose
+input32::kana
+input32::numlock
+input32::scrolllock
+input3::capslock
+input3::numlock
+input3::scrolllock
+input50::capslock
+input50::compose
+input50::kana
+input50::numlock
+input50::scrolllock
+phy0-led
+--- szczegoly LED-ow klawiatury ---
+
+==================== 5. Platform devices HP / OMEN ====================
+HPIC0003:00
+hp-rgb-lighting
+hp-wmi
+### /sys/devices/platform/hp-wmi
+/sys/devices/platform/hp-wmi/uevent
+/sys/devices/platform/hp-wmi/dock
+/sys/devices/platform/hp-wmi/gpu_tgp
+/sys/devices/platform/hp-wmi/power/runtime_active_time
+/sys/devices/platform/hp-wmi/power/runtime_status
+/sys/devices/platform/hp-wmi/power/autosuspend_delay_ms
+/sys/devices/platform/hp-wmi/power/runtime_suspended_time
+/sys/devices/platform/hp-wmi/power/control
+/sys/devices/platform/hp-wmi/tablet
+/sys/devices/platform/hp-wmi/display
+/sys/devices/platform/hp-wmi/graphics_mode
+/sys/devices/platform/hp-wmi/driver_override
+/sys/devices/platform/hp-wmi/hddtemp
+/sys/devices/platform/hp-wmi/als
+/sys/devices/platform/hp-wmi/postcode
+/sys/devices/platform/hp-wmi/gpu_ppab
+/sys/devices/platform/hp-wmi/modalias
+--- platform_profile ---
+low-power balanced performance
+performance
+
+==================== 6. Urzadzenia HID/USB (per-key RGB idzie zwykle przez HID, vendor 03F0 = HP) ====================
+Bus 002 Device 002: ID 03f0:579d HP, Inc USB3.2 Hub
+Bus 002 Device 003: ID 03f0:679d HP, Inc USB3.2 Hub
+Bus 003 Device 002: ID 03f0:079d HP, Inc USB2.1 Hub
+Bus 003 Device 004: ID 03f0:879d HP, Inc USB Audio
+Bus 003 Device 005: ID 03f0:01c5 HP, Inc HyperX Wireless Embedded Receiver
+Bus 003 Device 006: ID 03f0:179d HP, Inc USB2.1 Hub
+Bus 003 Device 008: ID 03f0:279d HP, Inc HP USB-C G5 Essential Dock
+Bus 003 Device 011: ID 03f0:379d HP, Inc HID Device
+Bus 003 Device 013: ID 03f0:479d HP, Inc HID Device
+Bus 001 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub
+Bus 002 Device 001: ID 1d6b:0003 Linux Foundation 3.0 root hub
+Bus 002 Device 002: ID 03f0:579d HP, Inc USB3.2 Hub
+Bus 002 Device 003: ID 03f0:679d HP, Inc USB3.2 Hub
+Bus 002 Device 004: ID 0bda:8153 Realtek Semiconductor Corp. RTL8153 Gigabit Ethernet Adapter
+Bus 002 Device 005: ID 05e3:0743 Genesys Logic, Inc. SDXC and microSDXC CardReader
+Bus 002 Device 006: ID 2109:0817 VIA Labs, Inc. USB3.0 Hub             
+Bus 003 Device 001: ID 1d6b:0002 Linux Foundation 2.0 root hub
+Bus 003 Device 002: ID 03f0:079d HP, Inc USB2.1 Hub
+Bus 003 Device 003: ID 30c9:00d9 Luxvisions Innotech Limited HP True Vision FHD Camera
+Bus 003 Device 004: ID 03f0:879d HP, Inc USB Audio
+Bus 003 Device 005: ID 03f0:01c5 HP, Inc HyperX Wireless Embedded Receiver
+Bus 003 Device 006: ID 03f0:179d HP, Inc USB2.1 Hub
+Bus 003 Device 007: ID 0d62:54bf Darfon Electronics Corp. HP Gaming Keyboard II
+Bus 003 Device 008: ID 03f0:279d HP, Inc HP USB-C G5 Essential Dock
+Bus 003 Device 009: ID 258a:0049 BY Tech Gaming Keyboard
+Bus 003 Device 010: ID 8087:0036 Intel Corp. BE200 Bluetooth
+Bus 003 Device 011: ID 03f0:379d HP, Inc HID Device
+Bus 003 Device 012: ID 2109:2817 VIA Labs, Inc. USB2.0 Hub             
+Bus 003 Device 013: ID 03f0:479d HP, Inc HID Device
+--- HID ---
+0003:03F0:01C5.0003  HID_NAME=HP, Inc HyperX Wireless Embedded Receiver
+0003:03F0:379D.000B  HID_NAME=Realtek HID Device
+0003:03F0:479D.000C  HID_NAME=Realtek HID Device
+0003:03F0:879D.0002  HID_NAME=Generic USB Audio
+0003:0D62:54BF.0004  HID_NAME=HP HP Gaming Keyboard II
+0003:0D62:54BF.0005  HID_NAME=HP HP Gaming Keyboard II
+0003:0D62:54BF.0006  HID_NAME=HP HP Gaming Keyboard II
+0003:0D62:54BF.0007  HID_NAME=HP HP Gaming Keyboard II
+0003:0D62:54BF.0008  HID_NAME=HP HP Gaming Keyboard II
+0003:258A:0049.0009  HID_NAME=BY Tech Gaming Keyboard
+0003:258A:0049.000A  HID_NAME=BY Tech Gaming Keyboard
+0003:25A7:FA70.000D  HID_NAME=Compx 2.4G Wireless Receiver
+0003:25A7:FA70.000E  HID_NAME=Compx 2.4G Wireless Receiver
+0005:32C2:6621.0010  HID_NAME=Triadyn Nereid 2
+0018:06CB:CFC5.0001  HID_NAME=SYNA32FD:00 06CB:CFC5
+/dev/hidraw0
+/dev/hidraw1
+/dev/hidraw10
+/dev/hidraw11
+/dev/hidraw12
+/dev/hidraw13
+/dev/hidraw14
+/dev/hidraw2
+/dev/hidraw3
+/dev/hidraw4
+/dev/hidraw5
+/dev/hidraw6
+/dev/hidraw7
+/dev/hidraw8
+/dev/hidraw9
+
+==================== 7. ACPI: czy w DSDT sa metody WMI HP (WMBA/WMBB/HPWMI) ====================
+Method (WMDE
+wystapien 0x20009 (FOURZONE): 0
+(zdekompilowany DSDT: /tmp/tmp.rDs7QjiRoL/dsdt.dsl)
+
+==================== 8. Secure Boot (blokuje ladowanie niepodpisanych modulow DKMS) ====================
+SecureBoot enabled
+
+GOTOWE. Wyslij plik omen-rgb-diag.txt.

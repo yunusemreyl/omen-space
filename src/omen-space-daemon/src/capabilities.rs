@@ -227,7 +227,9 @@ impl LinuxCapabilityClassifier {
 		// 8BCD: ACPI WMAA/WHCM aborts (field-reported)
 		// 8C75: broken GETB zero-length CreateField → AE_AML_BUFFER_LIMIT on all WMID methods
 		// 878A: AE_AML_BUFFER_LIMIT flood → EC lockups
-		matches!(board_id.trim().to_uppercase().as_str(), "8BCD" | "8C75" | "878A" )
+		// 8A42: AE_AML_BUFFER_LIMIT on WMID WMBA/WMAA + hp_wmi failed to set platform profile 5: -22
+		//       (Issue #242 dmesg confirmed; WMI BIOS command path broken, fallback to hp_wmi platform_profile)
+		matches!(board_id.trim().to_uppercase().as_str(), "8BCD" | "8C75" | "878A" | "8A42")
 	}
 
     /// Returns true when the board_id appears in the community-verified list.
@@ -259,6 +261,10 @@ impl LinuxCapabilityClassifier {
             | "88F8"
             // Victus 16-r/s (kernel hp-wmi list)
             | "8BBE" | "8BD5" | "8C99" | "8C9C"
+            // Victus — Issue #245 community-verified
+            | "8E5D"
+            // OMEN 16 8A42 — Issue #242 confirmed working (fan control degraded, profile OK via fallback)
+            | "8A42"
         )
     }
 }
@@ -319,7 +325,7 @@ fn get_all_models() -> &'static [ModelCapabilities] {
         model!("8A4C", "OMEN 16 (2022) AMD", 2022, "OMEN16", { supports_fan_control_wmi: true, supports_fan_curves: true, has_mux_switch: true, supports_undervolt: false, has_four_zone_rgb: true, notes: "GitHub #243".to_string() }),
         model!("8A44", "OMEN 16 (2022) n0xxx AMD", 2022, "OMEN16", { supports_fan_control_wmi: true, supports_fan_curves: true, has_mux_switch: true, supports_gpu_power_boost: true, supports_undervolt: false, has_four_zone_rgb: true, notes: "GitHub #112 — OMEN 16-n0xxx. Capabilities inferred from adjacent OMEN 16 generations; needs user verification.".to_string() }),
         model!("8A43", "OMEN 16 (2022) n0xxx AMD", 2022, "OMEN16", { supports_fan_control_wmi: true, supports_fan_curves: true, fan_zone_count: 2, has_mux_switch: true, supports_gpu_power_boost: true, supports_undervolt: false, has_four_zone_rgb: true, notes: "GitHub #121 / Discord 2026-05-25 — Hades 8A43 exact ProductId profile added to avoid model-name-pattern inference. HP serial lookup reports OMEN Gaming Laptop 16-n0002ni / 6G103EA. Fan diagnostics show practical V1 ceiling near level 60 (GPU ~60, CPU ~58), so max fan level override is set to 60 for safer verification/normalization.".to_string() }),
-        model!("8A42", "OMEN 16 (2022) n0xxx AMD", 2022, "OMEN16", { supports_fan_control_wmi: true, supports_fan_curves: true, fan_zone_count: 2, has_mux_switch: true, supports_gpu_power_boost: true, supports_undervolt: false, has_four_zone_rgb: true, notes: "GitHub #216 — Added from xalexlozanoo report. Hardware matches 8A43 sibling exactly.".to_string() }),
+        model!("8A42", "OMEN 16 (2022) n0xxx AMD", 2022, "OMEN16", { supports_fan_control_wmi: true, supports_fan_curves: true, fan_zone_count: 2, has_mux_switch: true, supports_gpu_power_boost: true, supports_undervolt: false, has_four_zone_rgb: true, allow_decoupled_wmi_thermal_policy_fallback: true, notes: "GitHub #216/#242 — OMEN 16-n0xxx (Ryzen 7 6800H + RX 6650 XT), ProductId 8A42, BIOS F.27. Issue #242 dmesg confirms AE_AML_BUFFER_LIMIT on WMID WMBA/WMAA/HWMC and hp_wmi failed to set platform profile 5: -22. The WMI BIOS command path (OMEN native) is non-functional on this board; power profile changes fall back to the hp_wmi/acpi platform_profile sysfs interface. Fan telemetry (EC RPM) confirmed working. Fan mode BIOS commands (WMI V1) may also be affected; EC path preferred. AllowDecoupledWmiThermalPolicyFallback=true ensures profile changes still reach the kernel.".to_string() }),
         model!("8BCA", "OMEN 16 (2023) wf0xxx Intel", 2023, "OMEN16", { supports_fan_control_wmi: true, supports_fan_curves: true, has_mux_switch: true, supports_gpu_power_boost: true, has_four_zone_rgb: true }),
         model!("8BCA-AMD", "OMEN 16 (2023) xf0xxx AMD", 2023, "OMEN16", { supports_fan_control_wmi: true, supports_fan_curves: true, has_mux_switch: true, supports_gpu_power_boost: true, has_four_zone_rgb: true, supports_undervolt: false, notes: "GitHub #163 — HP OMEN 16 XF0079AX (Ryzen 7 7840HS + RTX 4070), ProductId 8BCA shared with the wf0xxx Intel SKU. Disambiguated by WMI model name (16-xf0xxx). Capabilities carried over from the wf0xxx sibling (same board/chassis) except SupportsUndervolt=false (AMD, no Intel MSR path); not yet independently confirmed on this specific variant.".to_string() }),
         model!("8BAB", "OMEN 16 (2024) wf1xxx Intel", 2024, "OMEN16", { supports_fan_control_wmi: true, supports_fan_curves: true, fan_zone_count: 2, has_mux_switch: true, supports_gpu_power_boost: true, has_four_zone_rgb: true, notes: "OMEN 16-wf1xxx (2024 Intel) — Board 8C78. Added for Issue #68. Set UserVerified=true after community confirmation.".to_string() }),
@@ -365,7 +371,11 @@ fn get_all_models() -> &'static [ModelCapabilities] {
         model!("DESKTOP-35L", "OMEN 35L Desktop", 2023, "Desktop", { supports_fan_control_wmi: false, supports_fan_control_ec: false, supports_fan_curves: false, supports_rpm_readback: true, supports_performance_modes: true, has_keyboard_backlight: false, notes: "OMEN 35L Desktop - fan writes disabled by v3.6.3 safety gate; RPM telemetry/performance modes only pending hardware validation.".to_string() }),
         model!("DESKTOP-40L", "OMEN 40L Desktop", 2023, "Desktop", { supports_fan_control_wmi: false, supports_fan_control_ec: false, supports_fan_curves: false, supports_rpm_readback: true, supports_performance_modes: true, has_keyboard_backlight: false, notes: "OMEN 40L Desktop - fan writes disabled by v3.6.3 safety gate; RPM telemetry/performance modes only pending hardware validation.".to_string() }),
         model!("DESKTOP-45L", "OMEN 45L Desktop", 2023, "Desktop", { supports_fan_control_wmi: false, supports_fan_control_ec: false, supports_fan_curves: false, supports_rpm_readback: true, supports_performance_modes: true, has_keyboard_backlight: false, notes: "OMEN 45L Desktop - fan writes disabled by v3.6.3 safety gate; RPM telemetry/performance modes only pending hardware validation.".to_string() }),
-        model!("8EDD", "OMEN HyperX (2024)", 2024, "OMEN16", { supports_fan_control_wmi: true, supports_fan_curves: true, has_mux_switch: true, supports_gpu_power_boost: true, has_four_zone_rgb: true, notes: "GitHub #243".to_string() }),])
+        model!("8EDD", "OMEN HyperX (2024)", 2024, "OMEN16", { supports_fan_control_wmi: true, supports_fan_curves: true, has_mux_switch: true, supports_gpu_power_boost: true, has_four_zone_rgb: true, notes: "GitHub #243".to_string() }),
+        // ── New boards from community issues ──
+        model!("8E5D", "HP Victus 15 (2024)", 2024, "Victus", { supports_fan_control_wmi: true, supports_fan_control_ec: false, supports_fan_curves: true, supports_independent_fan_curves: false, supports_rpm_readback: true, fan_zone_count: 1, has_mux_switch: false, supports_gpu_power_boost: false, supports_undervolt: false, has_four_zone_rgb: false, has_keyboard_backlight: true, notes: "GitHub #245 — quickman1001 reports omen-space works normally. Community-verified entry. Conservative Victus profile (single-zone backlight, no MUX). RPM telemetry and WMI fan mode control confirmed functional.".to_string() }),
+        model!("8A4F", "HP Victus 15-fa0000 (2022)", 2022, "Victus", { supports_fan_control_wmi: true, supports_fan_control_ec: false, supports_fan_curves: true, supports_independent_fan_curves: false, supports_rpm_readback: false, fan_zone_count: 1, has_mux_switch: false, supports_gpu_power_boost: false, supports_undervolt: false, has_four_zone_rgb: false, has_keyboard_backlight: true, allow_decoupled_wmi_thermal_policy_fallback: true, notes: "GitHub #246 — TrDiTu reports app works normally except fan control on Victus 15-fa0000. Conservative Victus profile; WMI thermal-policy fallback enabled. Fan mode WMI commands may not be effective on this board; RPM readback disabled pending validation. Profile (Quiet/Balanced/Performance) changes route via hp_wmi/acpi platform_profile sysfs when WMI BIOS command path is unavailable.".to_string() }),
+    ])
 }
 
 fn get_known_model(board_id: &str) -> Option<ModelCapabilities> {

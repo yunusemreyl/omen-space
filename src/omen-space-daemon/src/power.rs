@@ -596,7 +596,15 @@ impl PowerService {
             info!("Power profile set to '{}'", normalized);
             "OK".to_string()
         } else {
-            warn!("Failed to apply power profile '{}'", profile);
+            let err_msg = format!(
+                "Güç profili '{}' uygulanamadı. BIOS OMEN komut arayüzü erişilebilir değil veya donanım desteklemiyor.",
+                profile
+            );
+            warn!("{}", err_msg);
+            crate::notifier::DesktopNotifier::notify_error(
+                "Güç Profili Değiştirilemedi",
+                &err_msg,
+            ).await;
             "FAIL".to_string()
         }
     }

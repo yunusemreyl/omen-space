@@ -1,0 +1,36 @@
+# HP OMEN MAX 16 (plyta 8D41) — interfejs HID LampArray wbudowanej klawiatury.
+# Dostep WYLACZNIE do sterowania diodami. Nacisniecia klawiszy ida innymi
+# interfejsami tego samego VID:PID i celowo ich tu nie otwieramy.
+#
+# DOPASOWANIE PRZEZ ENV, NIE ATTRS — to nie jest kwestia gustu.
+# Kusi napisac tego tak:
+#   ATTRS{idVendor}=="0d62", ATTRS{idProduct}=="54bf", ATTRS{bInterfaceNumber}=="04"
+# i taka wersja krazy po dokumentacji, ale ona NIE MOZE ZADZIALAC. W udev
+# wszystkie klucze w formie mnogiej (ATTRS, KERNELS, SUBSYSTEMS, DRIVERS) musza
+# byc spelnione przez TO SAMO urzadzenie nadrzedne, a te atrybuty leza na dwoch
+# roznych:
+#     .../usb3/3-9            -> idVendor, idProduct
+#     .../usb3/3-9/3-9:1.4    -> bInterfaceNumber
+# Regula wiec nigdy nie trafia, grupa zostaje domyslna i demon dostaje EACCES.
+#
+# Wlasciwosci ID_USB_* ustawia wbudowany "usb_id" na samym urzadzeniu hidraw,
+# wiec ENV{} nie podlega temu ograniczeniu. ID_USB_INTERFACE_NUM zastepuje
+# bInterfaceNumber i jest rownie precyzyjne.
+#
+# GROUP="omenkbd" — grupa demona. Nalezysz do niej, zeby sterowac kolorami przez
+# gniazdo; przy okazji dostajesz sam interfejs diod, co jest nieszkodliwe.
+# Swiadomie BEZ TAG+="uaccess": ten nadaje ACL UZYTKOWNIKOWI, czyli kazdemu jego
+# procesowi, co przekreslaloby sens dzialania demona na osobnym uid.
+# GROUP i MODE nie wystarczaja, gdy na wezle wisi POSIX ACL. Na tej maszynie
+# zostala ACL po wczesniejszej regule z uaccess:
+#     user::rw-  user:rj:rw-  group::---  mask::rw-  other::---
+# "ls -l" pokazuje wtedy "crw-rw---- root omenkbd", ale to "rw-" w miejscu grupy
+# jest MASKA ACL, a nie uprawnieniem grupy. Faktyczny wpis group:: to ---, wiec
+# demon w grupie omenkbd dostaje EACCES. udev robi chmod, a chmod na pliku z ACL
+# zmienia wlasnie maske, nie wpis group:: — problem sam nie znika.
+# Jawny wpis dla grupy dziala niezaleznie od group:: i przezywa ewentualne
+# pozniejsze ACL od logind.
+SUBSYSTEM=="hidraw", ENV{ID_USB_VENDOR_ID}=="0d62", ENV{ID_USB_MODEL_ID}=="54bf", ENV{ID_USB_INTERFACE_NUM}=="04", GROUP="omenkbd", MODE="0660", RUN+="/usr/bin/setfacl -m g:omenkbd:rw $env{DEVNAME}"
+
+# Inne klawiatury LampArray: dopisz swoje ID. Dopasowania po samym deskryptorze
+# HID udev nie potrafi — stad identyfikacja po USB.

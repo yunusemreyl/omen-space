@@ -1,0 +1,17 @@
+[Unit]
+Description=OMEN Keyboard — ikona w trayu
+# Tray potrzebuje ekranu, wiec czeka na sesje graficzna. Demon jest USLUGA
+# SYSTEMOWA i wstaje przy boocie niezaleznie — swiatlo dziala bez zalogowania,
+# a tray jest tylko interfejsem. Menedzer uzytkownika nie moze odwolywac sie do
+# jednostek systemowych, wiec nie ma tu Wants=omen-kbd.service.
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/omen-kbd-gui --hidden
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target

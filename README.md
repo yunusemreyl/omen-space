@@ -6,7 +6,7 @@
   **The ultimate, lightweight Linux control center for HP Omen, Victus & Transcend.**  
   *Written entirely in Rust for zero-overhead, native GTK4 performance.*
 
-  [![Version](https://img.shields.io/badge/Release-v2.1.1-red.svg?style=flat-square)](https://github.com/yunusemreyl/omen-space/releases)
+  [![Version](https://img.shields.io/badge/Release-v2.1.2-red.svg?style=flat-square)](https://github.com/yunusemreyl/omen-space/releases)
   [![License](https://img.shields.io/badge/License-GPL%203.0-green.svg?style=flat-square)](LICENSE)
   [![Platform](https://img.shields.io/badge/Platform-Linux-lightgrey.svg?style=flat-square)]()
   [![Built with Rust](https://img.shields.io/badge/Language-Rust-orange.svg?style=flat-square)]()

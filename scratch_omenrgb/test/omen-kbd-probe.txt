@@ -1,0 +1,185 @@
+
+==================== 1. Sterownik hp_rgb_lighting — skad i co wystawia ====================
+filename:       /lib/modules/7.1.10-200.fc44.x86_64/extra/hp-rgb-lighting.ko.xz
+license:        GPL
+description:    HP Omen/Victus keyboard RGB companion driver
+author:         Yunus Emre <yunusemreyl>
+depends:        wmi
+name:           hp_rgb_lighting
+retpoline:      Y
+		E3:3C:DB:94:35:18:F5:31:2E:5E:04:02:88:86:7F:72:60:16:49:57:
+		CA:5A:05:D9:A5:45:82:B0:B2:33:C7:58:AA:22:6B:0C:03:61:6B:77:
+		31:B0:02:4D:46:4A:50:3E:85:D8:9E:55:27:40:C8:99:6A:62:E4:3E:
+		83:E2:0B:88:31:A0:4F:C7:3E:4E:BC:A7:01:0F:C8:75:55:82:F5:29:
+		78:C5:18:75:22:C0:E3:C2:7A:64:67:2E:7A:F2:25:33:E2:01:59:1E:
+		B4:93:43:82:1F:43:39:F3:DE:E7:76:53:1A:7D:1F:B2:25:8B:EB:AB:
+		97:37:1B:F7:00:11:49:D4:E9:01:78:9F:F8:A8:66:9C:4E:2E:CC:4F:
+		9B:64:83:B6:BC:B3:4F:D7:D2:99:3C:1A:77:C3:1C:76:A4:11:BD:B4:
+		A7:61:5F:9D:1B:B2:F2:59:4E:12:88:97:B3:D6:48:4F:F2:B7:E9:DD:
+		86:33:5F:9E:DE:19:B4:15:B5:26:40:EE:EB:0F:43:50:92:30:7E:52:
+		D8:BC:53:34:B9:1E:B3:43:2C:D8:5E:08:7E:C5:8B:34:52:48:75:16:
+		7E:F4:47:96:B6:0E:94:BB:54:A2:59:82:34:2D:69:A1
+plik: /lib/modules/7.1.10-200.fc44.x86_64/extra/hp-rgb-lighting.ko.xz
+plik /lib/modules/7.1.10-200.fc44.x86_64/extra/hp-rgb-lighting.ko.xz nie należy do żadnego pakietu
+(rpm nie zna -> DKMS/out-of-tree)
+--- drzewo ---
+/sys/devices/platform/hp-rgb-lighting/
+/sys/devices/platform/hp-rgb-lighting/brightness
+/sys/devices/platform/hp-rgb-lighting/driver_override
+/sys/devices/platform/hp-rgb-lighting/modalias
+/sys/devices/platform/hp-rgb-lighting/omen_mux
+/sys/devices/platform/hp-rgb-lighting/power
+/sys/devices/platform/hp-rgb-lighting/subsystem
+/sys/devices/platform/hp-rgb-lighting/uevent
+/sys/devices/platform/hp-rgb-lighting/win_lock
+/sys/devices/platform/hp-rgb-lighting/zone0
+/sys/devices/platform/hp-rgb-lighting/zone1
+/sys/devices/platform/hp-rgb-lighting/zone2
+/sys/devices/platform/hp-rgb-lighting/zone3
+/sys/devices/platform/hp-rgb-lighting/zone4
+/sys/devices/platform/hp-rgb-lighting/zone5
+/sys/devices/platform/hp-rgb-lighting/zone6
+/sys/devices/platform/hp-rgb-lighting/zone7
+--- wartosci atrybutow ---
+brightness                                                   = 0 
+driver_override                                              = (null) 
+modalias                                                     = platform:hp-rgb-lighting 
+omen_mux                                                     = -1 
+uevent                                                       = MODALIAS=platform:hp-rgb-lighting 
+omen-kbd-probe.sh: linia 16: uwaga: podstawienie polecenia: zignorowano zerowy bajt na wejściu
+win_lock                                                     = 
+zone0                                                        = FFFFFF 
+zone1                                                        = FFFFFF 
+zone2                                                        = FFFFFF 
+zone3                                                        = FFFFFF 
+zone4                                                        = 000000 
+zone5                                                        = 000000 
+zone6                                                        = 000000 
+zone7                                                        = 000000 
+--- prawa zapisu ---
+-rw-r--r--. 1 root root 4096 08-28 06:07 /sys/devices/platform/hp-rgb-lighting/brightness
+-rw-r--r--. 1 root root 4096 08-28 06:49 /sys/devices/platform/hp-rgb-lighting/driver_override
+-r--r--r--. 1 root root 4096 08-28 06:49 /sys/devices/platform/hp-rgb-lighting/modalias
+-rw-r--r--. 1 root root 4096 08-28 06:06 /sys/devices/platform/hp-rgb-lighting/omen_mux
+-rw-r--r--. 1 root root 4096 08-28 06:06 /sys/devices/platform/hp-rgb-lighting/uevent
+-rw-r--r--. 1 root root 4096 08-28 06:06 /sys/devices/platform/hp-rgb-lighting/win_lock
+-rw-r--r--. 1 root root 4096 08-28 06:06 /sys/devices/platform/hp-rgb-lighting/zone0
+-rw-r--r--. 1 root root 4096 08-28 06:06 /sys/devices/platform/hp-rgb-lighting/zone1
+-rw-r--r--. 1 root root 4096 08-28 06:06 /sys/devices/platform/hp-rgb-lighting/zone2
+-rw-r--r--. 1 root root 4096 08-28 06:06 /sys/devices/platform/hp-rgb-lighting/zone3
+-rw-r--r--. 1 root root 4096 08-28 06:06 /sys/devices/platform/hp-rgb-lighting/zone4
+-rw-r--r--. 1 root root 4096 08-28 06:06 /sys/devices/platform/hp-rgb-lighting/zone5
+-rw-r--r--. 1 root root 4096 08-28 06:06 /sys/devices/platform/hp-rgb-lighting/zone6
+-rw-r--r--. 1 root root 4096 08-28 06:06 /sys/devices/platform/hp-rgb-lighting/zone7
+
+==================== 2. Ktora klawiatura jest WBUDOWANA (klucz: removable=fixed) ====================
+3-3.3.3      258a:0049  removable=removable  manuf=BY Tech            prod=Gaming Keyboard              port=3.3.3
+3-3.3.5      03f0:479d  removable=fixed      manuf=Realtek            prod=HID Device                   port=3.3.5
+3-3.6        03f0:379d  removable=fixed      manuf=Realtek            prod=HID Device                   port=3.6
+3-8          03f0:01c5  removable=removable  manuf=HP, Inc            prod=HyperX Wireless Embedded Receiver port=8
+3-9          0d62:54bf  removable=fixed      manuf=HP                 prod=HP Gaming Keyboard II        port=9
+(uwaga: removable=fixed => wlutowane w laptopa; removable=removable => cos w doku/USB)
+
+==================== 3. Mapowanie HID -> hidraw -> interfejs USB ====================
+0003:03F0:01C5.0003      HP, Inc HyperX Wireless Embedded Receiver hidraw=hidraw2    drv=hid-generic usb3/3-8/3-8:1.0/0003:03
+0003:03F0:379D.000B      Realtek HID Device             hidraw=hidraw10   drv=hid-generic usb3/3-3/3-3.6/3-3.6:1.0/0003:03
+0003:03F0:479D.000C      Realtek HID Device             hidraw=hidraw11   drv=hid-generic usb3/3-3/3-3.3/3-3.3.5/3-3.3.5:1.0/0003:03
+0003:0D62:54BF.0004      HP HP Gaming Keyboard II       hidraw=hidraw3    drv=hid-generic usb3/3-9/3-9:1.0/0003:0
+0003:0D62:54BF.0005      HP HP Gaming Keyboard II       hidraw=hidraw4    drv=hid-generic usb3/3-9/3-9:1.1/0003:0
+0003:0D62:54BF.0006      HP HP Gaming Keyboard II       hidraw=hidraw5    drv=hid-generic usb3/3-9/3-9:1.2/0003:0
+0003:0D62:54BF.0007      HP HP Gaming Keyboard II       hidraw=hidraw6    drv=hid-generic usb3/3-9/3-9:1.3/0003:0
+0003:0D62:54BF.0008      HP HP Gaming Keyboard II       hidraw=hidraw7    drv=hid-generic usb3/3-9/3-9:1.4/0003:0
+0003:258A:0049.0009      BY Tech Gaming Keyboard        hidraw=hidraw8    drv=hid-generic usb3/3-3/3-3.3/3-3.3.3/3-3.3.3:1.0/0003:258
+0003:258A:0049.000A      BY Tech Gaming Keyboard        hidraw=hidraw9    drv=hid-generic usb3/3-3/3-3.3/3-3.3.3/3-3.3.3:1.1/0003:258
+
+==================== 4. Deskryptory raportow — szukamy vendor-defined (Usage Page 0xFF..) = kanal RGB ====================
+### 0003:03F0:379D.000B  [Realtek HID Device]  bytes=4096
+omen-kbd-probe.sh: linia 55: xxd: nie znaleziono polecenia
+omen-kbd-probe.sh: linia 57: xxd: nie znaleziono polecenia
+### 0003:03F0:479D.000C  [Realtek HID Device]  bytes=4096
+omen-kbd-probe.sh: linia 55: xxd: nie znaleziono polecenia
+omen-kbd-probe.sh: linia 57: xxd: nie znaleziono polecenia
+### 0003:0D62:54BF.0004  [HP HP Gaming Keyboard II]  bytes=4096
+omen-kbd-probe.sh: linia 55: xxd: nie znaleziono polecenia
+omen-kbd-probe.sh: linia 57: xxd: nie znaleziono polecenia
+### 0003:0D62:54BF.0005  [HP HP Gaming Keyboard II]  bytes=4096
+omen-kbd-probe.sh: linia 55: xxd: nie znaleziono polecenia
+omen-kbd-probe.sh: linia 57: xxd: nie znaleziono polecenia
+### 0003:0D62:54BF.0006  [HP HP Gaming Keyboard II]  bytes=4096
+omen-kbd-probe.sh: linia 55: xxd: nie znaleziono polecenia
+omen-kbd-probe.sh: linia 57: xxd: nie znaleziono polecenia
+### 0003:0D62:54BF.0007  [HP HP Gaming Keyboard II]  bytes=4096
+omen-kbd-probe.sh: linia 55: xxd: nie znaleziono polecenia
+omen-kbd-probe.sh: linia 57: xxd: nie znaleziono polecenia
+### 0003:0D62:54BF.0008  [HP HP Gaming Keyboard II]  bytes=4096
+omen-kbd-probe.sh: linia 55: xxd: nie znaleziono polecenia
+omen-kbd-probe.sh: linia 57: xxd: nie znaleziono polecenia
+### 0003:258A:0049.0009  [BY Tech Gaming Keyboard]  bytes=4096
+omen-kbd-probe.sh: linia 55: xxd: nie znaleziono polecenia
+omen-kbd-probe.sh: linia 57: xxd: nie znaleziono polecenia
+### 0003:258A:0049.000A  [BY Tech Gaming Keyboard]  bytes=4096
+omen-kbd-probe.sh: linia 55: xxd: nie znaleziono polecenia
+omen-kbd-probe.sh: linia 57: xxd: nie znaleziono polecenia
+
+==================== 5. Czy hidraw da sie czytac + jakie Feature reporty (bezpieczny odczyt) ====================
+crw-------. 1 root root 241,  0 08-28 06:06 /dev/hidraw0
+crw-------. 1 root root 241,  1 08-28 06:06 /dev/hidraw1
+crw-------. 1 root root 241, 10 08-28 06:06 /dev/hidraw10
+crw-------. 1 root root 241, 11 08-28 06:06 /dev/hidraw11
+crw-------. 1 root root 241, 12 08-28 06:06 /dev/hidraw12
+crw-------. 1 root root 241, 13 08-28 06:06 /dev/hidraw13
+crw-------. 1 root root 241, 14 08-28 06:34 /dev/hidraw14
+crw-------. 1 root root 241,  2 08-28 06:06 /dev/hidraw2
+crw-------. 1 root root 241,  3 08-28 06:06 /dev/hidraw3
+crw-------. 1 root root 241,  4 08-28 06:06 /dev/hidraw4
+crw-------. 1 root root 241,  5 08-28 06:06 /dev/hidraw5
+crw-------. 1 root root 241,  6 08-28 06:06 /dev/hidraw6
+crw-------. 1 root root 241,  7 08-28 06:06 /dev/hidraw7
+crw-------. 1 root root 241,  8 08-28 06:06 /dev/hidraw8
+crw-------. 1 root root 241,  9 08-28 06:06 /dev/hidraw9
+(opcjonalnie: dnf install hidrd)
+
+==================== 6. Narzedzia, ktore juz moga to znac ====================
+OpenRGB nieobecny (dnf install openrgb / flatpak)
+
+==================== 7. Tabele ACPI — gdzie naprawde siedzi gaming WMI (SSDT, nie DSDT) ====================
+APIC
+BGRT
+data
+DBG2
+DBGP
+DMAR
+DSDT
+DTPR
+dynamic
+FACP
+FACS
+FPDT
+HPET
+LPIT
+MCFG
+MSDM
+NHLT
+PHAT
+SDEV
+SSDT1
+SSDT10
+SSDT11
+SSDT12
+SSDT13
+SSDT14
+SSDT15
+SSDT16
+SSDT17
+SSDT18
+SSDT19
+--- wystapienia identyfikatorow komend w SSDT ---
+FOURZONE 0x20009 w: /tmp/tmp.6tTik7sCXA/SSDT15.dsl
+0x2000B w: /tmp/tmp.6tTik7sCXA/SSDT15.dsl
+     34 0x00020008
+     12 0x00020009
+      6 0x00020000
+      5 0x0002000B
+(zdekompilowane SSDT: /tmp/tmp.6tTik7sCXA)
+
+GOTOWE — wyslij omen-kbd-probe.txt
