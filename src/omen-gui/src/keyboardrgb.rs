@@ -774,8 +774,12 @@ fn build_interactive_keyboard(
 
     controls_row.append(&gtk::Separator::new(gtk::Orientation::Vertical));
 
+    let label_sg = gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal);
+
     let speed_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).build();
-    speed_box.append(&gtk::Label::builder().label(crate::i18n::t("kb_effect_speed")).build());
+    let speed_label = gtk::Label::builder().label(crate::i18n::t("kb_effect_speed")).xalign(0.0).build();
+    label_sg.add_widget(&speed_label);
+    speed_box.append(&speed_label);
     let speed_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
     speed_scale.set_value(*speed_rc.borrow());
     speed_scale.set_size_request(150, -1);
@@ -807,7 +811,9 @@ fn build_interactive_keyboard(
     speed_box.append(&speed_scale);
     
     let bright_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).build();
-    bright_box.append(&gtk::Label::builder().label(crate::i18n::t("kb_brightness")).build());
+    let bright_label = gtk::Label::builder().label(crate::i18n::t("kb_brightness")).xalign(0.0).build();
+    label_sg.add_widget(&bright_label);
+    bright_box.append(&bright_label);
     let bright_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
     let mut bval = 100.0;
     if let Some(state_json) = state_json_opt {
