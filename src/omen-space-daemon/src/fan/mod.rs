@@ -10,6 +10,10 @@ use crate::notifier::DesktopNotifier;
 use std::sync::OnceLock;
 
 static SENSOR_TEMP_PATHS: OnceLock<Vec<PathBuf>> = OnceLock::new();
+pub const THERMAL_PROTECTION_TRIGGER_TEMP: f64 = 95.0;
+pub const THERMAL_PROTECTION_RECOVER_TEMP: f64 = 82.0;
+pub const AUTO_PEAK_HOLD_SECS: u64 = 15;
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct CurvePoint(pub f64, pub f64); // [Temp, Pct]
 
@@ -282,28 +286,39 @@ impl FanService {
         out
     }
 
+    pub fn is_ignored_sensor_device(name: &str, vendor: &str, class: &str) -> bool {
+        let name_lower = name.trim().to_lowercase();
+        if name_lower.contains("nvidia")
+            || name_lower.contains("nouveau")
+            || name_lower.contains("nvme")
+            || name_lower.contains("mt79")
+            || name_lower.contains("iwl")
+            || name_lower.contains("wireless")
+            || name_lower.contains("wifi")
+        {
+            return true;
+        }
+        let v = vendor.trim();
+        let c = class.trim();
+        v.eq_ignore_ascii_case("0x10de") && c.starts_with("0x03")
+    }
+
     async fn get_max_temp() -> f64 {
         tokio::task::spawn_blocking(|| {
             let paths = SENSOR_TEMP_PATHS.get_or_init(|| {
                 let mut p = Vec::new();
                 if let Ok(entries) = glob("/sys/class/hwmon/hwmon*/temp*_input") {
                     for entry in entries.filter_map(Result::ok) {
-                        let is_dgpu = if let Some(parent) = entry.parent() {
+                        let should_ignore = if let Some(parent) = entry.parent() {
                             let name = std::fs::read_to_string(parent.join("name")).unwrap_or_default();
-                            let name = name.trim().to_lowercase();
-                            if name.contains("nvidia") || name.contains("nouveau") {
-                                true
-                            } else {
-                                // Match PCI display controller (class 0x03*) from NVIDIA (vendor 0x10de)
-                                let vendor = std::fs::read_to_string(parent.join("device/vendor")).unwrap_or_default();
-                                let class = std::fs::read_to_string(parent.join("device/class")).unwrap_or_default();
-                                vendor.trim().eq_ignore_ascii_case("0x10de") && class.trim().starts_with("0x03")
-                            }
+                            let vendor = std::fs::read_to_string(parent.join("device/vendor")).unwrap_or_default();
+                            let class = std::fs::read_to_string(parent.join("device/class")).unwrap_or_default();
+                            Self::is_ignored_sensor_device(&name, &vendor, &class)
                         } else {
                             false
                         };
 
-                        if !is_dgpu {
+                        if !should_ignore {
                             p.push(entry);
                         }
                     }
@@ -343,7 +358,7 @@ impl FanService {
         pwm.clamp(0, 255)
     }
 
-    /// Write PWM duty cycle to hwmon. This sets both the mode (pwm1_enable=1)
+    /// Write PWM duty cycle to hwmon. This sets both the mode (pwm1_enable=1 or 0 for max)
     /// and the duty value (pwm1=0..255), matching OmenCore's SetHwmonPwmDutyPercent.
     async fn write_pwm_duty(state: &mut FanState, pct: u32) -> bool {
         let hwmon = match state.hwmon_path {
@@ -353,29 +368,23 @@ impl FanService {
 
         let pwm_enable_path = hwmon.join("pwm1_enable");
         let pwm_path = hwmon.join("pwm1");
+        let now = std::time::Instant::now();
 
-        // If pct is 100, use hardware max fan boost (pwm1_enable = 0) to bypass EC RPM limits
-        let target_enable = if pct == 100 { 0 } else { 1 };
-
-        if sysfs_exists(&pwm_enable_path).await {
-            let current = sysfs_read(&pwm_enable_path, 2).await;
-            if current != target_enable {
-                if target_enable == 1 && current == 0 {
-                    // Transition through EC hardware control (2) to clear stuck max mode
-                    let _ = sysfs_write(&pwm_enable_path, "2").await;
-                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        if pct == 100 {
+            // Max boost mode: pwm1_enable must be 0
+            if sysfs_exists(&pwm_enable_path).await {
+                let current = sysfs_read(&pwm_enable_path, 2).await;
+                if current != 0 {
+                    // Set manual duty 255 first, then set enable=0
+                    let _ = sysfs_write(&pwm_enable_path, "1").await;
+                    let _ = sysfs_write(&pwm_path, "255").await;
+                    let _ = sysfs_write(&pwm_enable_path, "0").await;
                 }
-                if !sysfs_write(&pwm_enable_path, &target_enable.to_string()).await {
-                    warn!("Failed to set pwm1_enable={} for fan control", target_enable);
-                    return false;
-                }
+            } else {
+                let _ = sysfs_write(&pwm_path, "255").await;
             }
-        }
-
-        if target_enable == 0 {
-            // In max fan boost, we don't need to write the PWM duty cycle
             state.last_written_duty = Some(255);
-            state.last_written_duty_time = Some(std::time::Instant::now());
+            state.last_written_duty_time = Some(now);
             let max_speed = state.max_speeds.values().max().copied().unwrap_or(6000);
             for &fan_num in &state.found_fans.clone() {
                 state.last_targets.insert(fan_num, max_speed);
@@ -383,13 +392,27 @@ impl FanService {
             return true;
         }
 
-        // Write duty cycle
-        let duty = Self::pct_to_pwm(pct);
-        // Minimum duty to actually spin the fan (avoid stall)
-        let duty = if duty > 0 && duty < 50 { 50 } else { duty };
+        // For pct < 100: Manual PWM control (pwm1_enable = 1)
+        if sysfs_exists(&pwm_enable_path).await {
+            let current = sysfs_read(&pwm_enable_path, 2).await;
+            if current != 1 {
+                if current == 0 {
+                    // Recovering from max boost (0) requires toggling through 2 to reset EC lock
+                    let _ = sysfs_write(&pwm_enable_path, "2").await;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                }
+                let _ = sysfs_write(&pwm_enable_path, "1").await;
+            }
+        }
+
+        let duty = if pct == 0 {
+            0
+        } else {
+            let d = Self::pct_to_pwm(pct);
+            if d > 0 && d < 50 { 50 } else { d }
+        };
 
         // Prevent I/O flooding: only write if duty changed or 10 seconds elapsed
-        let now = std::time::Instant::now();
         let should_write = state.last_written_duty != Some(duty) || 
             state.last_written_duty_time.is_none_or(|t| now.duration_since(t).as_secs() >= 10);
 
@@ -400,7 +423,6 @@ impl FanService {
         if sysfs_write(&pwm_path, duty.to_string()).await {
             state.last_written_duty = Some(duty);
             state.last_written_duty_time = Some(now);
-            // Track RPM equivalent for reporting
             let max_speed = state.max_speeds.values().max().copied().unwrap_or(6000);
             let rpm = ((max_speed as f64 * pct as f64) / 100.0).round() as u32;
             for &fan_num in &state.found_fans.clone() {
@@ -452,8 +474,8 @@ impl FanService {
                 let mut state = self.state.lock().await;
                 
                 // Thermal Protection Logic ALWAYS uses raw temp for safety
-                if state.thermal_protection_enabled && temp > 90.0 && !state.thermal_protection_active {
-                    warn!("Temperature exceeded 90°C ({}°C). Activating Thermal Protection Mode (Max Fan).", temp);
+                if state.thermal_protection_enabled && temp > THERMAL_PROTECTION_TRIGGER_TEMP && !state.thermal_protection_active {
+                    warn!("Temperature exceeded {}°C ({}°C). Activating Thermal Protection Mode (Max Fan).", THERMAL_PROTECTION_TRIGGER_TEMP, temp);
                     state.thermal_protection_active = true;
                     state.thermal_protection_entered_at = std::time::Instant::now();
                     state.pre_protection_mode = Some(state.mode.clone());
@@ -477,7 +499,7 @@ impl FanService {
                         DesktopNotifier::send_notification(title, msg, 1).await;
                     });
                 } else if state.thermal_protection_active {
-                    if !state.thermal_protection_enabled || temp <= 70.0 {
+                    if !state.thermal_protection_enabled || temp <= THERMAL_PROTECTION_RECOVER_TEMP {
                         let elapsed = state.thermal_protection_entered_at.elapsed().as_secs_f64();
                         
                         info!("Temperature dropped to {}°C (active for {:.1}s) or protection disabled. Deactivating Thermal Protection Mode.", temp, elapsed);
@@ -519,7 +541,13 @@ impl FanService {
                 )
             };
 
-            if thermal_active || fans.is_empty() {
+            if thermal_active {
+                let mut state = self.state.lock().await;
+                Self::write_pwm_duty(&mut state, 100).await;
+                continue;
+            }
+
+            if fans.is_empty() {
                 continue;
             }
 
@@ -605,25 +633,21 @@ impl FanService {
                         state.last_auto_pct = desired_pct;
                         state.last_auto_pct_time = std::time::Instant::now();
                     } else if desired_pct < state.last_auto_pct {
-                        // Decrease requested, check if 120s (2 mins) has passed since last increase
-                        if state.last_auto_pct_time.elapsed().as_secs() < 120 {
-                            // Hold the peak
+                        // Decrease requested, hold peak briefly for thermal stability
+                        if state.last_auto_pct_time.elapsed().as_secs() < AUTO_PEAK_HOLD_SECS {
                             desired_pct = state.last_auto_pct;
                         } else {
-                            // Allowed to decrease
                             state.last_auto_pct = desired_pct;
                         }
                     }
 
-                    // 2. Minimum Runtime (2 minutes)
+                    // 2. Minimum Runtime (AUTO_PEAK_HOLD_SECS)
                     if desired_pct == 0 {
                         if let Some(turned_on_at) = state.auto_fan_activated_at {
-                            if turned_on_at.elapsed().as_secs() < 120 {
-                                // Force it to stay on at minimum speed until 2 mins expire
+                            if turned_on_at.elapsed().as_secs() < AUTO_PEAK_HOLD_SECS {
                                 desired_pct = 38;
                                 state.last_auto_pct = 38;
                             } else {
-                                // Allowed to turn off
                                 state.auto_fan_activated_at = None;
                                 state.last_auto_pct = 0;
                             }
@@ -639,8 +663,6 @@ impl FanService {
                 }
                 "max" => {
                     let mut state = self.state.lock().await;
-                    // Our caching in write_pwm_duty prevents I/O flooding,
-                    // but calling this ensures max mode works even if pwm1_enable=0 fails.
                     Self::write_pwm_duty(&mut state, 100).await;
                 }
                 "performance" => {
@@ -668,7 +690,7 @@ impl FanService {
                         state.last_perf_pct = desired_pct;
                         state.last_perf_pct_time = std::time::Instant::now();
                     } else if desired_pct < state.last_perf_pct {
-                        if state.last_perf_pct_time.elapsed().as_secs() < 120 {
+                        if state.last_perf_pct_time.elapsed().as_secs() < AUTO_PEAK_HOLD_SECS {
                             desired_pct = state.last_perf_pct;
                         } else {
                             state.last_perf_pct = desired_pct;
@@ -703,8 +725,9 @@ impl FanService {
                     }
                     
                     if !curve_points.is_empty() {
-                        let pct = Self::evaluate_step(&curve_points, smoothed_temp);
-                        let target_pct = pct.round() as u32;
+                        curve_points.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                        let pct = Self::evaluate_spline(&curve_points, smoothed_temp);
+                        let target_pct = (pct.round() as u32).clamp(0, 100);
                         
                         let mut state = self.state.lock().await;
                         Self::write_pwm_duty(&mut state, target_pct).await;
@@ -769,14 +792,21 @@ impl FanService {
         // Step 1: Write pwm1_enable
         let mut ok = false;
         if let Some(ref hwmon) = state.hwmon_path {
-            if pwm_enable_val == 1 {
+            if pwm_enable_val == 0 {
+                // Max boost mode: write 1, write 255, then write 0
+                let _ = sysfs_write(hwmon.join("pwm1_enable"), "1").await;
+                let _ = sysfs_write(hwmon.join("pwm1"), "255").await;
+                ok = sysfs_write(hwmon.join("pwm1_enable"), "0").await;
+            } else if pwm_enable_val == 1 {
                 let current = sysfs_read(hwmon.join("pwm1_enable"), 2).await;
                 if current == 0 {
                     let _ = sysfs_write(hwmon.join("pwm1_enable"), "2").await;
                     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
                 }
+                ok = sysfs_write(hwmon.join("pwm1_enable"), "1").await;
+            } else if pwm_enable_val == 2 {
+                ok = sysfs_write(hwmon.join("pwm1_enable"), "2").await;
             }
-            ok = sysfs_write(hwmon.join("pwm1_enable"), pwm_enable_val.to_string()).await;
             if ok {
                 info!("Set pwm1_enable={} (mode={})", pwm_enable_val, mode);
             }
@@ -788,9 +818,19 @@ impl FanService {
             state.last_keepalive = std::time::Instant::now();
             state.last_written_duty = None;
             state.last_auto_pct = 0;
+            state.last_perf_pct = 0;
+            state.auto_fan_activated_at = None;
             // Clear manual target when switching modes
             if mode == "auto" || mode == "max" || mode == "ec" || mode == "performance" {
                 state.manual_target_pct = None;
+            }
+            if mode == "max" {
+                state.last_written_duty = Some(255);
+                state.last_written_duty_time = Some(std::time::Instant::now());
+                let max_speed = state.max_speeds.values().max().copied().unwrap_or(6000);
+                for &fan_num in &state.found_fans.clone() {
+                    state.last_targets.insert(fan_num, max_speed);
+                }
             }
             if mode == "performance" {
                 state.perf_cooldown_start = None;
@@ -844,6 +884,7 @@ impl FanService {
         let pct = ((rpm as f64 / max_speed as f64) * 100.0).round() as u32;
         let pct = pct.clamp(0, 100);
         
+        state.thermal_protection_active = false;
         // Store as manual target so monitor loop re-applies it as keep-alive
         state.manual_target_pct = Some(pct);
         
@@ -948,16 +989,11 @@ impl FanService {
     async fn set_fan_mode(&mut self, mode: &str) -> String {
         let (mode_to_save, custom_curve_json, success) = {
             let mut state = self.state.lock().await;
-            if state.thermal_protection_active {
-                info!("Thermal protection is active. Recording target mode '{}' for post-protection restoration.", mode);
-                state.pre_protection_mode = Some(mode.to_string());
-                (mode.to_string(), state.custom_curve_json.clone(), true)
-            } else {
-                // Clear manual target when mode is explicitly changed
-                state.manual_target_pct = None;
-                let success = Self::set_mode_internal(&mut state, mode).await;
-                (state.mode.clone(), state.custom_curve_json.clone(), success)
-            }
+            // Explicit user mode selection takes immediate effect and clears any thermal protection override
+            state.thermal_protection_active = false;
+            state.manual_target_pct = None;
+            let success = Self::set_mode_internal(&mut state, mode).await;
+            (state.mode.clone(), state.custom_curve_json.clone(), success)
         };
         
         if success {
@@ -986,14 +1022,11 @@ impl FanService {
             info!("SaveCustomCurve called with: {}", curve_json);
             if serde_json::from_str::<Vec<CurvePoint>>(curve_json).is_ok() {
                 state.custom_curve_json = curve_json.to_string();
-                // When a new curve is saved, clear manual target so curve takes over
+                // When a new curve is saved, clear manual target and thermal override so curve takes over
                 state.manual_target_pct = None;
-                let mode_to_save = if state.thermal_protection_active {
-                    state.pre_protection_mode.clone().unwrap_or_else(|| state.mode.clone())
-                } else {
-                    state.mode.clone()
-                };
-                (mode_to_save, state.custom_curve_json.clone(), true)
+                state.thermal_protection_active = false;
+                state.last_written_duty = None;
+                (state.mode.clone(), state.custom_curve_json.clone(), true)
             } else {
                 (String::new(), String::new(), false)
             }
@@ -1014,6 +1047,9 @@ impl FanService {
     async fn set_thermal_protection(&mut self, enabled: bool) -> String {
         let mut state = self.state.lock().await;
         state.thermal_protection_enabled = enabled;
+        if !enabled {
+            state.thermal_protection_active = false;
+        }
         
         let mut config = crate::config::ConfigManager::new().load().await;
         config.thermal_protection_enabled = enabled;
@@ -1037,7 +1073,7 @@ mod tests {
 
     #[test]
     fn test_golden_vectors() {
-        let vectors = serde_json::from_str::<serde_json::Value>(include_str!("../tests/fixtures/vectors.json")).unwrap();
+        let vectors = serde_json::from_str::<serde_json::Value>(include_str!("../../tests/fixtures/vectors.json")).unwrap();
         for test_case in vectors.as_array().unwrap() {
             let mut points = Vec::new();
             for pt in test_case["curve"].as_array().unwrap() {
@@ -1086,5 +1122,52 @@ mod tests {
             2,
             std::time::Duration::from_secs(30),
         ));
+    }
+
+    #[test]
+    fn test_is_ignored_sensor_device() {
+        // Must ignore Wi-Fi, NVMe, and discrete GPU sensors when measuring CPU temp
+        assert!(FanService::is_ignored_sensor_device("nvme", "", ""));
+        assert!(FanService::is_ignored_sensor_device("mt7921_phy0", "", ""));
+        assert!(FanService::is_ignored_sensor_device("iwlwifi_1", "", ""));
+        assert!(FanService::is_ignored_sensor_device("wireless", "", ""));
+        assert!(FanService::is_ignored_sensor_device("wifi_core", "", ""));
+        assert!(FanService::is_ignored_sensor_device("nvidia", "", ""));
+        assert!(FanService::is_ignored_sensor_device("nouveau", "", ""));
+        assert!(FanService::is_ignored_sensor_device("temp_sensor", "0x10de", "0x030000"));
+
+        // Must NOT ignore real CPU / motherboard hwmon sensors
+        assert!(!FanService::is_ignored_sensor_device("coretemp", "", ""));
+        assert!(!FanService::is_ignored_sensor_device("k10temp", "", ""));
+        assert!(!FanService::is_ignored_sensor_device("zenpower", "", ""));
+        assert!(!FanService::is_ignored_sensor_device("acpitz", "", ""));
+    }
+
+    #[test]
+    fn test_thermal_protection_constants() {
+        assert!(THERMAL_PROTECTION_TRIGGER_TEMP >= 95.0, "Trigger must protect at critical temp");
+        assert!(THERMAL_PROTECTION_RECOVER_TEMP <= 85.0, "Recover must allow normal operation");
+        assert!(THERMAL_PROTECTION_TRIGGER_TEMP > THERMAL_PROTECTION_RECOVER_TEMP, "Trigger must be higher than recover");
+        assert_eq!(AUTO_PEAK_HOLD_SECS, 15, "Peak hold must be responsive");
+    }
+
+    #[test]
+    fn test_evaluate_spline_sorting() {
+        let mut points = vec![
+            CurvePoint(75.0, 85.0),
+            CurvePoint(40.0, 0.0),
+            CurvePoint(85.0, 100.0),
+            CurvePoint(50.0, 30.0),
+            CurvePoint(65.0, 60.0),
+        ];
+        points.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        
+        // Exact points
+        assert_eq!(FanService::evaluate_spline(&points, 40.0), 0.0);
+        assert_eq!(FanService::evaluate_spline(&points, 85.0), 100.0);
+        
+        // Interpolated point: midpoint of (50.0, 30.0) and (65.0, 60.0) is 57.5°C -> 45.0%
+        let mid = FanService::evaluate_spline(&points, 57.5);
+        assert!((mid - 45.0).abs() < 1e-4);
     }
 }
