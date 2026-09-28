@@ -16,6 +16,7 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
     let mut init_thermal_alerts = true;
     let mut init_zone_override = 0u32;
     let mut init_appearance_mode = 0u32;
+    let mut init_ac_auto = crate::daemon_client::get_ac_auto_performance_sync();
     
     let specs = crate::daemon_client::get_hardware_specs_sync();
     let _prod_lower = specs.product_name.to_lowercase();
@@ -33,6 +34,9 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
                 if let Some(zo) = json.get("zone_override").and_then(|v| v.as_u64()) { init_zone_override = zo as u32; }
                 if let Some(am) = json.get("appearance_mode").and_then(|v| v.as_u64()) { init_appearance_mode = am as u32; }
                 if let Some(lb) = json.get("lightbar_enabled").and_then(|v| v.as_bool()) { init_lightbar = lb; }
+                if !init_ac_auto {
+                    if let Some(ac) = json.get("ac_auto_performance").and_then(|v| v.as_bool()) { init_ac_auto = ac; }
+                }
             }
         }
     }
@@ -220,6 +224,13 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
     battery_row.set_active(init_battery_care);
     perf_group.add(&battery_row);
 
+    let ac_auto_row = adw::SwitchRow::builder()
+        .title(i18n::t("ac_auto_perf_title"))
+        .subtitle(i18n::t("ac_auto_perf_desc"))
+        .build();
+    ac_auto_row.set_active(init_ac_auto);
+    perf_group.add(&ac_auto_row);
+
     let thermal_row = adw::SwitchRow::builder()
         .title(i18n::t("thermal_alerts"))
         .subtitle(i18n::t("thermal_alerts_sub"))
@@ -235,6 +246,7 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
     let as_row_clone = autostart_row.clone();
     let sm_row_clone = startup_mode_row.clone();
     let bat_row_clone = battery_row.clone();
+    let ac_row_clone = ac_auto_row.clone();
     let thm_row_clone = thermal_row.clone();
     let zone_row_clone = zone_override_row.clone();
     let lb_row_clone = lightbar_row.clone();
@@ -244,6 +256,7 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
         let auto = as_row_clone.is_active();
         let sp = sm_row_clone.selected();
         let bc = bat_row_clone.is_active();
+        let ac = ac_row_clone.is_active();
         let ta = thm_row_clone.is_active();
         let zo = zone_row_clone.selected();
         let lb = lb_row_clone.is_active();
@@ -256,6 +269,7 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
                 "autostart": auto,
                 "startup_profile": sp,
                 "battery_care": bc,
+                "ac_auto_performance": ac,
                 "thermal_alerts": ta,
                 "zone_override": zo,
                 "lightbar_enabled": lb
@@ -271,6 +285,11 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
     autostart_row.connect_active_notify(move |_| s2());
     let s3 = save_settings_rc.clone();
     startup_mode_row.connect_selected_notify(move |_| s3());
+    let s_ac = save_settings_rc.clone();
+    ac_auto_row.connect_active_notify(move |r| {
+        s_ac();
+        crate::daemon_client::set_ac_auto_performance_sync(r.is_active());
+    });
     
     let s4 = save_settings_rc.clone();
     battery_row.connect_active_notify(move |r| {

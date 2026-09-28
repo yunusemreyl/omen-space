@@ -9,22 +9,41 @@ use crate::notifier::DesktopNotifier;
 use std::sync::OnceLock;
 use std::path::PathBuf;
 
+#[zbus::proxy(
+    interface = "org.hp.omen.Power",
+    default_service = "org.hp.omen",
+    default_path = "/org/hp/omen/Power"
+)]
+trait Power {
+    async fn set_power_profile(&self, profile: &str) -> zbus::Result<String>;
+    async fn get_power_profile(&self) -> zbus::Result<String>;
+}
+
+#[zbus::proxy(
+    interface = "org.hp.omen.Fan",
+    default_service = "org.hp.omen",
+    default_path = "/org/hp/omen/Fan"
+)]
+trait Fan {
+    async fn set_fan_mode(&self, mode: &str) -> zbus::Result<String>;
+}
+
 static AC_ONLINE_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 #[derive(Clone)]
 pub struct PowerAutomationService {
-    last_ac_state: Arc<Mutex<Option<bool>>>,
+    last_applied_mode: Arc<Mutex<Option<bool>>>,
 }
 
 impl PowerAutomationService {
     pub fn new() -> Self {
         Self {
-            last_ac_state: Arc::new(Mutex::new(None)),
+            last_applied_mode: Arc::new(Mutex::new(None)),
         }
     }
 
     pub fn start_monitor(&self) {
-        let last_state = self.last_ac_state.clone();
+        let last_applied = self.last_applied_mode.clone();
 
         tokio::spawn(async move {
             if let Ok(conn) = zbus::Connection::system().await {
@@ -58,37 +77,83 @@ impl PowerAutomationService {
 
         tokio::spawn(async move {
             loop {
-                sleep(Duration::from_secs(4)).await;
+                sleep(Duration::from_secs(2)).await;
                 let current_ac = is_ac_power_connected();
+                let is_auto_enabled = is_ac_auto_performance_enabled();
 
-                let mut state_lock = last_state.lock().await;
-                if let Some(prev) = *state_lock {
-                    if prev != current_ac {
-                        *state_lock = Some(current_ac);
+                let mut applied_lock = last_applied.lock().await;
+
+                if is_auto_enabled {
+                    if *applied_lock != Some(current_ac) {
+                        *applied_lock = Some(current_ac);
                         if current_ac {
-                            info!("AC Power connected. Applying AC Performance Profile...");
+                            info!("AC Power connected. Applying Performance profile and Max Fans...");
                             DesktopNotifier::send_notification(
-                                "OMENSpace Power Automation",
-                                "AC Power connected. Switched to Performance mode.",
+                                "OMEN Space — Power Automation",
+                                "AC Power connected. Switched to Performance mode & Max Fans.",
                                 0,
                             ).await;
-                            let _ = crate::platform::set_thermal_policy_by_name("Performance");
+                            if let Ok(conn) = zbus::Connection::system().await {
+                                if let Ok(proxy) = PowerProxy::new(&conn).await {
+                                    let _ = proxy.set_power_profile("performance").await;
+                                }
+                                if let Ok(proxy) = FanProxy::new(&conn).await {
+                                    let _ = proxy.set_fan_mode("max").await;
+                                }
+                            }
                         } else {
-                            info!("Battery Power connected. Applying Battery Saver Profile...");
+                            info!("Battery Power connected. Applying Battery Saver profile and Auto Fans...");
                             DesktopNotifier::send_notification(
-                                "OMENSpace Power Automation",
-                                "Running on Battery. Switched to Quiet/Saver mode.",
+                                "OMEN Space — Power Automation",
+                                "Running on Battery. Switched to Quiet/Saver mode & Auto Fans.",
                                 1,
                             ).await;
-                            let _ = crate::platform::set_thermal_policy_by_name("Quiet");
+                            if let Ok(conn) = zbus::Connection::system().await {
+                                if let Ok(proxy) = PowerProxy::new(&conn).await {
+                                    let _ = proxy.set_power_profile("power-saver").await;
+                                }
+                                if let Ok(proxy) = FanProxy::new(&conn).await {
+                                    let _ = proxy.set_fan_mode("auto").await;
+                                }
+                            }
                         }
                     }
-                } else {
-                    *state_lock = Some(current_ac);
+                } else if applied_lock.is_some() {
+                    *applied_lock = None;
                 }
             }
         });
     }
+}
+
+fn is_ac_auto_performance_enabled() -> bool {
+    if let Ok(json_str) = fs::read_to_string("/etc/omen-space/power.json") {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&json_str) {
+            if let Some(enabled) = json.get("ac_auto_performance").and_then(|v| v.as_bool()) {
+                return enabled;
+            }
+        }
+    }
+    if let Ok(json_str) = fs::read_to_string("/etc/omen-space/settings.json") {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&json_str) {
+            if let Some(enabled) = json.get("ac_auto_performance").and_then(|v| v.as_bool()) {
+                return enabled;
+            }
+        }
+    }
+    if let Ok(entries) = fs::read_dir("/home") {
+        for entry in entries.flatten() {
+            let path = entry.path().join(".config/omenspace/settings.json");
+            if let Ok(json_str) = fs::read_to_string(&path) {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                    if let Some(enabled) = json.get("ac_auto_performance").and_then(|v| v.as_bool()) {
+                        return enabled;
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 fn is_ac_power_connected() -> bool {
@@ -97,8 +162,12 @@ fn is_ac_power_connected() -> bool {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name.starts_with("AC") || name.starts_with("ADP") || name.starts_with("ac") {
-                        return Some(path.join("online"));
+                    let n_lower = name.to_lowercase();
+                    if n_lower.starts_with("ac") || n_lower.starts_with("adp") || n_lower.contains("mains") {
+                        let online_file = path.join("online");
+                        if online_file.exists() {
+                            return Some(online_file);
+                        }
                     }
                 }
             }

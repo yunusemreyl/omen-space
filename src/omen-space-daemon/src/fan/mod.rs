@@ -380,12 +380,9 @@ impl FanService {
             if sysfs_exists(&pwm_enable_path).await {
                 let current = sysfs_read(&pwm_enable_path, 2).await;
                 if current != 0 {
-                    // Set manual duty 255 first, then set enable=0
-                    let _ = sysfs_write(&pwm_enable_path, "1").await;
-                    let _ = sysfs_write(&pwm_path, "255").await;
                     let _ = sysfs_write(&pwm_enable_path, "0").await;
                 }
-            } else {
+            } else if sysfs_exists(&pwm_path).await {
                 let _ = sysfs_write(&pwm_path, "255").await;
             }
             state.last_written_duty = Some(255);
@@ -393,6 +390,17 @@ impl FanService {
             let max_speed = state.max_speeds.values().max().copied().unwrap_or(6000);
             for &fan_num in &state.found_fans.clone() {
                 state.last_targets.insert(fan_num, max_speed);
+            }
+            return true;
+        }
+
+        if !sysfs_exists(&pwm_path).await {
+            // Board lacks manual PWM duty interface; restore EC automatic control
+            if sysfs_exists(&pwm_enable_path).await {
+                let current = sysfs_read(&pwm_enable_path, 2).await;
+                if current != 2 {
+                    let _ = sysfs_write(&pwm_enable_path, "2").await;
+                }
             }
             return true;
         }
@@ -798,9 +806,7 @@ impl FanService {
         let mut ok = false;
         if let Some(ref hwmon) = state.hwmon_path {
             if pwm_enable_val == 0 {
-                // Max boost mode: write 1, write 255, then write 0
-                let _ = sysfs_write(hwmon.join("pwm1_enable"), "1").await;
-                let _ = sysfs_write(hwmon.join("pwm1"), "255").await;
+                // Max boost mode: write 0
                 ok = sysfs_write(hwmon.join("pwm1_enable"), "0").await;
             } else if pwm_enable_val == 1 {
                 let current = sysfs_read(hwmon.join("pwm1_enable"), 2).await;
@@ -808,7 +814,11 @@ impl FanService {
                     let _ = sysfs_write(hwmon.join("pwm1_enable"), "2").await;
                     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
                 }
-                ok = sysfs_write(hwmon.join("pwm1_enable"), "1").await;
+                if !sysfs_write(hwmon.join("pwm1_enable"), "1").await {
+                    ok = sysfs_write(hwmon.join("pwm1_enable"), "2").await;
+                } else {
+                    ok = true;
+                }
             } else if pwm_enable_val == 2 {
                 ok = sysfs_write(hwmon.join("pwm1_enable"), "2").await;
             }

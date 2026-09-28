@@ -51,6 +51,8 @@ struct PowerConfig {
     pl2_w: u32,
     pl_enabled: bool,
     gpu_w: u32,
+    #[serde(default)]
+    pub ac_auto_performance: bool,
 }
 
 impl Default for PowerConfig {
@@ -65,6 +67,7 @@ impl Default for PowerConfig {
             pl2_w: 80,
             pl_enabled: false,
             gpu_w: 0,
+            ac_auto_performance: false,
         }
     }
 }
@@ -581,6 +584,7 @@ impl PowerService {
             "pl2_w": real_pl2,
             "pl_enabled": cfg.pl_enabled,
             "gpu_w": cfg.gpu_w,
+            "ac_auto_performance": cfg.ac_auto_performance,
         });
         json.to_string()
     }
@@ -694,6 +698,19 @@ impl PowerService {
                 "FAIL".to_string()
             }
         }
+    }
+
+    async fn get_ac_auto_performance(&self) -> bool {
+        let cfg = self.config.lock().await;
+        cfg.ac_auto_performance
+    }
+
+    async fn set_ac_auto_performance(&self, enabled: bool) -> String {
+        let mut cfg = self.config.lock().await;
+        cfg.ac_auto_performance = enabled;
+        cfg.save();
+        info!("SetAcAutoPerformance: {}", enabled);
+        "OK".to_string()
     }
 
     async fn ping(&self) -> String {

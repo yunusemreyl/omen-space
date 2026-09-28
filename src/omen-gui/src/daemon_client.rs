@@ -184,6 +184,31 @@ pub fn set_app_profiles_enabled_sync(enabled: bool) {
     });
 }
 
+pub fn set_ac_auto_performance_sync(enabled: bool) {
+    let rt = get_runtime();
+    rt.spawn(async move {
+        if let Ok(conn) = get_conn().await {
+            if let Ok(proxy) = PowerProxy::new(&conn).await {
+                let _ = proxy.set_ac_auto_performance(enabled).await;
+            }
+        }
+    });
+}
+
+pub fn get_ac_auto_performance_sync() -> bool {
+    let rt = get_runtime();
+    rt.block_on(async {
+        if let Ok(conn) = get_conn().await {
+            if let Ok(proxy) = PowerProxy::new(&conn).await {
+                if let Ok(enabled) = proxy.get_ac_auto_performance().await {
+                    return enabled;
+                }
+            }
+        }
+        false
+    })
+}
+
 pub async fn get_app_profiles_async() -> Result<String, Box<dyn std::error::Error>> {
     let conn = get_conn().await?;
     let proxy = AppProfilesProxy::new(&conn).await?;

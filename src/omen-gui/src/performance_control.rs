@@ -117,6 +117,79 @@ pub fn build_page() -> gtk::Box {
     perf_box.append(&perf_wrap);
     page.append(&perf_box);
 
+    // AC Charging Auto-Performance Switch
+    let ac_card = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(12)
+        .css_classes(["os-card"])
+        .margin_bottom(14)
+        .build();
+
+    let ac_icon = gtk::Image::builder()
+        .icon_name("battery-charging-symbolic")
+        .pixel_size(22)
+        .valign(gtk::Align::Center)
+        .build();
+    ac_card.append(&ac_icon);
+
+    let ac_text_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(2)
+        .hexpand(true)
+        .build();
+    ac_text_box.append(&gtk::Label::builder()
+        .label(i18n::t("ac_auto_perf_title"))
+        .css_classes(["os-section-header"])
+        .halign(gtk::Align::Start)
+        .build());
+    ac_text_box.append(&gtk::Label::builder()
+        .label(i18n::t("ac_auto_perf_desc"))
+        .css_classes(["os-section-desc"])
+        .halign(gtk::Align::Start)
+        .wrap(true)
+        .build());
+    ac_card.append(&ac_text_box);
+
+    let mut init_ac_auto = crate::daemon_client::get_ac_auto_performance_sync();
+    if !init_ac_auto {
+        if let Ok(home) = std::env::var("HOME") {
+            let path = format!("{}/.config/omenspace/settings.json", home);
+            if let Ok(json_str) = std::fs::read_to_string(&path) {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                    if let Some(v) = json.get("ac_auto_performance").and_then(|x| x.as_bool()) {
+                        init_ac_auto = v;
+                    }
+                }
+            }
+        }
+    }
+
+    let ac_switch = gtk::Switch::builder()
+        .active(init_ac_auto)
+        .valign(gtk::Align::Center)
+        .build();
+
+    ac_switch.connect_active_notify(move |s| {
+        let active = s.is_active();
+        crate::daemon_client::set_ac_auto_performance_sync(active);
+        if let Ok(home) = std::env::var("HOME") {
+            let dir = format!("{}/.config/omenspace", home);
+            let _ = std::fs::create_dir_all(&dir);
+            let path = format!("{}/settings.json", dir);
+            let mut json = serde_json::json!({});
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
+                    json = parsed;
+                }
+            }
+            json["ac_auto_performance"] = serde_json::json!(active);
+            let _ = std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap_or_default());
+        }
+    });
+
+    ac_card.append(&ac_switch);
+    page.append(&ac_card);
+
     // ── FAN MODES ─────────────────────────────────────────────────────────────
     let fan_header = gtk::Box::builder()
         .orientation(gtk::Orientation::Horizontal)
