@@ -1,3 +1,4 @@
+pub mod drives;
 pub mod sensors;
 pub mod gpu;
 pub mod stats;

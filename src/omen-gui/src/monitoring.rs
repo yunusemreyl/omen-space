@@ -1,4 +1,5 @@
 use gtk::prelude::*;
+use omen_types::{DriveInfo, DriveUsage, HardwareSpecs};
 use std::rc::Rc;
 use std::cell::RefCell;
 
@@ -17,12 +18,22 @@ struct MonitorUI {
     fan_label: gtk::Label,
 }
 
+/// One drive's usage bar and caption in the Device Status card.
+struct DriveRowUI {
+    /// Kernel device name (`nvme0n1`); matches `DriveUsage::name` in the telemetry stream.
+    name: String,
+    bar: gtk::ProgressBar,
+    val_label: gtk::Label,
+}
+
 struct DeviceUI {
     container: gtk::Box,
     ram_bar: gtk::ProgressBar,
     ram_val_label: gtk::Label,
-    disk_bar: gtk::ProgressBar,
-    disk_val_label: gtk::Label,
+    drive_rows: Vec<DriveRowUI>,
+    /// True when the daemon sent no per-drive list (an older daemon): there is then a single
+    /// row, fed by the aggregate `disk_*` fields.
+    legacy: bool,
 }
 
 struct WattGraphUI {
@@ -205,36 +216,195 @@ fn build_device_card() -> DeviceUI {
     sep.set_margin_bottom(10);
     card.append(&sep);
 
-    // Disk
-    let disk_row = gtk::Box::builder()
-        .orientation(gtk::Orientation::Horizontal)
+    // Drives: one block per internal drive, or a single legacy block for an older daemon
+    let drives_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(0)
         .build();
-    disk_row.append(&sub_label(i18n::t("mon_disk")));
-    disk_row.append(&gtk::Label::builder().label(&specs.ssd_spec).css_classes(["os-spec-text"])
-        .halign(gtk::Align::End).hexpand(true).build());
-    card.append(&disk_row);
-
-    let disk_bar = gtk::ProgressBar::builder()
-        .fraction(0.0)
-        .css_classes(["os-prog-disk"])
-        .margin_top(5)
-        .margin_bottom(3)
-        .build();
-    card.append(&disk_bar);
-    let disk_val = gtk::Label::builder()
-        .label("─.─ / ─.─ GB")
-        .css_classes(["os-monitor-label"])
-        .halign(gtk::Align::End)
-        .build();
-    card.append(&disk_val);
+    let blocks = drive_blocks(&specs);
+    let legacy = specs.drives.is_empty();
+    let mut drive_rows = Vec::with_capacity(blocks.len());
+    for (i, block) in blocks.iter().enumerate() {
+        if i > 0 {
+            let sep = gtk::Separator::new(gtk::Orientation::Horizontal);
+            sep.set_margin_top(10);
+            sep.set_margin_bottom(10);
+            drives_box.append(&sep);
+        }
+        let (row, bar, val_label) = build_drive_row(&block.title, &block.card_spec, &block.spec);
+        drives_box.append(&row);
+        drive_rows.push(DriveRowUI { name: block.name.clone(), bar, val_label });
+    }
+    card.append(&drives_box);
 
     DeviceUI {
         container: card,
         ram_bar,
         ram_val_label: ram_val,
-        disk_bar,
-        disk_val_label: disk_val,
+        drive_rows,
+        legacy,
     }
+}
+
+/// Title row (kind + `text`, ellipsized, full `tooltip` on hover), usage bar and caption for
+/// one drive.
+fn build_drive_row(title: &str, text: &str, tooltip: &str) -> (gtk::Box, gtk::ProgressBar, gtk::Label) {
+    let row = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(0)
+        .build();
+
+    let head = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(8)
+        .build();
+    head.append(&sub_label(title));
+    head.append(&gtk::Label::builder()
+        .label(text)
+        .css_classes(["os-spec-text"])
+        // Fill the row and right-align the text inside, rather than `halign(End)`: an
+        // end-aligned ellipsizing label can be allocated slightly less than its text needs
+        // and cut off "Sabrent Rocket Q4" while a longer model name still fits.
+        .halign(gtk::Align::Fill)
+        .xalign(1.0)
+        .hexpand(true)
+        .ellipsize(gtk::pango::EllipsizeMode::End)
+        .max_width_chars(48)
+        .tooltip_text(tooltip)
+        .build());
+    row.append(&head);
+
+    let bar = gtk::ProgressBar::builder()
+        .fraction(0.0)
+        .css_classes(["os-prog-disk"])
+        .margin_top(5)
+        .margin_bottom(3)
+        .build();
+    row.append(&bar);
+    let val_label = gtk::Label::builder()
+        .label("─.─ / ─.─ GB")
+        .css_classes(["os-monitor-label"])
+        .halign(gtk::Align::End)
+        .build();
+    row.append(&val_label);
+    (row, bar, val_label)
+}
+
+// ── Drive presentation helpers (pure, unit-tested below) ────
+
+/// What one drive looks like in the UI: the kernel name that links it to telemetry, a short
+/// title ("NVMe 1") and two renderings of its description.
+#[derive(Debug, PartialEq, Eq)]
+struct DriveBlock {
+    name: String,
+    title: String,
+    /// Full line for the spec header and tooltips: "SAMSUNG MZVL81T0HFLB-00BH1  ·  1024 GB".
+    spec: String,
+    /// Short line for the narrow Device Status card. The capacity is left out because that
+    /// card's "used / total GB" caption already shows it, and it would be the first thing
+    /// ellipsis cut off.
+    card_spec: String,
+}
+
+/// Row titles: the drive kind, numbered per kind only when several drives share it, so an HDD
+/// never reads "SSD" and two NVMe drives read "NVMe 1" / "NVMe 2".
+fn drive_titles(drives: &[DriveInfo]) -> Vec<String> {
+    drives
+        .iter()
+        .enumerate()
+        .map(|(i, d)| {
+            let label = d.kind.label();
+            if drives.iter().filter(|o| o.kind == d.kind).count() > 1 {
+                let nth = drives[..=i].iter().filter(|o| o.kind == d.kind).count();
+                format!("{label} {nth}")
+            } else {
+                label.to_string()
+            }
+        })
+        .collect()
+}
+
+/// Decimal gigabytes, the unit drives are sold in; used for capacity and usage alike so the
+/// two agree ("48 / 1024 GB").
+fn gb(bytes: u64) -> f64 {
+    bytes as f64 / 1e9
+}
+
+fn drive_capacity_text(d: &DriveInfo) -> String {
+    format!("{:.0} GB", gb(d.size_bytes))
+}
+
+/// "MODEL  ·  1024 GB", or just the capacity when the model is unknown.
+fn drive_spec_text(d: &DriveInfo) -> String {
+    if d.model.is_empty() {
+        drive_capacity_text(d)
+    } else {
+        format!("{}  ·  {}", d.model, drive_capacity_text(d))
+    }
+}
+
+/// The model alone, or the capacity when the model is unknown.
+fn drive_card_text(d: &DriveInfo) -> String {
+    if d.model.is_empty() {
+        drive_capacity_text(d)
+    } else {
+        d.model.clone()
+    }
+}
+
+/// "47 / 1024 GB"
+fn format_usage(used_bytes: u64, total_bytes: u64) -> String {
+    format!("{:.0} / {:.0} GB", gb(used_bytes), gb(total_bytes))
+}
+
+fn usage_fraction(used_bytes: u64, total_bytes: u64) -> f64 {
+    if total_bytes == 0 {
+        0.0
+    } else {
+        (used_bytes as f64 / total_bytes as f64).clamp(0.0, 1.0)
+    }
+}
+
+/// One block per drive. An older daemon sends no `drives`; its single `ssd_spec` line becomes
+/// one block titled like the old "SSD" row.
+fn drive_blocks(specs: &HardwareSpecs) -> Vec<DriveBlock> {
+    if specs.drives.is_empty() {
+        return vec![DriveBlock {
+            name: String::new(),
+            title: i18n::t("mon_disk").to_string(),
+            spec: specs.ssd_spec.clone(),
+            card_spec: specs.ssd_spec.clone(),
+        }];
+    }
+    drive_titles(&specs.drives)
+        .into_iter()
+        .zip(&specs.drives)
+        .map(|(title, d)| DriveBlock {
+            name: d.name.clone(),
+            title,
+            spec: drive_spec_text(d),
+            card_spec: drive_card_text(d),
+        })
+        .collect()
+}
+
+/// Caption and bar fraction for one drive's latest usage sample. A drive with nothing mounted
+/// has a zero total and gets a text instead of a misleading "0 / 0 GB".
+fn usage_display(u: Option<&DriveUsage>) -> (String, f64) {
+    match u {
+        Some(u) if u.total_bytes > 0 => (
+            format_usage(u.used_bytes, u.total_bytes),
+            usage_fraction(u.used_bytes, u.total_bytes),
+        ),
+        Some(_) => (i18n::t("mon_disk_unmounted").to_string(), 0.0),
+        None => ("─.─ / ─.─ GB".to_string(), 0.0),
+    }
+}
+
+/// Tooltip listing where a drive is mounted, or `None` when nothing is.
+fn mounts_tooltip(u: Option<&DriveUsage>) -> Option<String> {
+    let u = u.filter(|u| !u.mounts.is_empty())?;
+    Some(i18n::t("mon_drive_mounts").replace("{}", &u.mounts.join(", ")))
 }
 
 // ── Total wattage card ──────────────────────────────────────
@@ -409,22 +579,23 @@ pub fn build_spec_header() -> gtk::Box {
         .column_spacing(16)
         .build();
 
-    let spec_list = [
-        ("CPU",  specs.cpu_spec.as_str()),
-        ("GPU",  specs.gpu_spec.as_str()),
-        ("RAM",  specs.ram_spec.as_str()),
-        ("SSD",  specs.ssd_spec.as_str()),
-        ("OS",   specs.os_spec.as_str()),
+    // CPU, GPU, RAM, one row per drive, OS
+    let mut spec_list: Vec<(String, String)> = vec![
+        ("CPU".to_string(), specs.cpu_spec.clone()),
+        ("GPU".to_string(), specs.gpu_spec.clone()),
+        ("RAM".to_string(), specs.ram_spec.clone()),
     ];
+    spec_list.extend(drive_blocks(&specs).into_iter().map(|b| (b.title, b.spec)));
+    spec_list.push(("OS".to_string(), specs.os_spec.clone()));
 
     for (i, (k, v)) in spec_list.iter().enumerate() {
         grid.attach(
-            &gtk::Label::builder().label(*k).css_classes(["spec-label"])
+            &gtk::Label::builder().label(k.as_str()).css_classes(["spec-label"])
                 .halign(gtk::Align::Start).build(),
             0, i as i32, 1, 1
         );
         grid.attach(
-            &gtk::Label::builder().label(*v).css_classes(["spec-value"])
+            &gtk::Label::builder().label(v.as_str()).css_classes(["spec-value"])
                 .halign(gtk::Align::Start).build(),
             1, i as i32, 1, 1
         );
@@ -610,9 +781,24 @@ pub fn build_page(is_general: bool) -> gtk::Box {
         dev_ui.ram_bar.set_fraction(stats.ram_frac);
         dev_ui.ram_val_label.set_label(
             &format!("{:.1} / {:.1} GB", stats.ram_used_gb, stats.ram_total_gb));
-        dev_ui.disk_bar.set_fraction(stats.disk_frac);
-        dev_ui.disk_val_label.set_label(
-            &format!("{:.0} / {:.0} GB", stats.disk_used_gb, stats.disk_total_gb));
+        for row in &dev_ui.drive_rows {
+            if dev_ui.legacy {
+                // Older daemon: one row fed by the aggregate fields.
+                row.bar.set_fraction(stats.disk_frac);
+                row.val_label.set_label(
+                    &format!("{:.0} / {:.0} GB", stats.disk_used_gb, stats.disk_total_gb));
+                continue;
+            }
+            let usage = stats.drives.iter().find(|u| u.name == row.name);
+            let (text, frac) = usage_display(usage);
+            row.bar.set_fraction(frac);
+            row.val_label.set_label(&text);
+            let tip = mounts_tooltip(usage);
+            if row.val_label.tooltip_text().map(|t| t.to_string()) != tip {
+                row.val_label.set_tooltip_text(tip.as_deref());
+                row.bar.set_tooltip_text(tip.as_deref());
+            }
+        }
 
         if !is_general {
             let mut last = last_throttle.borrow_mut();
@@ -718,4 +904,124 @@ fn draw_sparkline(
         cr.set_source_rgba(r, g, b, 1.0);
     }
     let _ = cr.fill();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use omen_types::DriveKind;
+
+    fn drive(name: &str, model: &str, kind: DriveKind, size_bytes: u64) -> DriveInfo {
+        DriveInfo { name: name.into(), model: model.into(), kind, size_bytes }
+    }
+
+    fn usage(name: &str, used: u64, total: u64, mounts: &[&str]) -> DriveUsage {
+        DriveUsage {
+            name: name.into(),
+            used_bytes: used,
+            total_bytes: total,
+            mounts: mounts.iter().map(|m| m.to_string()).collect(),
+        }
+    }
+
+    fn specs_with(drives: Vec<DriveInfo>, ssd_spec: &str) -> HardwareSpecs {
+        HardwareSpecs { drives, ssd_spec: ssd_spec.into(), ..Default::default() }
+    }
+
+    #[test]
+    fn a_single_drive_title_is_just_its_kind() {
+        let d = [drive("nvme0n1", "M", DriveKind::Nvme, 1)];
+        assert_eq!(drive_titles(&d), vec!["NVMe"]);
+    }
+
+    #[test]
+    fn drives_of_the_same_kind_are_numbered_and_other_kinds_are_not() {
+        let d = [
+            drive("nvme0n1", "A", DriveKind::Nvme, 1),
+            drive("sda", "B", DriveKind::Hdd, 1),
+            drive("nvme1n1", "C", DriveKind::Nvme, 1),
+            drive("mmcblk0", "D", DriveKind::Emmc, 1),
+        ];
+        assert_eq!(drive_titles(&d), vec!["NVMe 1", "HDD", "NVMe 2", "eMMC"]);
+    }
+
+    #[test]
+    fn spec_text_is_model_and_decimal_capacity() {
+        let d = drive("nvme0n1", "SAMSUNG MZVL81T0HFLB-00BH1", DriveKind::Nvme, 1_024_209_543_168);
+        assert_eq!(drive_spec_text(&d), "SAMSUNG MZVL81T0HFLB-00BH1  ·  1024 GB");
+        let unknown = drive("sdb", "", DriveKind::Hdd, 2_000_398_934_016);
+        assert_eq!(drive_spec_text(&unknown), "2000 GB", "no dangling separator without a model");
+        assert_eq!(drive_card_text(&d), "SAMSUNG MZVL81T0HFLB-00BH1", "the card leaves the capacity to its usage caption");
+        assert_eq!(drive_card_text(&unknown), "2000 GB");
+    }
+
+    #[test]
+    fn usage_is_shown_in_decimal_gb_so_it_matches_the_capacity() {
+        assert_eq!(format_usage(47_602_962_432, 1_024_199_012_352), "48 / 1024 GB");
+        assert_eq!(format_usage(218_836_664_320, 1_967_845_998_592), "219 / 1968 GB");
+    }
+
+    #[test]
+    fn fraction_is_clamped_and_safe_for_empty_totals() {
+        assert_eq!(usage_fraction(0, 0), 0.0);
+        assert_eq!(usage_fraction(5, 0), 0.0);
+        assert_eq!(usage_fraction(50, 100), 0.5);
+        assert_eq!(usage_fraction(200, 100), 1.0);
+    }
+
+    #[test]
+    fn blocks_carry_the_kernel_name_that_links_them_to_telemetry() {
+        let specs = specs_with(
+            vec![
+                drive("nvme0n1", "Samsung", DriveKind::Nvme, 1_000_000_000_000),
+                drive("nvme1n1", "Sabrent", DriveKind::Nvme, 2_000_000_000_000),
+            ],
+            "ignored when drives are present",
+        );
+        let blocks = drive_blocks(&specs);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(
+            blocks[1],
+            DriveBlock {
+                name: "nvme1n1".into(),
+                title: "NVMe 2".into(),
+                spec: "Sabrent  ·  2000 GB".into(),
+                card_spec: "Sabrent".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn an_older_daemon_without_a_drive_list_gets_one_legacy_block() {
+        let specs = specs_with(vec![], "SAMSUNG MZVL81T0HFLB-00BH1  ·  1024 GB NVMe");
+        let blocks = drive_blocks(&specs);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].spec, "SAMSUNG MZVL81T0HFLB-00BH1  ·  1024 GB NVMe");
+        assert_eq!(blocks[0].card_spec, blocks[0].spec);
+        assert!(blocks[0].name.is_empty());
+    }
+
+    #[test]
+    fn usage_display_covers_mounted_unmounted_and_missing_drives() {
+        let (text, frac) = usage_display(Some(&usage("a", 50, 100, &["/"])));
+        assert_eq!(text, "0 / 0 GB");
+        assert_eq!(frac, 0.5);
+
+        let (text, frac) = usage_display(Some(&usage("a", 0, 0, &[])));
+        assert_eq!(text, i18n::t("mon_disk_unmounted"));
+        assert_eq!(frac, 0.0);
+
+        let (text, frac) = usage_display(None);
+        assert_eq!(text, "─.─ / ─.─ GB");
+        assert_eq!(frac, 0.0);
+    }
+
+    #[test]
+    fn mounts_tooltip_lists_mountpoints_only_when_there_are_some() {
+        assert_eq!(mounts_tooltip(None), None);
+        assert_eq!(mounts_tooltip(Some(&usage("a", 1, 2, &[]))), None);
+        let tip = mounts_tooltip(Some(&usage("a", 1, 2, &["/", "/boot"]))).unwrap();
+        assert!(tip.contains("/, /boot"), "{tip}");
+        assert!(!tip.contains("{}"), "template placeholder must be filled: {tip}");
+    }
 }
