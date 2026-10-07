@@ -241,27 +241,9 @@ pub fn get_hardware_specs() -> HardwareSpecs {
         }
         specs.ram_spec = format!("{} GB RAM", total_gb);
 
-        // 5. SSD Model & Size
-        let mut ssd_str = String::from("NVMe SSD");
-        if let Ok(entries) = glob::glob("/sys/block/nvme*n1/device/model") {
-            for entry in entries.filter_map(Result::ok) {
-                if let Ok(model) = fs::read_to_string(&entry) {
-                    let model = model.trim();
-                    if let Some(parent) = entry.parent().and_then(|p| p.parent()) {
-                        if let Ok(size_str) = fs::read_to_string(parent.join("size")) {
-                            if let Ok(sectors) = size_str.trim().parse::<f64>() {
-                                let gb = (sectors * 512.0 / 1_000_000_000.0).round() as i32;
-                                ssd_str = format!("{}  ·  {} GB NVMe", model, gb);
-                                break;
-                            }
-                        }
-                    }
-                    ssd_str = format!("{} NVMe", model);
-                    break;
-                }
-            }
-        }
-        specs.ssd_spec = ssd_str;
+        // 5. Internal drives. `GetHardwareSpecs` re-probes these on every call (see
+        // interface.rs) so a hot-added drive shows up; this seeds the cached copy.
+        crate::sysmon::drives::refresh_specs(&mut specs);
 
         // 6. OS & Kernel
         let mut os_name = String::from("Linux");

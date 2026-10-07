@@ -19,7 +19,10 @@ impl SysMonInterface {
     }
 
     async fn get_hardware_specs(&self) -> String {
-        let specs = get_hardware_specs();
+        let mut specs = get_hardware_specs();
+        // The rest of the specs never change at runtime and stay cached (they cost a
+        // nvidia-smi/lspci spawn); the drive list is a few sysfs reads, so keep it fresh.
+        crate::sysmon::drives::refresh_specs(&mut specs);
         serde_json::to_string(&specs).unwrap_or_else(|_| "{}".to_string())
     }
 

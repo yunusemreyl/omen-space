@@ -24,6 +24,65 @@ pub struct SystemStats {
     pub chassis_temp: i32,
     #[serde(default)]
     pub board_verified: bool,
+    /// Live usage of every internal drive (see `HardwareSpecs::drives` for the static
+    /// part). Added after the aggregate `disk_*` fields above, which stay populated for
+    /// clients that predate it. `#[serde(default)]` lets a newer client read an older
+    /// daemon's JSON, which simply has no such list.
+    #[serde(default)]
+    pub drives: Vec<DriveUsage>,
+}
+
+/// What kind of internal storage device a drive is. Unknown values sent by a newer daemon
+/// deserialize to `Other` instead of failing the whole payload.
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DriveKind {
+    Nvme,
+    Ssd,
+    Hdd,
+    Emmc,
+    #[default]
+    #[serde(other)]
+    Other,
+}
+
+impl DriveKind {
+    /// Short technical name for the UI. These are acronyms and are not translated.
+    pub fn label(self) -> &'static str {
+        match self {
+            DriveKind::Nvme => "NVMe",
+            DriveKind::Ssd => "SSD",
+            DriveKind::Hdd => "HDD",
+            DriveKind::Emmc => "eMMC",
+            DriveKind::Other => "DRIVE",
+        }
+    }
+}
+
+/// Static description of one internal storage device (NVMe / SATA SSD / HDD / eMMC).
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DriveInfo {
+    /// Kernel block device name, e.g. `nvme0n1`. Also the key that ties this entry to its
+    /// `DriveUsage` in the telemetry stream.
+    pub name: String,
+    /// Vendor model string with the kernel's space padding removed.
+    pub model: String,
+    pub kind: DriveKind,
+    /// Raw capacity in bytes (`/sys/block/<name>/size` x 512).
+    pub size_bytes: u64,
+}
+
+/// Live usage of one internal drive, summed over its mounted filesystems (same numbers as `df`:
+/// used = blocks - free blocks). A drive with nothing mounted reports `total_bytes == 0`.
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DriveUsage {
+    pub name: String,
+    pub used_bytes: u64,
+    pub total_bytes: u64,
+    /// Where this drive's filesystems are mounted (for a tooltip), e.g. `["/", "/boot"]`.
+    pub mounts: Vec<String>,
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +98,10 @@ pub struct HardwareSpecs {
     pub vbios_version: String,
     pub nvidia_driver: String,
     pub kernel_version: String,
+    /// Every internal drive. Empty when talking to a daemon that predates this field,
+    /// in which case clients fall back to the single `ssd_spec` line.
+    #[serde(default)]
+    pub drives: Vec<DriveInfo>,
 }
 
 // ── Power Service Proxy ────────────────────────────────────────────────────────

@@ -65,36 +65,16 @@ pub fn fetch_system_stats() -> SystemStats {
         }
     }
 
-    // ── 3. Disk Usage using libc::statvfs (instantaneous, zero-fork) ─────────
-    unsafe {
-        if let Ok(mounts) = std::fs::read_to_string("/proc/mounts") {
-            let mut total_gb = 0.0;
-            let mut used_gb = 0.0;
-            let mut seen = std::collections::HashSet::new();
-            for line in mounts.lines() {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 3 && parts[0].starts_with("/dev/") && !parts[0].starts_with("/dev/loop") {
-                    if seen.insert(parts[0].to_string()) {
-                        if let Ok(path) = std::ffi::CString::new(parts[1]) {
-                            let mut stat: libc::statvfs = std::mem::zeroed();
-                            if libc::statvfs(path.as_ptr(), &mut stat) == 0 {
-                                let block_size = stat.f_frsize as f64;
-                                let total_bytes = stat.f_blocks as f64 * block_size;
-                                let free_bytes = stat.f_bavail as f64 * block_size;
-                                let used_bytes = (total_bytes - free_bytes).max(0.0);
-                                total_gb += total_bytes / (1024.0 * 1024.0 * 1024.0);
-                                used_gb += used_bytes / (1024.0 * 1024.0 * 1024.0);
-                            }
-                        }
-                    }
-                }
-            }
-            stats.disk_total_gb = total_gb;
-            stats.disk_used_gb = used_gb;
-            if total_gb > 0.0 {
-                stats.disk_frac = (used_gb / total_gb).clamp(0.0, 1.0);
-            }
-        }
+    // ── 3. Drive usage: per internal drive, from sysfs + mountinfo + statvfs ──
+    // The scalar `disk_*` fields keep describing the first drive for clients that predate
+    // the per-drive list.
+    {
+        let drives = crate::sysmon::drives::current_drives();
+        stats.drives = crate::sysmon::drives::current_usage(&drives);
+        let (used_gb, total_gb, frac) = crate::sysmon::drives::legacy_disk_fields(&stats.drives);
+        stats.disk_used_gb = used_gb;
+        stats.disk_total_gb = total_gb;
+        stats.disk_frac = frac;
     }
 
     // ── 4. CPU Temp & Power from Direct Cached Paths ───────────
