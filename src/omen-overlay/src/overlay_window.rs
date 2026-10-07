@@ -400,7 +400,7 @@ impl OverlayWindow {
             let key_val = key.name().unwrap_or_default().to_lowercase();
             let _has_shift = state.contains(gtk::gdk::ModifierType::SHIFT_MASK);
 
-            // Escape/F2 triggers app quit, handled in main.rs key controller
+            // Escape closes the HUD (main.rs key controller); Shift+F2 toggles it globally via the daemon/tray
 
             match key_val.as_str() {
                 "1" | "kp_1" => {

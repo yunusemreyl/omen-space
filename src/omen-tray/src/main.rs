@@ -1,9 +1,10 @@
 mod i18n;
+mod overlay_proc;
 
 use ksni::menu::{CheckmarkItem, StandardItem, SubMenu};
 use ksni::MenuItem;
 use i18n::t;
-use log::{error, info};
+use log::{error, info, warn};
 use std::process::Command;
 use std::sync::OnceLock;
 use zbus::{Connection, Result as ZbusResult};
@@ -87,47 +88,71 @@ fn spawn_gui() {
     }
 }
 
-fn spawn_overlay() {
-    let is_running = std::process::Command::new("pgrep")
-        .arg("-x")
-        .arg("omen-overlay")
-        .output()
-        .map(|o| o.status.success() && !o.stdout.is_empty())
-        .unwrap_or(false);
+/// Serialises overlay toggles so a tray-menu click and a hotkey signal that arrive
+/// together cannot both decide "not running" and start two HUDs.
+static OVERLAY_TOGGLE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    if is_running {
-        let _ = std::process::Command::new("pkill").arg("-TERM").arg("-x").arg("omen-overlay").output();
+/// Toggle the quick HUD: close it if a live one exists, otherwise start it.
+///
+/// "Live" is decided from `/proc` (see `overlay_proc`), not `pgrep`: a zombie
+/// `omen-overlay` (e.g. a child someone started and never reaped) matches
+/// `pgrep -x`, which used to make this function "close" a corpse and never open
+/// the HUD.
+fn spawn_overlay() {
+    let _guard = OVERLAY_TOGGLE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+    // SAFETY: getuid() has no preconditions and cannot fail.
+    let uid = unsafe { libc::getuid() };
+    let running = overlay_proc::find_live_pids(std::path::Path::new("/proc"), "omen-overlay", uid);
+
+    if !running.is_empty() {
+        for pid in running {
+            // SAFETY: plain kill(2) on a pid we just matched as a live omen-overlay of ours.
+            let rc = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+            if rc == 0 {
+                info!("Closed overlay (pid {})", pid);
+            } else {
+                warn!("Could not signal overlay pid {}: {}", pid, std::io::Error::last_os_error());
+            }
+        }
         return;
     }
 
-    let spawned: Option<std::process::Child> = std::env::current_exe()
+    // Prefer the binary next to this one, then fall back to $PATH.
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(sibling) = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|dir| dir.join("omen-overlay")))
-        .and_then(|overlay_path| {
-            if overlay_path.exists() {
-                std::process::Command::new(overlay_path)
-                    .stdin(std::process::Stdio::null())
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .spawn()
-                    .ok()
-            } else {
-                None
-            }
-        })
-        .or_else(|| {
-            std::process::Command::new("omen-overlay")
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-                .ok()
-        });
+    {
+        if sibling.exists() {
+            candidates.push(sibling);
+        }
+    }
+    candidates.push(std::path::PathBuf::from("omen-overlay"));
 
-    if let Some(mut child) = spawned {
-        std::thread::spawn(move || {
-            let _ = child.wait();
-        });
+    let mut last_error: Option<(std::path::PathBuf, std::io::Error)> = None;
+    for candidate in candidates {
+        // stderr is inherited (the journal when run as a user unit) so a crashing
+        // overlay is no longer invisible; its stdout is not interesting.
+        match Command::new(&candidate)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::inherit())
+            .spawn()
+        {
+            Ok(mut child) => {
+                info!("Started overlay {} (pid {})", candidate.display(), child.id());
+                // Reap the child once it exits so it never lingers as a zombie.
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+                return;
+            }
+            Err(e) => last_error = Some((candidate, e)),
+        }
+    }
+    if let Some((path, e)) = last_error {
+        warn!("Failed to start overlay '{}': {}", path.display(), e);
     }
 }
 
@@ -465,7 +490,10 @@ async fn main() {
         }
     };
 
-    env_logger::init();
+    // Show our own info-level lines (hotkey received, overlay started/closed) in the
+    // journal by default; RUST_LOG still overrides this.
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,omen_tray=info"))
+        .init();
     info!("omen-tray başlatılıyor...");
 
     i18n::init();
@@ -491,25 +519,37 @@ async fn main() {
     // No longer holding overlay in background
 
     // Listen for OMEN key presses from the zero-overhead hotkey monitor
+    // Every failure is logged and the subscription is retried, so a slow D-Bus start or a
+    // restarted daemon can no longer leave the hotkeys silently dead until the next login.
     tokio::spawn(async move {
-        if let Ok(conn) = get_conn().await {
-            use futures::StreamExt;
-            if let Ok(proxy) = PlatformProxy::new(&conn).await {
-                if let Ok(mut stream) = proxy.receive_macro_key_pressed().await {
-                    while let Some(msg) = stream.next().await {
-                        if let Ok(args) = msg.args() {
-                            let key_name = args.key_name();
-                            if *key_name == "omen" {
-                                info!("OMEN key detected, launching GUI...");
-                                spawn_gui();
-                            } else if *key_name == "overlay" {
-                                info!("Overlay hotkey detected, toggling overlay...");
-                                spawn_overlay();
+        use futures::StreamExt;
+        loop {
+            match get_conn().await {
+                Ok(conn) => match PlatformProxy::new(&conn).await {
+                    Ok(proxy) => match proxy.receive_macro_key_pressed().await {
+                        Ok(mut stream) => {
+                            info!("Subscribed to daemon hotkey signals");
+                            while let Some(msg) = stream.next().await {
+                                if let Ok(args) = msg.args() {
+                                    let key_name = args.key_name();
+                                    if *key_name == "omen" {
+                                        info!("OMEN key detected, launching GUI...");
+                                        spawn_gui();
+                                    } else if *key_name == "overlay" {
+                                        info!("Overlay hotkey detected, toggling overlay...");
+                                        spawn_overlay();
+                                    }
+                                }
                             }
+                            warn!("Hotkey signal stream ended; resubscribing");
                         }
-                    }
-                }
+                        Err(e) => warn!("Cannot subscribe to MacroKeyPressed: {}", e),
+                    },
+                    Err(e) => warn!("Cannot create Platform proxy for hotkeys: {}", e),
+                },
+                Err(e) => warn!("Cannot connect to D-Bus for hotkeys: {}", e),
             }
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         }
     });
 

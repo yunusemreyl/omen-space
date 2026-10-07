@@ -2,6 +2,12 @@
 
 The following issues have been resolved and tested with the Omen Space 2.0 architecture updates and patches.
 
+### Quick HUD Overlay (Shift+F2) does nothing, on any distro (#258)
+- **Description:** Pressing Shift+F2 never opens the HUD, whether the main GUI is open or "closed" (the GUI is D-Bus activatable and may be running in the background). Reproduced on CachyOS (Arch) with KDE Plasma on Wayland.
+- **Root cause:** `omen-gui` started `omen-overlay --daemon` at startup. The overlay has no such option, so it exited immediately, and because the GUI never called `wait()` on it the dead process stayed behind as a zombie. `omen-tray` decided whether the HUD was already open with `pgrep -x omen-overlay`, which also matches zombies, so it "closed" the corpse and returned without opening anything.
+- **Status:** ✅ **Resolved.** The GUI no longer spawns the overlay; the tray checks `/proc` for a *live* process and logs what it does; the overlay closes only on Escape (the global Shift+F2 toggle is handled by the daemon/tray, and quitting on F2 as well raced with it); `omen-cli overlay daemon` is now a deprecated no-op. The Arch `PKGBUILD` and `flake.nix` now install `omen-overlay` as well (the PKGBUILD previously did not ship it at all), and `Cargo.lock` was refreshed so `cargo build --locked` works.
+- **Known limitation:** the HUD is a normal window, not a layer-shell surface, so on Wayland it can appear behind a fullscreen game or without keyboard focus (KWin focus-stealing prevention). Use the tray menu entry or `omen-cli overlay toggle` as a fallback.
+
 ### [8A43] Bug Report — OMEN by HP Gaming Laptop 16-n0xxx #173
 - **Description:** Power profiles return to balanced on auto seconds after changing. `hp-rgb-lighting` DKMS module fails to build on kernel 6.12.104 with Clang (`make LLVM=1`).
 - **Status:** ✅ **Resolved.** Migrated from `hp-rgb-lighting` to the `hp-omen-extra` module, fixing Clang compilation errors. The power profile reset issue was resolved by decoupling `is_victus_s_thermal_profile`.

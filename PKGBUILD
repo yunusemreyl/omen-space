@@ -48,6 +48,9 @@ package() {
   cp target/release/omen-cli "$pkgdir/usr/bin/"
   cp target/release/omen-tray "$pkgdir/usr/bin/"
   cp target/release/omen-gui "$pkgdir/usr/bin/"
+  # Quick HUD overlay (Shift+F2). omen-tray starts it on demand; without this binary
+  # the hotkey silently does nothing on a package-based install.
+  cp target/release/omen-overlay "$pkgdir/usr/bin/"
 
   # System configuration files
   cp data/org.hp.omen.conf "$pkgdir/etc/dbus-1/system.d/"
