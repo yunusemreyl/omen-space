@@ -44,8 +44,8 @@ fn ensure_tray_running() {
                 }
             });
 
-        if spawned.is_none() {
-            let _ = std::process::Command::new("omen-tray")
+        let spawned = spawned.or_else(|| {
+            std::process::Command::new("omen-tray")
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
@@ -56,52 +56,16 @@ fn ensure_tray_running() {
                         .stdout(std::process::Stdio::null())
                         .stderr(std::process::Stdio::null())
                         .spawn()
-                });
-        }
-    }
-}
+                })
+                .ok()
+        });
 
-fn ensure_overlay_running() {
-    let is_running = std::process::Command::new("pgrep")
-        .arg("-x")
-        .arg("omen-overlay")
-        .output()
-        .map(|o| o.status.success() && !o.stdout.is_empty())
-        .unwrap_or(false);
-
-    if !is_running {
-        let spawned = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|dir| dir.join("omen-overlay")))
-            .and_then(|overlay_path| {
-                if overlay_path.exists() {
-                    std::process::Command::new(overlay_path)
-                        .arg("--daemon")
-                        .stdin(std::process::Stdio::null())
-                        .stdout(std::process::Stdio::null())
-                        .stderr(std::process::Stdio::null())
-                        .spawn()
-                        .ok()
-                } else {
-                    None
-                }
+        // Reap the child once it exits so it never lingers as a zombie (a zombie
+        // still matches `pgrep -x omen-tray` and would block the next launch).
+        if let Some(mut child) = spawned {
+            std::thread::spawn(move || {
+                let _ = child.wait();
             });
-
-        if spawned.is_none() {
-            let _ = std::process::Command::new("omen-overlay")
-                .arg("--daemon")
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-                .or_else(|_| {
-                    std::process::Command::new("/usr/bin/omen-overlay")
-                        .arg("--daemon")
-                        .stdin(std::process::Stdio::null())
-                        .stdout(std::process::Stdio::null())
-                        .stderr(std::process::Stdio::null())
-                        .spawn()
-                });
         }
     }
 }
@@ -112,8 +76,12 @@ fn main() {
 
     let app = adw::Application::builder().application_id(APP_ID).build();
     app.connect_startup(|_| {
+        // The quick HUD overlay (Shift+F2) is deliberately NOT started here: it is
+        // launched on demand by omen-tray. It used to be spawned as
+        // `omen-overlay --daemon`, a flag the overlay does not implement, so the
+        // child exited immediately and was never reaped, leaving a zombie that made
+        // the tray believe an overlay was already running.
         ensure_tray_running();
-        ensure_overlay_running();
         adw::init().expect("Failed to initialize libadwaita");
         i18n::init();
         

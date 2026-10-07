@@ -7,7 +7,8 @@ use crate::dbus_proxy::PlatformProxy;
 pub enum OverlayCommand {
     /// Toggle HUD overlay visibility (Shift+F2)
     Toggle,
-    /// Launch overlay in background daemon mode
+    /// Deprecated: the overlay has no background mode and is started on demand
+    #[command(hide = true)]
     Daemon,
 }
 
@@ -23,11 +24,40 @@ pub async fn handle(cmd: &OverlayCommand, conn: &zbus::Connection) -> Result<()>
             }
         }
         OverlayCommand::Daemon => {
-            println!("{} Starting OMEN Overlay in daemon mode...", "🎮".cyan());
-            let _ = std::process::Command::new("omen-overlay")
-                .arg("--daemon")
-                .spawn();
+            // `omen-overlay` never implemented a `--daemon` flag: GApplication rejected
+            // it and the process exited at once, leaving a zombie that blocked the
+            // Shift+F2 toggle. The overlay is now opened on demand, so this is a no-op
+            // kept only so existing scripts that call it do not break.
+            println!(
+                "{} `omen-cli overlay daemon` is deprecated and does nothing: the HUD is started on demand.\n  Use `omen-cli overlay toggle` or press Shift+F2.",
+                "ℹ".cyan()
+            );
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Parser, Debug)]
+    struct Wrapper {
+        #[command(subcommand)]
+        cmd: OverlayCommand,
+    }
+
+    #[test]
+    fn toggle_subcommand_parses() {
+        let w = Wrapper::try_parse_from(["omen-cli", "toggle"]).unwrap();
+        assert!(matches!(w.cmd, OverlayCommand::Toggle));
+    }
+
+    #[test]
+    fn deprecated_daemon_subcommand_still_parses() {
+        // Old scripts must keep working (as a no-op) after the fix.
+        let w = Wrapper::try_parse_from(["omen-cli", "daemon"]).unwrap();
+        assert!(matches!(w.cmd, OverlayCommand::Daemon));
+    }
 }
