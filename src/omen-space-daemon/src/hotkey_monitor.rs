@@ -3,6 +3,28 @@ use futures::StreamExt;
 use log::{info, warn};
 use zbus::Connection;
 
+/// Map a pressed key to the name broadcast in the `MacroKeyPressed` D-Bus signal.
+///
+/// `shift_held` is true while either Shift key is down. It is a free function (not
+/// inlined in the event loop) so the unit tests exercise the real mapping.
+pub(crate) fn resolve_hotkey(key_code: u16, shift_held: bool) -> Option<&'static str> {
+    // Shift+F2 opens/closes the quick HUD overlay (handled by omen-tray).
+    if (key_code == Key::KEY_F2.code() || key_code == 60) && shift_held {
+        return Some("overlay");
+    }
+    // 148 = KEY_PROG1 (Omen Key mapped by hwdb / hp-omen-extra)
+    // 200 = raw XF86Launch2 scancode on some boards without hwdb
+    // 149 = KEY_PROG2 (P1/P2/Macro)
+    // 140 = KEY_CALC (Calculator)
+    match key_code {
+        148 | 200 => Some("omen"),
+        149 => Some("prog2"),
+        140 => Some("calc"),
+        256 => Some("prog3"),
+        _ => None,
+    }
+}
+
 pub struct HotkeyMonitor;
 
 impl HotkeyMonitor {
@@ -80,21 +102,7 @@ impl HotkeyMonitor {
                     let shift_held = left_shift || right_shift;
 
                     if event.value() == 1 { // Key press
-                        let key_name = if (key_code == Key::KEY_F2.code() || key_code == 60) && shift_held {
-                            Some("overlay")
-                        } else {
-                            // 148 = KEY_PROG1 (Omen Key mapped by hwdb / hp-omen-extra)
-                            // 200 = raw XF86Launch2 scancode on some boards without hwdb
-                            // 149 = KEY_PROG2 (P1/P2/Macro)
-                            // 140 = KEY_CALC (Calculator)
-                            match key_code {
-                                148 | 200 => Some("omen"),
-                                149 => Some("prog2"),
-                                140 => Some("calc"),
-                                256 => Some("prog3"),
-                                _ => None,
-                            }
-                        };
+                        let key_name = resolve_hotkey(key_code, shift_held);
 
                         if let Some(name) = key_name {
                             info!("HotkeyMonitor: Detected Hotkey / Macro Key: {}", name);

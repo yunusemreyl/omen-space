@@ -137,16 +137,9 @@ mod tests {
 
     #[test]
     fn hotkey_raw_scancode_200_maps_to_omen() {
-        fn resolve_hotkey(key_code: u16, shift_held: bool) -> Option<&'static str> {
-            if (key_code == 60) && shift_held { return Some("overlay"); }
-            match key_code {
-                148 | 200 => Some("omen"),
-                149 => Some("prog2"),
-                140 => Some("calc"),
-                256 => Some("prog3"),
-                _ => None,
-            }
-        }
+        // Calls the REAL mapping used by the hotkey monitor (this test used to
+        // re-implement it locally, so it kept passing even if the real code broke).
+        use crate::hotkey_monitor::resolve_hotkey;
         assert_eq!(resolve_hotkey(148, false), Some("omen"));
         assert_eq!(resolve_hotkey(200, false), Some("omen"), "raw XF86Launch2 scancode must work (fix #266)");
         assert_eq!(resolve_hotkey(149, false), Some("prog2"));
@@ -154,6 +147,32 @@ mod tests {
         assert_eq!(resolve_hotkey(256, false), Some("prog3"));
         assert_eq!(resolve_hotkey(1, false), None);
         assert_eq!(resolve_hotkey(60, true), Some("overlay"));
+    }
+
+    #[test]
+    fn shift_f2_opens_the_overlay_but_plain_f2_does_not() {
+        use crate::hotkey_monitor::resolve_hotkey;
+        use evdev::Key;
+        assert_eq!(Key::KEY_F2.code(), 60, "evdev KEY_F2 must stay code 60");
+        assert_eq!(resolve_hotkey(Key::KEY_F2.code(), true), Some("overlay"));
+        assert_eq!(resolve_hotkey(60, true), Some("overlay"));
+        assert_eq!(resolve_hotkey(60, false), None, "F2 without Shift must not toggle the HUD");
+    }
+
+    #[test]
+    fn shift_does_not_change_the_other_macro_keys() {
+        use crate::hotkey_monitor::resolve_hotkey;
+        for shift in [false, true] {
+            assert_eq!(resolve_hotkey(148, shift), Some("omen"));
+            assert_eq!(resolve_hotkey(200, shift), Some("omen"));
+            assert_eq!(resolve_hotkey(149, shift), Some("prog2"));
+            assert_eq!(resolve_hotkey(140, shift), Some("calc"));
+            assert_eq!(resolve_hotkey(256, shift), Some("prog3"));
+        }
+        // Ordinary keys (letters, brightness, the Shift keys themselves) map to nothing.
+        for code in [30u16, 42, 54, 224, 225] {
+            assert_eq!(resolve_hotkey(code, true), None, "code {code} must not trigger anything");
+        }
     }
 
     // ── Issue #282 — ACPI cooldown throttle logic ─────────────────────────────

@@ -32,7 +32,13 @@ use zbus::connection::Builder;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    env_logger::init();
+    // Only the hotkey monitor is promoted to info: its "Detected Hotkey" line is the
+    // first thing to check when Shift+F2 / the Omen key does nothing. Everything else
+    // keeps the quiet default; RUST_LOG still overrides this.
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("warn,omen_space_daemon::hotkey_monitor=info"),
+    )
+    .init();
     info!("Starting omen-space-daemon v{}", env!("CARGO_PKG_VERSION"));
     
 
