@@ -262,7 +262,11 @@ fn build_drive_row(title: &str, text: &str, tooltip: &str) -> (gtk::Box, gtk::Pr
     head.append(&gtk::Label::builder()
         .label(text)
         .css_classes(["os-spec-text"])
-        .halign(gtk::Align::End)
+        // Fill the row and right-align the text inside, rather than `halign(End)`: an
+        // end-aligned ellipsizing label can be allocated slightly less than its text needs
+        // and cut off "Sabrent Rocket Q4" while a longer model name still fits.
+        .halign(gtk::Align::Fill)
+        .xalign(1.0)
         .hexpand(true)
         .ellipsize(gtk::pango::EllipsizeMode::End)
         .max_width_chars(48)
