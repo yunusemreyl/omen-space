@@ -45,7 +45,7 @@
             '';
 
             buildPhase = ''
-              for crate in omen-space-daemon omen-cli omen-tray omen-gui; do
+              for crate in omen-space-daemon omen-cli omen-tray omen-gui omen-overlay; do
                 cargo build --release --manifest-path src/$crate/Cargo.toml
               done
             '';
@@ -66,6 +66,7 @@
               cp target/*/release/omen-cli $out/bin/ || cp target/release/omen-cli $out/bin/
               cp target/*/release/omen-tray $out/bin/ || cp target/release/omen-tray $out/bin/
               cp target/*/release/omen-gui $out/bin/ || cp target/release/omen-gui $out/bin/
+              cp target/*/release/omen-overlay $out/bin/ || cp target/release/omen-overlay $out/bin/
 
               cp data/omen-space-daemon.service $out/lib/systemd/system/
               cp data/sysusers.d/omen-space.conf $out/lib/sysusers.d/

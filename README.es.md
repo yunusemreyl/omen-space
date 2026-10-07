@@ -112,7 +112,7 @@ OMEN Space es una reescritura completa del antiguo *OmenCtl* en Python, ahora en
 - **`omen-space-daemon`**: el backend. Se ejecuta como servicio de systemd (root) y gestiona las interacciones con WMI, ACPI, Sysfs y MSR a través de D-Bus.
 - **`omen-gui`**: un frontend GTK4 + Libadwaita muy rápido, que se ejecuta en espacio de usuario.
 - **`omen-tray`**: un applet ligero para el panel del escritorio que permite cambiar rápido de perfil.
-- **`omen-cli`**: una interfaz de terminal rápida y programable, con comandos del HUD (`omen-cli overlay toggle`, `omen-cli overlay daemon`).
+- **`omen-cli`**: una interfaz de terminal rápida y programable, con un comando para el HUD (`omen-cli overlay toggle`).
 - **`hp-omen-extra`**: el controlador de kernel DKMS que amplía las capacidades estándar del kernel.
 
 ---

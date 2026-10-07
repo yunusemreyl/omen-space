@@ -23,7 +23,7 @@
 OMEN Space provides everything you need to unlock the full potential of your laptop on Linux, without the bloat.
 
 - 🎛️ **Fan & Thermal Mastery:** Create custom Fan curve splines for near-silent operation without thermal throttling. Includes a dedicated **Fan Cleaning Mode**.
-- 🎮 **Quick HUD Overlay (Shift+F2):** Zero-latency in-game floating GTK4 HUD for instant fan and power mode switching, keeping you focused on the game.
+- 🎮 **Quick HUD Overlay (Shift+F2):** A small floating GTK4 panel for switching fan and power modes without opening the main app. It needs `omen-tray` running and opens as a normal window, so on Wayland it can sit behind a fullscreen game (see [Known Issues](knownissues.md)).
 - ⚡ **Performance Profiles:** Seamlessly switch between `power-saver`, `balanced`, and `performance` ACPI/WMI modes.
 - 🚀 **Ryzen SMU & Undervolting:** Direct MSR-based undervolting, TCC offset control, GPU TGP limits, and AMD Ryzen SMU tuning.
 - 🎮 **MUX Switch:** Native Optimus / dGPU routing switching for maximum gaming performance.
@@ -112,7 +112,7 @@ OMEN Space is a complete rewrite of the legacy Python *OmenCtl*, moving to **Rus
 - **`omen-space-daemon`**: The backend. Runs as a systemd service (root), managing WMI, ACPI, Sysfs, and MSR interactions over secure D-Bus.
 - **`omen-gui`**: A beautifully fast GTK4 + Libadwaita frontend running in user-space.
 - **`omen-tray`**: A lightweight desktop panel applet for quick profile toggling.
-- **`omen-cli`**: A fast scriptable terminal interface. Now with HUD commands (`omen-cli overlay toggle`, `omen-cli overlay daemon`).
+- **`omen-cli`**: A fast scriptable terminal interface. Now with a HUD command (`omen-cli overlay toggle`).
 - **`hp-omen-extra`**: The underlying DKMS kernel driver extending standard kernel capabilities.
 
 ---
