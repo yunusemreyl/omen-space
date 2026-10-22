@@ -343,7 +343,7 @@ static const struct dmi_system_id victus_s_thermal_profile_boards[] __initconst 
 	},
 	{
 		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8BCD")},
-		.driver_data = (void *)&omen_v1_no_ec_thermal_params,
+		.driver_data = (void *)&omen_v1_thermal_params,
 	},
 	{
 		/* 8D40: HP OMEN Slim Gaming Laptop 16-an0xxx */

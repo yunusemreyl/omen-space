@@ -153,16 +153,29 @@ impl FanService {
 
     async fn _find_hwmon() -> Option<PathBuf> {
         if let Ok(entries) = glob("/sys/class/hwmon/hwmon*/name") {
+            let mut matching_paths = Vec::new();
             for entry in entries.filter_map(Result::ok) {
                 if let Some(name) = sysfs_read_str(&entry).await {
-                    // Added hp_wmi to cover broader matches
                     if name == "hp" || name == "hp-omen" || name == "hp_wmi" {
                         if let Some(parent) = entry.parent() {
-                            info!("Found HP/OMEN hwmon at {:?} (driver={})", parent, name);
-                            return Some(parent.to_path_buf());
+                            matching_paths.push(parent.to_path_buf());
                         }
                     }
                 }
+            }
+
+            // Prioritize paths that actually contain fan1_input
+            for path in &matching_paths {
+                if tokio::fs::try_exists(path.join("fan1_input")).await.unwrap_or(false) {
+                    info!("Found HP/OMEN hwmon with active fan input at {:?}", path);
+                    return Some(path.clone());
+                }
+            }
+
+            // Fallback to first matching if none have fan1_input
+            if let Some(path) = matching_paths.first() {
+                info!("Found HP/OMEN hwmon at {:?}", path);
+                return Some(path.clone());
             }
         }
 
