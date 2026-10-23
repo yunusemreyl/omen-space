@@ -25,6 +25,7 @@ OMEN Space ofrece todo lo necesario para aprovechar al máximo tu portátil en L
 - ⚡ **Perfiles de rendimiento:** cambia entre los modos ACPI/WMI `power-saver`, `balanced` y `performance` con protección activa keep-alive de EC y respaldo automático `WMBA` → `WMAA`.
 - 🚀 **Intel RAPL, Ryzen SMU y undervolt:** límites PL1/PL2 de Intel RAPL (hasta 150W/200W en procesadores HX y Core Ultra), undervolt directo por MSR, control del desfase TCC, límites de TGP de la GPU y ajuste del SMU de AMD Ryzen.
 - 🎮 **Interruptor MUX:** cambio nativo de Optimus / enrutamiento de la dGPU para el máximo rendimiento en juegos.
+- 🔍 **Interfaz escalable (Ctrl+Mayús+Más / Ctrl+Mayús+Menos):** amplía toda la ventana entre el 80 % y el 200 % (`Ctrl+Mayús+0` restablece) para que la aplicación siga siendo legible en monitores grandes o de alta densidad sin pasar a pantalla completa. El factor se recuerda y también puede ajustarse en Ajustes → Apariencia.
 - 🌈 **RGB Studio:** iluminación de teclado de 4 zonas, zona única, barra de luz o por tecla USB HID (`0d62:54bf`), con efectos de onda, respiración, ciclo y estático.
 - 🔄 **Comprobador inteligente de BIOS:** consulta los servidores de HP para buscar el firmware más reciente de tu placa.
 

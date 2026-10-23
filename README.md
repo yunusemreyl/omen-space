@@ -27,6 +27,7 @@ OMEN Space provides everything you need to unlock the full potential of your lap
 - ⚡ **Performance Profiles:** Seamlessly switch between `power-saver`, `balanced`, and `performance` ACPI/WMI modes with active EC keep-alive protection and automatic WMI `WMBA` → `WMAA` fallback across OMEN 15/16/17, OMEN Max 16, Transcend 14, and Victus 15/16 series.
 - 🚀 **Intel RAPL, Ryzen SMU & Undervolting:** Intel RAPL PL1/PL2 power limits (up to 150W/200W for HX & Core Ultra processors), direct MSR-based undervolting, TCC offset control, GPU TGP limits, and AMD Ryzen SMU tuning.
 - 🎮 **MUX Switch:** Native Optimus / dGPU routing switching for maximum gaming performance.
+- 🔍 **Scalable Interface (Ctrl+Shift+Plus / Ctrl+Shift+Minus):** Zoom the whole window between 80 % and 200 % (`Ctrl+Shift+0` resets) so the app stays readable on large or high-DPI monitors without going fullscreen. The factor is remembered and can also be set from Settings → Appearance.
 - 🌈 **RGB Studio:** Hardware-accelerated 4-Zone, Single-Zone, Light Bar, and USB HID Per-Key (`0d62:54bf`) keyboard lighting with wave, breathing, cycle, and static effects.
 - 🔄 **Smart BIOS Checker:** Automatically checks HP servers for your specific motherboard's latest firmware.
 

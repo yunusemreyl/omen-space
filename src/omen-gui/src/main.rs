@@ -13,6 +13,7 @@ mod undervolt;
 mod mux;
 mod keyboardrgb;
 mod settings;
+mod ui_scale;
 mod desktop_rgb_gui;
 mod updater;
 mod daemon_client;
@@ -165,6 +166,12 @@ fn build_ui(app: &adw::Application) {
         .default_width(1150)
         .default_height(820)
         .build();
+
+    // Interface zoom (Ctrl+Shift+Plus / Ctrl+Shift+Minus, Ctrl+Shift+0 to reset).
+    // Registered before the first present() so a saved factor is applied to the
+    // initial window size instead of resizing it in front of the user.
+    ui_scale::init(&window);
+    ui_scale::install_shortcuts(app);
 
     // Close button hides the window instead of killing the process (Minimize to Tray)
     window.connect_close_request(move |win| {

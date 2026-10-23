@@ -129,6 +129,28 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
     });
     app_lang_group.add(&appearance_row);
 
+    // Interface zoom — mirrors Ctrl+Shift+Plus / Ctrl+Shift+Minus so the
+    // shortcut is discoverable and the current factor is visible.
+    let scale_row = adw::ActionRow::builder()
+        .title(i18n::t("ui_scale"))
+        .subtitle(i18n::t("ui_scale_sub"))
+        .build();
+    let scale_spin = gtk::SpinButton::with_range(
+        crate::ui_scale::MIN_SCALE * 100.0,
+        crate::ui_scale::MAX_SCALE * 100.0,
+        crate::ui_scale::SCALE_STEP * 100.0,
+    );
+    scale_spin.set_valign(gtk::Align::Center);
+    crate::ui_scale::bind_spin(&scale_spin);
+    scale_spin.connect_value_changed(|spin| {
+        if crate::ui_scale::is_syncing_spin() {
+            return; // value pushed by a keyboard zoom, already applied
+        }
+        crate::ui_scale::apply(spin.value() / 100.0);
+    });
+    scale_row.add_suffix(&scale_spin);
+    app_lang_group.add(&scale_row);
+
     let lang_row = adw::ComboRow::builder()
         .title(i18n::t("language_row_title"))
         .subtitle(i18n::t("language_row_sub"))
@@ -292,16 +314,20 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
             let dir = format!("{}/.config/omenspace", home);
             let _ = std::fs::create_dir_all(&dir);
             let path = format!("{}/settings.json", dir);
-            let json = serde_json::json!({
-                "heartbeat_interval": hb,
-                "autostart": auto,
-                "startup_profile": sp,
-                "battery_care": bc,
-                "thermal_alerts": ta,
-                "thermal_protection": tp,
-                "zone_override": zo,
-                "lightbar_enabled": lb
-            });
+            // Merge into the existing file: keys owned elsewhere (appearance_mode,
+            // ui_scale) must survive a save from this page.
+            let mut json = serde_json::json!({});
+            if let Ok(js) = std::fs::read_to_string(&path) {
+                if let Ok(j) = serde_json::from_str::<serde_json::Value>(&js) { json = j; }
+            }
+            json["heartbeat_interval"] = serde_json::json!(hb);
+            json["autostart"] = serde_json::json!(auto);
+            json["startup_profile"] = serde_json::json!(sp);
+            json["battery_care"] = serde_json::json!(bc);
+            json["thermal_alerts"] = serde_json::json!(ta);
+            json["thermal_protection"] = serde_json::json!(tp);
+            json["zone_override"] = serde_json::json!(zo);
+            json["lightbar_enabled"] = serde_json::json!(lb);
             let _ = std::fs::write(path, serde_json::to_string_pretty(&json).unwrap_or_default());
         }
     };

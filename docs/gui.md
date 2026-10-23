@@ -13,7 +13,11 @@ The graphical user interface for OMENSpace is designed to be modern, responsive,
 3. **Asset & Theme Management:**
    - Automatically loads CSS styling (`style.css`) for custom UI components (like the custom toggle chips).
    - Resolves image paths dynamically (`asset_resolver.rs`) so the application works perfectly whether it is launched locally (`cargo run`) or installed system-wide (`/usr/share/omen-space/assets`).
-4. **App Updator:**
+4. **Interface Zoom:**
+   - `Ctrl+Shift+Plus` / `Ctrl+Shift+Minus` scale the whole pane between 80 % and 200 % (`Ctrl+Shift+0` resets it), which keeps the app readable on large or high-density monitors without going fullscreen.
+   - `ui_scale.rs` re-emits `style.css` with every `px` length multiplied by the factor, scales the app-local font DPI (`gtk-xft-dpi`) so theme-font widgets follow, and grows the window proportionally, clamped to the monitor it sits on.
+   - The factor is stored as `ui_scale` in `~/.config/omenspace/settings.json` and is also exposed as "Interface Scale" in Settings → Appearance.
+5. **App Updator:**
    - Connects to the GitHub API to check for software updates.
    - Triggers `fwupdmgr` to scan for HP BIOS and firmware updates natively.
 
@@ -25,3 +29,4 @@ The graphical user interface for OMENSpace is designed to be modern, responsive,
 - `src/monitoring.rs`: Renders the real-time statistics cards (CPU/GPU temps).
 - `src/updater.rs`: Manages OTA update checks.
 - `src/i18n.rs`: Handles localization/translations (e.g., Turkish and English support).
+- `src/ui_scale.rs`: Interface zoom — the `Ctrl+Shift+Plus`/`Ctrl+Shift+Minus` actions, stylesheet rescaling, and window sizing.
