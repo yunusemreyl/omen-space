@@ -51,6 +51,8 @@ pub struct OverlayWindow {
     gpu_val_label: gtk::Label,
     fan_val_label: gtk::Label,
     ram_val_label: gtk::Label,
+    battery_chip: gtk::Box,
+    battery_val_label: gtk::Label,
     tag_label: gtk::Label,
 }
 
@@ -323,6 +325,13 @@ impl OverlayWindow {
         ram_chip.append(&ram_val);
         telemetry_box.append(&ram_chip);
 
+        // BAT chip (revealed when laptop battery telemetry is active)
+        let battery_chip = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).visible(false).build();
+        battery_chip.append(&gtk::Label::builder().label(&crate::i18n::t("battery")).css_classes(["telem-chip-title"]).halign(gtk::Align::Start).build());
+        let battery_val = gtk::Label::builder().label("──%").css_classes(["telem-chip-val"]).halign(gtk::Align::Start).build();
+        battery_chip.append(&battery_val);
+        telemetry_box.append(&battery_chip);
+
         root_box.append(&telemetry_box);
 
         // ── 5. Footer Shortcut Hints ─────────────────────────────────────────
@@ -365,6 +374,8 @@ impl OverlayWindow {
             gpu_val_label: gpu_val,
             fan_val_label: fan_val,
             ram_val_label: ram_val,
+            battery_chip,
+            battery_val_label: battery_val,
             tag_label,
         });
 
@@ -506,6 +517,20 @@ impl OverlayWindow {
 
         if stats.ram_total_gb > 0.0 {
             self.ram_val_label.set_label(&format!("{:.1} / {:.0} GB", stats.ram_used_gb, stats.ram_total_gb));
+        }
+
+        if let Some(ref bat) = stats.battery {
+            self.battery_chip.set_visible(true);
+            let pwr_str = if bat.power_w > 0.0 {
+                format!(" | {:.0}W", bat.power_w)
+            } else if bat.ac_online {
+                " | AC".to_string()
+            } else {
+                String::new()
+            };
+            self.battery_val_label.set_label(&format!("{}%{}", bat.charge_pct, pwr_str));
+        } else {
+            self.battery_chip.set_visible(false);
         }
     }
 

@@ -1,3 +1,4 @@
+pub mod battery;
 pub mod drives;
 pub mod sensors;
 pub mod gpu;

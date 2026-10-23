@@ -245,9 +245,15 @@ pub fn build_page(window: &adw::ApplicationWindow, on_lang_changed: Option<Rc<dy
     startup_mode_row.set_selected(init_startup_profile);
     perf_group.add(&startup_mode_row);
 
+    let specs = crate::daemon_client::get_hardware_specs_sync();
+    let bat_sub = if !specs.battery_spec.is_empty() {
+        format!("{} ({})", i18n::t("battery_care_sub"), specs.battery_spec)
+    } else {
+        i18n::t("battery_care_sub").to_string()
+    };
     let battery_row = adw::SwitchRow::builder()
         .title(i18n::t("battery_care"))
-        .subtitle(i18n::t("battery_care_sub"))
+        .subtitle(&bat_sub)
         .build();
     battery_row.set_active(init_battery_care);
     perf_group.add(&battery_row);

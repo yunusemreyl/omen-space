@@ -23,6 +23,16 @@ impl SysMonInterface {
         // The rest of the specs never change at runtime and stay cached (they cost a
         // nvidia-smi/lspci spawn); the drive list is a few sysfs reads, so keep it fresh.
         crate::sysmon::drives::refresh_specs(&mut specs);
+        if let Some(bat) = crate::sysmon::battery::current_battery() {
+            let cap_wh = bat.energy_full_wh.or(bat.energy_design_wh).unwrap_or(0.0);
+            let health_str = bat.health_pct.map(|h| format!(" · {:.0}% Health", h)).unwrap_or_default();
+            let cycles_str = bat.cycle_count.map(|c| format!(" ({} cycles)", c)).unwrap_or_default();
+            if cap_wh > 0.0 {
+                specs.battery_spec = format!("{:.1} Wh Li-ion{}{}", cap_wh, health_str, cycles_str);
+            } else {
+                specs.battery_spec = format!("{}%{}", bat.charge_pct, health_str);
+            }
+        }
         serde_json::to_string(&specs).unwrap_or_else(|_| "{}".to_string())
     }
 
@@ -77,6 +87,33 @@ impl SysMonInterface {
         }
         report.push_str(&format!("- CPU Power: {:.1} W  |  GPU Power: {:.1} W  |  Total: {:.1} W\n",
             stats.cpu_pwr, stats.gpu_pwr, stats.total_pwr));
+
+        // ── Battery Telemetry ────────────────────────────────────
+        if let Some(ref bat) = stats.battery {
+            report.push_str("\n## Battery Telemetry\n\n| Field | Value |\n|-------|-------|\n");
+            report.push_str(&format!("| Battery Node   | `{}` |\n", bat.name));
+            report.push_str(&format!("| Status         | `{:?}` (AC Online: `{}`) |\n", bat.status, bat.ac_online));
+            report.push_str(&format!("| Charge Level   | `{}%` |\n", bat.charge_pct));
+            if let Some(h) = bat.health_pct {
+                report.push_str(&format!("| Battery Health | `{:.1}%` |\n", h));
+            }
+            if let (Some(now), Some(full)) = (bat.energy_now_wh, bat.energy_full_wh) {
+                let des_str = bat.energy_design_wh.map(|d| format!(" / {:.2} Wh design", d)).unwrap_or_default();
+                report.push_str(&format!("| Energy Wh      | `{:.2} / {:.2} Wh{}` |\n", now, full, des_str));
+            }
+            if let Some(cycles) = bat.cycle_count {
+                report.push_str(&format!("| Cycle Count    | `{}` |\n", cycles));
+            }
+            if bat.power_w > 0.0 {
+                report.push_str(&format!("| Power Rate     | `{:.2} W` |\n", bat.power_w));
+            }
+            if let Some(v) = bat.voltage_v {
+                report.push_str(&format!("| Voltage        | `{:.2} V` |\n", v));
+            }
+            if let Some(limit) = bat.charge_limit_pct {
+                report.push_str(&format!("| Care Limit     | `{}%` |\n", limit));
+            }
+        }
 
         // ── hwmon Path Probe ─────────────────────────────────────
         report.push_str("\n## hwmon Sensor Paths\n\n");

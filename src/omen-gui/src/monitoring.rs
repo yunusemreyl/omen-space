@@ -34,6 +34,20 @@ struct DeviceUI {
     /// True when the daemon sent no per-drive list (an older daemon): there is then a single
     /// row, fed by the aggregate `disk_*` fields.
     legacy: bool,
+    battery_sep: gtk::Separator,
+    battery_box: gtk::Box,
+    battery_bar: gtk::ProgressBar,
+    battery_status_label: gtk::Label,
+    battery_val_label: gtk::Label,
+}
+
+struct BatteryCardUI {
+    container: gtk::Box,
+    charge_label: gtk::Label,
+    status_label: gtk::Label,
+    health_val: gtk::Label,
+    cycles_val: gtk::Label,
+    power_val: gtk::Label,
 }
 
 struct WattGraphUI {
@@ -237,12 +251,63 @@ fn build_device_card() -> DeviceUI {
     }
     card.append(&drives_box);
 
+    // Battery section (auto-revealed on laptops when battery metrics are received)
+    let has_battery = !specs.battery_spec.is_empty();
+    let battery_sep = gtk::Separator::new(gtk::Orientation::Horizontal);
+    battery_sep.set_margin_top(10);
+    battery_sep.set_margin_bottom(10);
+    battery_sep.set_visible(has_battery);
+    card.append(&battery_sep);
+
+    let battery_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(0)
+        .visible(has_battery)
+        .build();
+
+    let bat_head = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(8)
+        .build();
+    bat_head.append(&sub_label(i18n::t("mon_battery")));
+    let battery_status_label = gtk::Label::builder()
+        .label(if has_battery { &specs.battery_spec } else { "..." })
+        .css_classes(["os-spec-text"])
+        .halign(gtk::Align::Fill)
+        .xalign(1.0)
+        .hexpand(true)
+        .ellipsize(gtk::pango::EllipsizeMode::End)
+        .build();
+    bat_head.append(&battery_status_label);
+    battery_box.append(&bat_head);
+
+    let battery_bar = gtk::ProgressBar::builder()
+        .fraction(0.0)
+        .css_classes(["os-prog-bat"])
+        .margin_top(5)
+        .margin_bottom(3)
+        .build();
+    battery_box.append(&battery_bar);
+
+    let battery_val_label = gtk::Label::builder()
+        .label("──%")
+        .css_classes(["os-monitor-label"])
+        .halign(gtk::Align::End)
+        .build();
+    battery_box.append(&battery_val_label);
+    card.append(&battery_box);
+
     DeviceUI {
         container: card,
         ram_bar,
         ram_val_label: ram_val,
         drive_rows,
         legacy,
+        battery_sep,
+        battery_box,
+        battery_bar,
+        battery_status_label,
+        battery_val_label,
     }
 }
 
@@ -419,7 +484,7 @@ fn build_watt_card() -> TotalWattUI {
         .spacing(8)
         .build();
     r1.append(&gtk::Image::builder()
-        .icon_name("battery-symbolic")
+        .icon_name("power-profile-performance-symbolic")
         .pixel_size(18)
         .build());
     r1.append(&gtk::Label::builder()
@@ -551,6 +616,84 @@ fn build_modes_card() -> ModesUI {
     ModesUI { container: card }
 }
 
+// ── Battery health card (live from daemon) ───────────────────
+fn build_battery_card() -> BatteryCardUI {
+    let specs = crate::daemon_client::get_hardware_specs_sync();
+    let has_battery = !specs.battery_spec.is_empty();
+    let card = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .css_classes(["os-monitor-card"])
+        .visible(has_battery)
+        .build();
+    let r1 = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(8)
+        .build();
+    r1.append(&gtk::Image::builder()
+        .icon_name("battery-symbolic")
+        .pixel_size(18)
+        .build());
+    r1.append(&gtk::Label::builder()
+        .label(i18n::t("mon_battery"))
+        .css_classes(["monitor-icon-label"])
+        .hexpand(true)
+        .halign(gtk::Align::Start)
+        .build());
+    let status_label = gtk::Label::builder()
+        .label("...")
+        .css_classes(["os-monitor-val-sub"])
+        .halign(gtk::Align::End)
+        .build();
+    r1.append(&status_label);
+    card.append(&r1);
+
+    let charge_label = gtk::Label::builder()
+        .label("──%")
+        .css_classes(["os-monitor-val"])
+        .halign(gtk::Align::Center)
+        .valign(gtk::Align::Center)
+        .vexpand(true)
+        .margin_top(10)
+        .margin_bottom(10)
+        .build();
+    card.append(&charge_label);
+
+    let health_val = gtk::Label::builder().label("...").css_classes(["os-monitor-val-sub"]).build();
+    let cycles_val = gtk::Label::builder().label("...").css_classes(["os-monitor-val-sub"]).build();
+    let power_val  = gtk::Label::builder().label("...").css_classes(["os-monitor-val-sub"]).build();
+
+    let make_row = |key: &str, val: &gtk::Label| {
+        let row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).margin_top(8).build();
+        row.append(&gtk::Label::builder().label(key).css_classes(["os-monitor-label"]).hexpand(true).halign(gtk::Align::Start).build());
+        row.append(val);
+        row
+    };
+
+    let sep1 = gtk::Separator::new(gtk::Orientation::Horizontal);
+    sep1.set_margin_top(4);
+    card.append(&sep1);
+    card.append(&make_row(i18n::t("battery_health"), &health_val));
+
+    let sep2 = gtk::Separator::new(gtk::Orientation::Horizontal);
+    sep2.set_margin_top(4);
+    card.append(&sep2);
+    card.append(&make_row(i18n::t("bat_cycles"), &cycles_val));
+
+    let sep3 = gtk::Separator::new(gtk::Orientation::Horizontal);
+    sep3.set_margin_top(4);
+    card.append(&sep3);
+    card.append(&make_row(i18n::t("bat_power"), &power_val));
+
+    BatteryCardUI {
+        container: card,
+        charge_label,
+        status_label,
+        health_val,
+        cycles_val,
+        power_val,
+    }
+}
+
 // ── Device spec header card ─────────────────────────────────
 pub fn build_spec_header() -> gtk::Box {
     let specs = crate::daemon_client::get_hardware_specs_sync();
@@ -591,12 +734,15 @@ pub fn build_spec_header() -> gtk::Box {
         .column_spacing(16)
         .build();
 
-    // CPU, GPU, RAM, one row per drive, OS
+    // CPU, GPU, RAM, Battery, one row per drive, OS
     let mut spec_list: Vec<(String, String)> = vec![
         ("CPU".to_string(), specs.cpu_spec.clone()),
         ("GPU".to_string(), specs.gpu_spec.clone()),
         ("RAM".to_string(), specs.ram_spec.clone()),
     ];
+    if !specs.battery_spec.is_empty() {
+        spec_list.push((i18n::t("mon_battery").to_string(), specs.battery_spec.clone()));
+    }
     spec_list.extend(drive_blocks(&specs).into_iter().map(|b| (b.title, b.spec)));
     spec_list.push(("OS".to_string(), specs.os_spec.clone()));
 
@@ -659,6 +805,7 @@ pub fn build_page(is_general: bool) -> gtk::Box {
     let gpu_watt_ui = build_watt_graph_card(i18n::t("gpu_wattage"), gpu_max_watt);
     let watt_ui     = build_watt_card();
     let modes_ui    = build_modes_card();
+    let battery_ui  = build_battery_card();
 
     let cpu_history = Rc::new(RefCell::new(vec![(0.0f64, false); 60]));
     let gpu_history = Rc::new(RefCell::new(vec![(0.0f64, false); 60]));
@@ -745,6 +892,7 @@ pub fn build_page(is_general: bool) -> gtk::Box {
             .build();
         row2.append(&watt_ui.container);
         row2.append(&modes_ui.container);
+        row2.append(&battery_ui.container);
         sec.append(&row2);
     }
 
@@ -814,7 +962,107 @@ pub fn build_page(is_general: bool) -> gtk::Box {
             }
         }
 
+        if let Some(ref bat) = stats.battery {
+            dev_ui.battery_sep.set_visible(true);
+            dev_ui.battery_box.set_visible(true);
+
+            let frac = (bat.charge_pct as f64 / 100.0).clamp(0.0, 1.0);
+            dev_ui.battery_bar.set_fraction(frac);
+            if bat.charge_pct < 20 {
+                dev_ui.battery_bar.remove_css_class("os-prog-bat");
+                dev_ui.battery_bar.add_css_class("os-prog-bat-low");
+            } else {
+                dev_ui.battery_bar.remove_css_class("os-prog-bat-low");
+                dev_ui.battery_bar.add_css_class("os-prog-bat");
+            }
+
+            let status_text = match bat.status {
+                omen_types::BatteryStatus::Charging => {
+                    if bat.power_w > 0.0 {
+                        format!("{} (+{:.1}W)", i18n::t("bat_charging"), bat.power_w)
+                    } else {
+                        i18n::t("bat_charging").to_string()
+                    }
+                }
+                omen_types::BatteryStatus::Discharging => {
+                    if bat.power_w > 0.0 {
+                        format!("{} (-{:.1}W)", i18n::t("bat_discharging"), bat.power_w)
+                    } else {
+                        i18n::t("bat_discharging").to_string()
+                    }
+                }
+                omen_types::BatteryStatus::NotCharging => i18n::t("bat_not_charging").to_string(),
+                omen_types::BatteryStatus::Full => i18n::t("bat_full").to_string(),
+                omen_types::BatteryStatus::Unknown => "...".to_string(),
+            };
+            dev_ui.battery_status_label.set_label(&format!("{}% · {}", bat.charge_pct, status_text));
+
+            let val_text = match (bat.energy_now_wh, bat.energy_full_wh, bat.health_pct) {
+                (Some(now), Some(full), Some(h)) => format!("{:.1} / {:.1} Wh · {:.0}% {}", now, full, h, i18n::t("battery_health")),
+                (Some(now), Some(full), None) => format!("{:.1} / {:.1} Wh", now, full),
+                _ => format!("{}%", bat.charge_pct),
+            };
+            dev_ui.battery_val_label.set_label(&val_text);
+
+            let mut tip_parts = Vec::new();
+            if let Some(des) = bat.energy_design_wh {
+                tip_parts.push(format!("Design: {:.1} Wh", des));
+            }
+            if let Some(cycles) = bat.cycle_count {
+                tip_parts.push(format!("{}: {}", i18n::t("bat_cycles"), cycles));
+            }
+            if let Some(v) = bat.voltage_v {
+                tip_parts.push(format!("{:.2} V", v));
+            }
+            let tooltip = if tip_parts.is_empty() { None } else { Some(tip_parts.join(" | ")) };
+            dev_ui.battery_val_label.set_tooltip_text(tooltip.as_deref());
+            dev_ui.battery_bar.set_tooltip_text(tooltip.as_deref());
+        } else {
+            dev_ui.battery_sep.set_visible(false);
+            dev_ui.battery_box.set_visible(false);
+        }
+
         if !is_general {
+            if let Some(ref bat) = stats.battery {
+                battery_ui.container.set_visible(true);
+                battery_ui.charge_label.set_label(&format!("{}%", bat.charge_pct));
+
+                let status_text = match bat.status {
+                    omen_types::BatteryStatus::Charging => i18n::t("bat_charging"),
+                    omen_types::BatteryStatus::Discharging => i18n::t("bat_discharging"),
+                    omen_types::BatteryStatus::NotCharging => i18n::t("bat_not_charging"),
+                    omen_types::BatteryStatus::Full => i18n::t("bat_full"),
+                    omen_types::BatteryStatus::Unknown => "...",
+                };
+                battery_ui.status_label.set_label(status_text);
+
+                if let Some(h) = bat.health_pct {
+                    let cap_str = match (bat.energy_full_wh, bat.energy_design_wh) {
+                        (Some(f), Some(d)) => format!(" ({:.1} / {:.1} Wh)", f, d),
+                        _ => String::new(),
+                    };
+                    battery_ui.health_val.set_label(&format!("{:.1}%{}", h, cap_str));
+                } else {
+                    battery_ui.health_val.set_label("──");
+                }
+
+                if let Some(cycles) = bat.cycle_count {
+                    battery_ui.cycles_val.set_label(&cycles.to_string());
+                } else {
+                    battery_ui.cycles_val.set_label("──");
+                }
+
+                let pwr_str = if bat.power_w > 0.0 {
+                    format!("{:.1} W", bat.power_w)
+                } else {
+                    "0.0 W".to_string()
+                };
+                let volt_str = bat.voltage_v.map(|v| format!(" · {:.1} V", v)).unwrap_or_default();
+                battery_ui.power_val.set_label(&format!("{}{}", pwr_str, volt_str));
+            } else {
+                battery_ui.container.set_visible(false);
+            }
+
             let mut last = last_throttle.borrow_mut();
             let cpu_throttled = stats.cpu_throttle_count > *last && *last > 0 || stats.cpu_temp >= 95;
             let gpu_throttled = stats.gpu_temp >= 87 || (stats.gpu_load > 0.9 && stats.gpu_pwr >= 0.0 && stats.gpu_pwr < 20.0);

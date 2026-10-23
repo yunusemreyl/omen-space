@@ -306,6 +306,18 @@ pub fn get_hardware_specs() -> HardwareSpecs {
             })
             .unwrap_or_else(|| "Unknown".to_string());
 
+        // 10. Battery Spec
+        if let Some(bat) = crate::sysmon::battery::current_battery() {
+            let cap_wh = bat.energy_full_wh.or(bat.energy_design_wh).unwrap_or(0.0);
+            let health_str = bat.health_pct.map(|h| format!(" · {:.0}% Health", h)).unwrap_or_default();
+            let cycles_str = bat.cycle_count.map(|c| format!(" ({} cycles)", c)).unwrap_or_default();
+            if cap_wh > 0.0 {
+                specs.battery_spec = format!("{:.1} Wh Li-ion{}{}", cap_wh, health_str, cycles_str);
+            } else {
+                specs.battery_spec = format!("{}%{}", bat.charge_pct, health_str);
+            }
+        }
+
         specs
     }).clone()
 }

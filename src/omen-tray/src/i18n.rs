@@ -119,6 +119,12 @@ fn translate_tr(key: &'static str) -> &'static str {
         "tt_gpu_hybrid" => "Hibrit (Hybrid)",
         "tt_gpu_discrete" => "Harici (dGPU)",
         "tt_gpu_advanced" => "Advanced Optimus",
+        "tt_battery" => "Pil",
+        "battery_health" => "Sağlık",
+        "bat_charging" => "Şarj Oluyor",
+        "bat_discharging" => "Deşarj Oluyor",
+        "bat_not_charging" => "Şarj Olmuyor",
+        "bat_full" => "Tam Dolu",
         
         _ => translate_en(key),
     }
@@ -151,6 +157,12 @@ fn translate_en(key: &'static str) -> &'static str {
         "tt_gpu_hybrid" => "Hybrid",
         "tt_gpu_discrete" => "Discrete (dGPU)",
         "tt_gpu_advanced" => "Advanced Optimus",
+        "tt_battery" => "Battery",
+        "battery_health" => "Health",
+        "bat_charging" => "Charging",
+        "bat_discharging" => "Discharging",
+        "bat_not_charging" => "Not Charging",
+        "bat_full" => "Full",
         
         _ => key,
     }

@@ -408,9 +408,9 @@ pub async fn generate_rgb_issue_async() -> Result<String, Box<dyn std::error::Er
 pub fn get_hardware_specs_sync() -> HardwareSpecs {
     let json_str = tokio::task::block_in_place(|| {
         get_runtime().block_on(async {
-            match tokio::time::timeout(std::time::Duration::from_millis(500), get_hardware_specs_async()).await {
+            match tokio::time::timeout(std::time::Duration::from_millis(2500), get_hardware_specs_async()).await {
                 Ok(Ok(s)) => s,
-                               _ => "{}".to_string()
+                _ => "{}".to_string()
             }
         })
     });

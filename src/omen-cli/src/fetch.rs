@@ -115,7 +115,16 @@ pub async fn run_live_dashboard(conn: &zbus::Connection) -> Result<()> {
                 format!("\x1b[1;36m{}\x1b[0m: \x1b[1;32m{}\x1b[0m [PL1: {}W / PL2: {}W]", crate::i18n::t("power_profile"), power_active, pl1, pl2),
                 format!("\x1b[1;36m{}\x1b[0m: CPU: {}°C | GPU: {}°C | Fan1: {} RPM | Fan2: {} RPM [\x1b[33m{}\x1b[0m]", crate::i18n::t("thermal_fans"), cpu_temp, gpu_temp, fan1_rpm, fan2_rpm, fan_mode),
                 format!("\x1b[1;36m{}\x1b[0m: \x1b[1;35m{}\x1b[0m | \x1b[1;31mTGP\x1b[0m: {}W | \x1b[1;36mUV\x1b[0m: {}mV", crate::i18n::t("gpu_mux"), mux_mode, gpu_w, undervolt_mv),
-                format!("\x1b[1;36m{}\x1b[0m: {}% {} | \x1b[1;36mRGB\x1b[0m: {}", crate::i18n::t("battery_care"), battery_limit, crate::i18n::t("limit"), rgb_mode),
+                if let Some(bat) = sysmon_json.get("battery").filter(|b| !b.is_null()) {
+                    let charge = bat["charge_pct"].as_u64().unwrap_or(0);
+                    let health_str = bat["health_pct"].as_f64().map(|h| format!("{:.0}%", h)).unwrap_or_else(|| "N/A".into());
+                    let status_str = bat["status"].as_str().unwrap_or("Unknown");
+                    let limit_str = if battery_limit < 100 { format!(" (Care: {}%)", battery_limit) } else { String::new() };
+                    format!("\x1b[1;36mBattery\x1b[0m: {}% [{}] | \x1b[1;36mHealth\x1b[0m: {}{}", charge, status_str, health_str, limit_str)
+                } else {
+                    format!("\x1b[1;36m{}\x1b[0m: {}% {}", crate::i18n::t("battery_care"), battery_limit, crate::i18n::t("limit"))
+                },
+                format!("\x1b[1;36mRGB\x1b[0m: {}", rgb_mode),
                 format!("\x1b[1;36m{}\x1b[0m: {}", crate::i18n::t("conflicts"), if conflict_clean { format!("\x1b[32m{}\x1b[0m", crate::i18n::t("clean")) } else { format!("\x1b[31m{}\x1b[0m", crate::i18n::t("warning")) }),
                 "\x1b[40m   \x1b[41m   \x1b[42m   \x1b[43m   \x1b[44m   \x1b[45m   \x1b[46m   \x1b[47m   \x1b[0m".to_string(),
                 "\x1b[100m   \x1b[101m   \x1b[102m   \x1b[103m   \x1b[104m   \x1b[105m   \x1b[106m   \x1b[107m   \x1b[0m".to_string(),
@@ -312,7 +321,16 @@ pub async fn print_omen_fetch(conn: &zbus::Connection) -> Result<()> {
         format!("\x1b[1;36m{}\x1b[0m: \x1b[1;32m{}\x1b[0m [PL1: {}W / PL2: {}W]", crate::i18n::t("power_profile"), power_active, pl1, pl2),
         format!("\x1b[1;36m{}\x1b[0m: CPU: {}°C | GPU: {}°C | Fan1: {} RPM | Fan2: {} RPM [\x1b[33m{}\x1b[0m]", crate::i18n::t("thermal_fans"), cpu_temp, gpu_temp, fan1_rpm, fan2_rpm, fan_mode),
         format!("\x1b[1;36m{}\x1b[0m: \x1b[1;35m{}\x1b[0m | \x1b[1;31mTGP\x1b[0m: {}W | \x1b[1;36mUV\x1b[0m: {}mV", crate::i18n::t("gpu_mux"), mux_mode, gpu_w, undervolt_mv),
-        format!("\x1b[1;36m{}\x1b[0m: {}% {} | \x1b[1;36mRGB\x1b[0m: {}", crate::i18n::t("battery_care"), battery_limit, crate::i18n::t("limit"), rgb_mode),
+        if let Some(bat) = sysmon_json.get("battery").filter(|b| !b.is_null()) {
+            let charge = bat["charge_pct"].as_u64().unwrap_or(0);
+            let health_str = bat["health_pct"].as_f64().map(|h| format!("{:.0}%", h)).unwrap_or_else(|| "N/A".into());
+            let status_str = bat["status"].as_str().unwrap_or("Unknown");
+            let limit_str = if battery_limit < 100 { format!(" (Care: {}%)", battery_limit) } else { String::new() };
+            format!("\x1b[1;36mBattery\x1b[0m: {}% [{}] | \x1b[1;36mHealth\x1b[0m: {}{}", charge, status_str, health_str, limit_str)
+        } else {
+            format!("\x1b[1;36m{}\x1b[0m: {}% {}", crate::i18n::t("battery_care"), battery_limit, crate::i18n::t("limit"))
+        },
+        format!("\x1b[1;36mRGB\x1b[0m: {}", rgb_mode),
         format!("\x1b[1;36m{}\x1b[0m: {}", crate::i18n::t("conflicts"), if conflict_clean { format!("\x1b[32m{}\x1b[0m", crate::i18n::t("clean")) } else { format!("\x1b[31m{}\x1b[0m", crate::i18n::t("warning")) }),
         "\x1b[40m   \x1b[41m   \x1b[42m   \x1b[43m   \x1b[44m   \x1b[45m   \x1b[46m   \x1b[47m   \x1b[0m".to_string(),
         "\x1b[100m   \x1b[101m   \x1b[102m   \x1b[103m   \x1b[104m   \x1b[105m   \x1b[106m   \x1b[107m   \x1b[0m".to_string(),

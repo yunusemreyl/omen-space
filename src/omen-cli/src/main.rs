@@ -18,6 +18,8 @@ struct Cli {
 pub enum Commands {
     /// Show fastfetch / neofetch style OMEN system summary
     Fetch,
+    /// Live battery charge, health, and status
+    Battery,
     /// RGB keyboard lighting controls
     Rgb {
         #[command(subcommand)]
@@ -81,6 +83,7 @@ async fn main() -> Result<()> {
 async fn run_command(cmd: &Commands, conn: &zbus::Connection) -> Result<()> {
     match cmd {
         Commands::Fetch => fetch::print_omen_fetch(conn).await?,
+        Commands::Battery => commands::system::handle(&commands::system::SystemCommand::Battery, conn).await?,
         Commands::Rgb { cmd } => commands::rgb::handle(cmd, conn).await?,
         Commands::Fan { cmd } => commands::fan::handle(cmd, conn).await?,
         Commands::Power { cmd } => commands::power::handle(cmd, conn).await?,

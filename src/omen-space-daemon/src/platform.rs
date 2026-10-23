@@ -166,28 +166,46 @@ fn read_temp(path: &str) -> f64 {
 }
 
 fn get_battery_info() -> serde_json::Value {
-    let bat_base = "/sys/class/power_supply/BAT0";
-    if !Path::new(bat_base).exists() { return serde_json::Value::Object(serde_json::Map::new()); }
+    let Some(bat) = crate::sysmon::battery::current_battery() else {
+        return serde_json::Value::Object(serde_json::Map::new());
+    };
 
-    let mut bat = serde_json::Map::new();
-    let read = |name: &str| std::fs::read_to_string(format!("{}/{}", bat_base, name))
-        .map(|s| s.trim().to_string()).ok();
-
-    if let Some(s) = read("status") { bat.insert("status".into(), s.into()); }
-    if let Some(c) = read("capacity").and_then(|s| s.parse::<u32>().ok()) { bat.insert("capacity".into(), c.into()); }
-    if let Some(cc) = read("cycle_count").and_then(|s| s.parse::<u32>().ok()) { bat.insert("cycle_count".into(), cc.into()); }
-    if let (Some(cf), Some(cfd)) = (
-        read("charge_full").and_then(|s| s.parse::<u64>().ok()),
-        read("charge_full_design").and_then(|s| s.parse::<u64>().ok()),
-    ) {
-        if let Some(pct) = (cf * 100).checked_div(cfd) {
-            bat.insert("health".into(), pct.min(100).into());
+    let mut map = serde_json::Map::new();
+    map.insert("name".into(), bat.name.into());
+    map.insert(
+        "status".into(),
+        match bat.status {
+            omen_types::BatteryStatus::Charging => "Charging",
+            omen_types::BatteryStatus::Discharging => "Discharging",
+            omen_types::BatteryStatus::NotCharging => "Not charging",
+            omen_types::BatteryStatus::Full => "Full",
+            omen_types::BatteryStatus::Unknown => "Unknown",
         }
+        .into(),
+    );
+    map.insert("capacity".into(), (bat.charge_pct as u32).into());
+    if let Some(cc) = bat.cycle_count {
+        map.insert("cycle_count".into(), cc.into());
     }
-    if let Some(p) = read("power_now").and_then(|s| s.parse::<u64>().ok()) {
-        bat.insert("power_now".into(), (p as f64 / 1_000_000.0).into());
+    if let Some(h) = bat.health_pct {
+        map.insert("health".into(), (h.round() as u64).into());
     }
-    serde_json::Value::Object(bat)
+    map.insert("power_now".into(), bat.power_w.into());
+    if let Some(v) = bat.voltage_v {
+        map.insert("voltage_now".into(), v.into());
+    }
+    if let Some(w) = bat.energy_now_wh {
+        map.insert("energy_now_wh".into(), w.into());
+    }
+    if let Some(w) = bat.energy_full_wh {
+        map.insert("energy_full_wh".into(), w.into());
+    }
+    if let Some(w) = bat.energy_design_wh {
+        map.insert("energy_design_wh".into(), w.into());
+    }
+    map.insert("ac_online".into(), bat.ac_online.into());
+
+    serde_json::Value::Object(map)
 }
 
 // ── Service ───────────────────────────────────────────────────────────────────

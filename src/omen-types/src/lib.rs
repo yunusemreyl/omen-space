@@ -30,6 +30,39 @@ pub struct SystemStats {
     /// daemon's JSON, which simply has no such list.
     #[serde(default)]
     pub drives: Vec<DriveUsage>,
+    /// Live battery charge, health, cycle count, and power metrics. `None` on desktop systems
+    /// or when no system battery is present. `#[serde(default)]` preserves wire compatibility.
+    #[serde(default)]
+    pub battery: Option<BatteryTelemetry>,
+}
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BatteryStatus {
+    Charging,
+    Discharging,
+    NotCharging,
+    Full,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BatteryTelemetry {
+    pub name: String,
+    pub status: BatteryStatus,
+    pub charge_pct: u8,
+    pub health_pct: Option<f64>,
+    pub energy_now_wh: Option<f64>,
+    pub energy_full_wh: Option<f64>,
+    pub energy_design_wh: Option<f64>,
+    pub power_w: f64,
+    pub voltage_v: Option<f64>,
+    pub cycle_count: Option<u32>,
+    pub ac_online: bool,
+    pub charge_limit_pct: Option<u8>,
 }
 
 /// What kind of internal storage device a drive is. Unknown values sent by a newer daemon
@@ -86,6 +119,7 @@ pub struct DriveUsage {
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct HardwareSpecs {
     pub product_name: String,
     pub cpu_spec: String,
@@ -98,6 +132,9 @@ pub struct HardwareSpecs {
     pub vbios_version: String,
     pub nvidia_driver: String,
     pub kernel_version: String,
+    /// Primary battery description, e.g. "Primary Li-ion (55.6 Wh · 100% Health)". Empty on desktops.
+    #[serde(default)]
+    pub battery_spec: String,
     /// Every internal drive. Empty when talking to a daemon that predates this field,
     /// in which case clients fall back to the single `ssd_spec` line.
     #[serde(default)]

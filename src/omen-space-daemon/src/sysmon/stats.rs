@@ -315,6 +315,9 @@ pub fn fetch_system_stats() -> SystemStats {
     stats.board_verified =
         crate::capabilities::LinuxCapabilityClassifier::is_board_verified(board_id.trim());
 
+    // ── 10. Live Battery Telemetry ─────────────────────────────────────────
+    stats.battery = crate::sysmon::battery::current_battery();
+
     stats
 }
 

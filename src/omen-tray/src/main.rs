@@ -165,6 +165,7 @@ struct Tray {
     power_profile: String,
     fan_mode: String,
     gpu_mode: String,
+    battery_info: Option<String>,
 }
 
 impl ksni::Tray for Tray {
@@ -209,9 +210,13 @@ impl ksni::Tray for Tray {
             "advanced" => t("tt_gpu_advanced"),
             _ => t("tt_gpu_hybrid"),
         };
+        let mut desc = format!("{}: {}\n{}: {}\n{}: {}", t("tt_power"), p_label, t("tt_fan"), f_label, t("tt_gpu"), g_label);
+        if let Some(ref bat) = self.battery_info {
+            desc.push_str(&format!("\n{}: {}", t("tt_battery"), bat));
+        }
         ksni::ToolTip {
             title: "OMEN Space".into(),
-            description: format!("{}: {}\n{}: {}\n{}: {}", t("tt_power"), p_label, t("tt_fan"), f_label, t("tt_gpu"), g_label),
+            description: desc,
             icon_name: "omenspace".into(),
             ..Default::default()
         }
@@ -448,6 +453,31 @@ async fn fetch_gpu_mode() -> Option<String> {
     None
 }
 
+async fn fetch_battery_info() -> Option<Option<String>> {
+    if let Ok(conn) = get_conn().await {
+        if let Ok(proxy) = SysMonProxy::new(&conn).await {
+            if let Ok(diag_str) = proxy.get_diagnostics().await {
+                if let Ok(stats) = serde_json::from_str::<omen_types::SystemStats>(&diag_str) {
+                    if let Some(ref bat) = stats.battery {
+                        let status_str = match bat.status {
+                            omen_types::BatteryStatus::Charging => t("bat_charging"),
+                            omen_types::BatteryStatus::Discharging => t("bat_discharging"),
+                            omen_types::BatteryStatus::NotCharging => t("bat_not_charging"),
+                            omen_types::BatteryStatus::Full => t("bat_full"),
+                            omen_types::BatteryStatus::Unknown => "...",
+                        };
+                        let health_str = bat.health_pct.map(|h| format!(" · {:.0}% {}", h, t("battery_health"))).unwrap_or_default();
+                        return Some(Some(format!("{}% ({}){}", bat.charge_pct, status_str, health_str)));
+                    } else {
+                        return Some(None);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 async fn set_power_profile(profile: &str) {
     if let Ok(conn) = get_conn().await {
         if let Ok(proxy) = PowerProxy::new(&conn).await {
@@ -607,11 +637,13 @@ async fn main() {
     let initial_power = fetch_power_profile().await.unwrap_or_else(|| "balanced".into());
     let initial_fan = fetch_fan_mode().await.unwrap_or_else(|| "auto".into());
     let initial_gpu = fetch_gpu_mode().await.unwrap_or_else(|| "hybrid".into());
+    let initial_bat = fetch_battery_info().await.unwrap_or(None);
 
     let tray = Tray {
         power_profile: initial_power,
         fan_mode: initial_fan,
         gpu_mode: initial_gpu,
+        battery_info: initial_bat,
     };
 
     let service = ksni::TrayService::new(tray);
@@ -632,7 +664,8 @@ async fn main() {
         let p = fetch_power_profile().await;
         let f = fetch_fan_mode().await;
         let g = fetch_gpu_mode().await;
-        if p.is_some() || f.is_some() || g.is_some() {
+        let b = fetch_battery_info().await;
+        if p.is_some() || f.is_some() || g.is_some() || b.is_some() {
             handle.update(|tray| {
                 if let Some(new_p) = p {
                     tray.power_profile = new_p;
@@ -642,6 +675,9 @@ async fn main() {
                 }
                 if let Some(new_g) = g {
                     tray.gpu_mode = new_g;
+                }
+                if let Some(new_b) = b {
+                    tray.battery_info = new_b;
                 }
             });
         }
