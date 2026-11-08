@@ -10,10 +10,10 @@ obj-m += hp-omen-extra.o
 endif
 
 # Kernel build directory
-KDIR := /lib/modules/$(shell uname -r)/build
+KDIR ?= /lib/modules/$(shell uname -r)/build
 
-PKGNAME := $(shell grep -oP 'PACKAGE_NAME="\K[^"]+' dkms.conf)
-VERSION := $(shell grep -oP 'PACKAGE_VERSION="\K[^"]+' dkms.conf)
+PKGNAME := $(shell grep -oP 'PACKAGE_NAME="\K[^"]+' dkms.conf 2>/dev/null || echo "hp-omen-extra")
+VERSION := $(shell grep -oP 'PACKAGE_VERSION="\K[^"]+' dkms.conf 2>/dev/null || echo "1.3.5")
 
 # Current directory
 PWD := $(shell pwd)
@@ -23,12 +23,17 @@ LLVM_DETECTED := $(shell grep -iq clang /proc/version && echo 1 || echo 0)
 LLVM ?= $(LLVM_DETECTED)
 
 # Default target
-all:
+all: modules
+
+modules:
 ifeq ($(LLVM),1)
 	$(MAKE) LLVM=1 -C $(KDIR) M=$(PWD) modules
 else
 	$(MAKE) -C $(KDIR) M=$(PWD) modules
 endif
+
+modules_install:
+	$(MAKE) -C $(KDIR) M=$(PWD) modules_install
 
 # Clean target
 clean:

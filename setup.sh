@@ -238,9 +238,9 @@ do_build() {
     echo " Building OMENSpace (Daemon, CLI, GUI, Tray)"
     echo "====================================="
 
-    # FIX #268: On openSUSE Tumbleweed, libhidapi-hidraw is not available as a
-    # dynamic shared library. Switch to linux-static-hidraw before building.
-    if command -v zypper &> /dev/null; then
+    # FIX #268 & #349: On openSUSE Tumbleweed, libhidapi-hidraw is not available as a
+    # dynamic shared library. Switch to linux-static-hidraw before building if source exists.
+    if command -v zypper &> /dev/null && [ -f "$SCRIPT_DIR/src/omen-space-daemon/Cargo.toml" ]; then
         echo "[fix #268] openSUSE detected: switching daemon hidapi backend to linux-static-hidraw..."
         sed -i 's/linux-shared-hidraw/linux-static-hidraw/g' \
             "$SCRIPT_DIR/src/omen-space-daemon/Cargo.toml" || true
@@ -623,6 +623,10 @@ shift || true
 
 case "$COMMAND" in
     install)
+        if [ ! -f "$SCRIPT_DIR/Cargo.toml" ]; then
+            echo "Source tree not found in $SCRIPT_DIR; fetching repository..."
+            prepare_update_repo install "$@"
+        fi
         emit_step 1 15 "Checking system dependencies..."
         check_conflicting_power_managers
         install_dependencies

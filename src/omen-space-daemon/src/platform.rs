@@ -371,12 +371,24 @@ fn write_hwdb_rules(prtsc: bool, f1: bool) {
     if prtsc { lines.push(" KEYBOARD_KEY_b7=sysrq".to_string()); }
     if f1    { lines.push(" KEYBOARD_KEY_ab=f1".to_string()); }
     
-    // Always map macro keys to standard keysyms
+    // Always map macro keys to standard keysyms (P1..P6 for Omen 17 / 8A17 etc.)
     lines.push(" KEYBOARD_KEY_8c=calc".to_string());   // 140 -> Calculator
     lines.push(" KEYBOARD_KEY_94=prog1".to_string());  // 148 -> Omen Key
     lines.push(" KEYBOARD_KEY_95=prog2".to_string());  // 149 -> P1/P2/Prog2
     lines.push(" KEYBOARD_KEY_bf=f21".to_string());    // 191 -> f21
     lines.push(" KEYBOARD_KEY_100=prog3".to_string()); // 256 -> P3/Prog3
+    lines.push(" KEYBOARD_KEY_101=prog4".to_string());
+    lines.push(" KEYBOARD_KEY_102=f16".to_string());
+    lines.push(" KEYBOARD_KEY_103=f17".to_string());
+    lines.push(" KEYBOARD_KEY_104=f18".to_string());
+    // Also include DMI-specific matcher for 8A17 / Omen 17 programmable keys
+    lines.push("evdev:atkbd:dmi:bvn*:bvr*:bd*:svnHP*:pn*OMEN*17*:*".to_string());
+    lines.push(" KEYBOARD_KEY_95=f13".to_string());
+    lines.push(" KEYBOARD_KEY_100=f14".to_string());
+    lines.push(" KEYBOARD_KEY_101=f15".to_string());
+    lines.push(" KEYBOARD_KEY_102=f16".to_string());
+    lines.push(" KEYBOARD_KEY_103=f17".to_string());
+    lines.push(" KEYBOARD_KEY_104=f18".to_string());
     
     let content = lines.join("\n") + "\n";
 

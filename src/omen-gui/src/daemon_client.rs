@@ -20,7 +20,7 @@ pub fn get_runtime() -> &'static Runtime {
 
 static SHARED_CONN: tokio::sync::Mutex<Option<zbus::Connection>> = tokio::sync::Mutex::const_new(None);
 
-async fn get_conn() -> Result<zbus::Connection, zbus::Error> {
+pub async fn get_conn() -> Result<zbus::Connection, zbus::Error> {
     let mut guard = SHARED_CONN.lock().await;
     if let Some(conn) = &*guard {
         return Ok(conn.clone());
@@ -260,6 +260,29 @@ pub fn set_global_sync(power_val: bool, brightness_val: i32, direction_str: &str
     });
 }
 
+pub fn set_lightbar_color_sync(zone_val: i32, hex_color: String) {
+    let rt = get_runtime();
+    rt.spawn(async move {
+        if let Ok(conn) = get_conn().await {
+            if let Ok(proxy) = RgbProxy::new(&conn).await {
+                let _ = proxy.set_lightbar_color(zone_val, &hex_color).await;
+            }
+        }
+    });
+}
+
+pub fn set_lightbar_global_sync(power_val: bool, brightness_val: i32, mode_str: &str, speed_val: i32) {
+    let mode = mode_str.to_string();
+    let rt = get_runtime();
+    rt.spawn(async move {
+        if let Ok(conn) = get_conn().await {
+            if let Ok(proxy) = RgbProxy::new(&conn).await {
+                let _ = proxy.set_lightbar_global(power_val, brightness_val, &mode, speed_val).await;
+            }
+        }
+    });
+}
+
 pub async fn run_fan_cleaning_async() -> Result<String, Box<dyn std::error::Error>> {
     let conn = get_conn().await?;
     let proxy = PlatformProxy::new(&conn).await?;
@@ -301,6 +324,7 @@ pub enum DaemonStatus {
 
 static TELEMETRY_SENDERS: OnceLock<std::sync::Mutex<Vec<glib::Sender<SystemStats>>>> = OnceLock::new();
 static DAEMON_STATUS_SENDERS: OnceLock<std::sync::Mutex<Vec<glib::Sender<DaemonStatus>>>> = OnceLock::new();
+static CURRENT_DAEMON_STATUS: OnceLock<std::sync::Mutex<DaemonStatus>> = OnceLock::new();
 static TELEMETRY_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Subscribe to daemon online/offline transitions.
@@ -316,10 +340,18 @@ where
         glib::ControlFlow::Continue
     });
     let senders = DAEMON_STATUS_SENDERS.get_or_init(|| std::sync::Mutex::new(Vec::new()));
-    senders.lock().unwrap_or_else(|e| e.into_inner()).push(tx);
+    senders.lock().unwrap_or_else(|e| e.into_inner()).push(tx.clone());
+
+    if let Some(cur) = CURRENT_DAEMON_STATUS.get() {
+        let status = cur.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let _ = tx.send(status);
+    }
 }
 
 fn broadcast_daemon_status(status: DaemonStatus) {
+    let cur = CURRENT_DAEMON_STATUS.get_or_init(|| std::sync::Mutex::new(DaemonStatus::Offline));
+    *cur.lock().unwrap_or_else(|e| e.into_inner()) = status.clone();
+
     if let Some(mutex) = DAEMON_STATUS_SENDERS.get() {
         let mut senders = mutex.lock().unwrap_or_else(|e| e.into_inner());
         senders.retain(|tx| tx.send(status.clone()).is_ok());
@@ -352,9 +384,14 @@ where
                         if let Ok(mut stream) = proxy.receive_telemetry_updated().await {
                             // We successfully connected — broadcast Online if we weren't before
                             if !was_online {
-                                          broadcast_daemon_status(DaemonStatus::Online);
+                                was_online = true;
+                                broadcast_daemon_status(DaemonStatus::Online);
                             }
                             while let Some(signal) = stream.next().await {
+                                if !was_online {
+                                    was_online = true;
+                                    broadcast_daemon_status(DaemonStatus::Online);
+                                }
                                 if let Ok(args) = signal.args() {
                                     let json_str = args.json_stats();
                                     if let Ok(stats) = serde_json::from_str::<SystemStats>(json_str) {
@@ -688,6 +725,17 @@ pub fn set_per_key_colors_sync(colors: Vec<String>) {
                 if let Err(e) = proxy.set_per_key_colors(&json).await {
                     notify_dbus_error("Per-key RGB renkleri ayarlanamıyor", &e).await;
                 }
+            }
+        }
+    });
+}
+
+pub fn light_key_index_sync(index: u32, hex_color: String) {
+    let rt = get_runtime();
+    rt.spawn(async move {
+        if let Ok(conn) = get_conn().await {
+            if let Ok(proxy) = RgbProxy::new(&conn).await {
+                let _ = proxy.light_key_index(index, &hex_color).await;
             }
         }
     });

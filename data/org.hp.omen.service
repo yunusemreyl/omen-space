@@ -1,0 +1,5 @@
+[D-BUS Service]
+Name=org.hp.omen
+Exec=/usr/libexec/omen-space/omen-space-daemon
+User=root
+SystemdService=omen-space-daemon.service

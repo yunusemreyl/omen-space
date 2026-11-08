@@ -198,22 +198,20 @@ pub fn fetch_system_stats() -> SystemStats {
 
         if let Some(metrics) = fetch_gpu_metrics_with_timeout() {
             has_active_clients = metrics.has_clients;
-            if has_active_clients {
-                // Workload running: clear cooldown and stream live metrics
-                {
-                    let mut guard = GPU_IDLE_COOLDOWN.lock().unwrap_or_else(|e| e.into_inner());
-                    *guard = None;
-                }
+            if let Some(t) = metrics.temp {
+                stats.gpu_temp = t;
+            }
+            if let Some(p) = metrics.power {
+                stats.gpu_pwr = p;
+            }
+            if let Some(u) = metrics.util {
+                stats.gpu_load = u;
+            }
 
-                if let Some(t) = metrics.temp {
-                    stats.gpu_temp = t;
-                }
-                if let Some(p) = metrics.power {
-                    stats.gpu_pwr = p;
-                }
-                if let Some(u) = metrics.util {
-                    stats.gpu_load = u;
-                }
+            if has_active_clients {
+                // Workload running: clear cooldown
+                let mut guard = GPU_IDLE_COOLDOWN.lock().unwrap_or_else(|e| e.into_inner());
+                *guard = None;
             }
         }
         else {
@@ -224,8 +222,9 @@ pub fn fetch_system_stats() -> SystemStats {
             // Zero game/render clients detected. Arm 12s quiet window so kernel can suspend.
             let mut guard = GPU_IDLE_COOLDOWN.lock().unwrap_or_else(|e| e.into_inner());
             *guard = Some(std::time::Instant::now() + std::time::Duration::from_secs(12));
-            stats.gpu_temp = 0;
-            stats.gpu_pwr = -2.0;
+            if stats.gpu_pwr <= 0.0 {
+                stats.gpu_pwr = -2.0;
+            }
         }
     }
 

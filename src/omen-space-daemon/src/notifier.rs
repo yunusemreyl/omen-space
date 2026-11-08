@@ -11,6 +11,29 @@ pub struct DesktopNotifier;
 impl DesktopNotifier {
     /// Discover the active graphical desktop user's session environment `(user, display, dbus_addr, xdg_runtime, home)`.
     fn find_user_session_env() -> Option<(String, String, String, String, String)> {
+        // 1. Try systemd loginctl session discovery first (fast & reliable without procfs iteration)
+        if let Ok(output) = std::process::Command::new("loginctl").args(["list-sessions", "--no-legend"]).output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    let uid_str = parts[1];
+                    let user_name = parts[2];
+                    if let Ok(uid) = uid_str.parse::<u32>() {
+                        if uid >= 1000 && user_name != "root" {
+                            let xdg = format!("/run/user/{}", uid);
+                            let bus = format!("{}/bus", xdg);
+                            if std::path::Path::new(&bus).exists() {
+                                let home = format!("/home/{}", user_name);
+                                return Some((user_name.to_string(), ":0".to_string(), format!("unix:path={}", bus), xdg, home));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Fall back to /proc/*/environ scanning
         let entries = glob("/proc/*/environ").ok()?;
         for entry in entries.flatten() {
             let Ok(content) = std::fs::read(&entry) else { continue };

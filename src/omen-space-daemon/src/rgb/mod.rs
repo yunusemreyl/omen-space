@@ -187,6 +187,63 @@ impl RgbHardware {
         }
     }
 
+    fn write_zones_batch(&self, colors: &[String]) {
+        let Some(ref base) = self.driver_path else { return; };
+        let all_zones_path = format!("{}/all_zones", base);
+        if Path::new(&all_zones_path).exists() {
+            let mut mapped_colors = vec!["000000".to_string(); 4];
+            for i in 0..4 {
+                let actual = if self.zone_count == 4 {
+                    map_four_zone_index(&self.board_id, i)
+                } else {
+                    i
+                };
+                if actual < 4 {
+                    mapped_colors[actual] = colors.get(i).cloned().unwrap_or_else(|| "000000".to_string());
+                }
+            }
+            let payload = mapped_colors.join(" ");
+            let _ = std::fs::write(&all_zones_path, payload);
+            return;
+        }
+        for (i, c) in colors.iter().enumerate().take(self.zone_count as usize) {
+            self.write_zone(i, c);
+        }
+    }
+
+    fn write_lightbar(&self, colors: &[String]) {
+        let Some(ref base) = self.driver_path else { return; };
+        let lightbar_path = format!("{}/lightbar", base);
+        if Path::new(&lightbar_path).exists() {
+            // Purple-white workaround for OMEN firmware (#FFFFFF -> #FFFFFE)
+            let payload = colors.iter().take(4).map(|c| {
+                if c.eq_ignore_ascii_case("FFFFFF") {
+                    "FFFFFE".to_string()
+                } else {
+                    c.clone()
+                }
+            }).collect::<Vec<_>>().join(" ");
+            let _ = std::fs::write(&lightbar_path, payload);
+            return;
+        }
+        for (i, c) in colors.iter().take(4).enumerate() {
+            let led_path = format!("/sys/class/leds/hp::lightbar-{}/multi_intensity", i);
+            if Path::new(&led_path).exists() {
+                let (r, g, b) = parse_hex_color(c);
+                let _ = std::fs::write(&led_path, format!("{} {} {}", r, g, b));
+            }
+        }
+    }
+
+    fn has_lightbar(&self) -> bool {
+        if let Some(ref base) = self.driver_path {
+            if Path::new(&format!("{}/lightbar", base)).exists() {
+                return true;
+            }
+        }
+        Path::new("/sys/class/leds/hp::lightbar-0/multi_intensity").exists()
+    }
+
     fn write_mode(&self, mode: &str, speed: u32) {
         if !self.is_new_driver { return; }
         let Some(ref base) = self.driver_path else { return; };
@@ -275,16 +332,36 @@ impl HidPerKeyBackend {
                                             "/dev/{}",
                                             entry.file_name().unwrap_or_default().to_string_lossy()
                                         );
-                                        let is_vendor = Self::has_vendor_usage_page(&entry);
-                                        info!(
-                                            "Found HP Per-Key RGB hidraw node {} (VID={:04X} PID={:04X}, vendor_page={})",
-                                            dev_path, vid, pid, is_vendor
-                                        );
                                         found_pid = Some(pid);
-                                        if is_vendor {
-                                            vendor_paths.push(dev_path.clone());
+
+                                        if is_darfon {
+                                            // FIX #341 B.3 & #349: Darfon 0d62:54bf interface routing.
+                                            // Interface 2 is input-only (causes EPIPE on write).
+                                            // Interface 3 (MI_03) is vendor lighting control.
+                                            // Interface 4 (MI_04) is LampArray (requires AutonomousMode=1 unlock).
+                                            let dev_dir = entry.join("device");
+                                            let canonical = std::fs::canonicalize(&dev_dir).unwrap_or(dev_dir);
+                                            let path_str = canonical.to_string_lossy();
+                                            let is_if4 = path_str.contains(":1.4") || path_str.contains(".4/");
+                                            let is_if3 = path_str.contains(":1.3") || path_str.contains(".3/");
+
+                                            if is_if4 {
+                                                Self::unlock_darfon_lamparray(&dev_path);
+                                            } else if is_if3 {
+                                                info!("Found Darfon Lighting Control node (Interface 3): {}", dev_path);
+                                                vendor_paths.push(dev_path.clone());
+                                            }
+                                        } else {
+                                            let is_vendor = Self::has_vendor_usage_page(&entry);
+                                            info!(
+                                                "Found HP Per-Key RGB hidraw node {} (VID={:04X} PID={:04X}, vendor_page={})",
+                                                dev_path, vid, pid, is_vendor
+                                            );
+                                            if is_vendor {
+                                                vendor_paths.push(dev_path.clone());
+                                            }
+                                            all_paths.push(dev_path);
                                         }
-                                        all_paths.push(dev_path);
                                     }
                                 }
                             }
@@ -306,6 +383,71 @@ impl HidPerKeyBackend {
 
     fn is_available(&self) -> bool {
         !self.hidraw_paths.is_empty()
+    }
+
+    fn is_darfon(&self) -> bool {
+        self.device_pid == Some(0x54BF)
+    }
+
+    fn unlock_darfon_lamparray(path: &str) {
+        use std::os::fd::AsRawFd;
+        if let Ok(file) = std::fs::OpenOptions::new().read(true).write(true).open(path) {
+            let fd = file.as_raw_fd();
+            let report: [u8; 2] = [0x06, 0x01]; // Report 6, AutonomousMode = 1
+            const HIDIOCSFEATURE_2: libc::c_ulong = 0xC0024806;
+            unsafe {
+                libc::ioctl(fd, HIDIOCSFEATURE_2, report.as_ptr());
+            }
+            info!("Sent AutonomousMode=1 unlock feature report to Darfon LampArray at {}", path);
+        }
+    }
+
+    fn write_darfon_colors(&self, key_colors: &[(u8, u8, u8)]) -> bool {
+        // Step 1: Lighting enable prelude (CMD 0x09)
+        let mut on_pkt = [0u8; 64];
+        on_pkt[0] = 0x09;
+        on_pkt[2] = 0x01;
+        on_pkt[4] = 0x01;
+        let _ = self.write_packet(&on_pkt);
+
+        // Step 2: Map key_colors to 176 Darfon LED positions
+        let mut r_leds = [0u8; 176];
+        let mut g_leds = [0u8; 176];
+        let mut b_leds = [0u8; 176];
+
+        let total_keys = key_colors.len().max(1);
+        for (i, &(r, g, b)) in key_colors.iter().enumerate().take(104) {
+            let base_led = (i * 176) / total_keys;
+            let end_led = ((i + 1) * 176) / total_keys;
+            for led in base_led..end_led.min(176) {
+                r_leds[led] = r;
+                g_leds[led] = g;
+                b_leds[led] = b;
+            }
+        }
+
+        // Step 3: Write Red (0x05), Green (0x06), Blue (0x07) across 3 pages each
+        let channels = [(0x05u8, &r_leds), (0x06u8, &g_leds), (0x07u8, &b_leds)];
+        for (cmd, leds) in channels {
+            for chunk_idx in 0..3 {
+                let mut pkt = [0u8; 64];
+                pkt[0] = cmd;
+                pkt[1] = chunk_idx as u8;
+                pkt[2] = 0x3C; // 60 bytes payload
+                pkt[3] = 0x00;
+                let start_idx = chunk_idx * 60;
+                for led in 0..60 {
+                    let pos = start_idx + led;
+                    if pos < 176 {
+                        pkt[4 + led] = leds[pos];
+                    }
+                }
+                if !self.write_packet(&pkt) {
+                    return false;
+                }
+            }
+        }
+        true
     }
 
     fn build_packet(&self, sub_command: u8) -> [u8; Self::PACKET_SIZE] {
@@ -348,6 +490,9 @@ impl HidPerKeyBackend {
     }
 
     fn write_per_key_colors(&self, key_colors: &[(u8, u8, u8)]) -> bool {
+        if self.is_darfon() {
+            return self.write_darfon_colors(key_colors);
+        }
         let segment_count = key_colors.len().div_ceil(Self::KEYS_PER_SEGMENT);
         for seg in 0..segment_count {
             let mut packet = self.build_packet(Self::SUB_SET_COLORS);
@@ -507,7 +652,25 @@ struct RgbConfig {
     /// built-in effects instead of streaming frames from the daemon. Off by default.
     #[serde(default)]
     hw_effects: bool,
+    #[serde(default = "default_lightbar_colors")]
+    lightbar_colors: Vec<String>,
+    #[serde(default = "default_true")]
+    lightbar_power: bool,
+    #[serde(default = "default_100")]
+    lightbar_brightness: u32,
+    #[serde(default = "default_static")]
+    lightbar_mode: String,
+    #[serde(default = "default_50")]
+    lightbar_speed: u32,
 }
+
+fn default_lightbar_colors() -> Vec<String> {
+    vec!["E03454".to_string(), "0099EE".to_string(), "0099EE".to_string(), "E03454".to_string()]
+}
+fn default_true() -> bool { true }
+fn default_100() -> u32 { 100 }
+fn default_50() -> u32 { 50 }
+fn default_static() -> String { "static".to_string() }
 
 impl Default for RgbConfig {
     fn default() -> Self {
@@ -521,6 +684,11 @@ impl Default for RgbConfig {
             win_lock: false,
             zone_count_override: None,
             hw_effects: false,
+            lightbar_colors: default_lightbar_colors(),
+            lightbar_power: true,
+            lightbar_brightness: 100,
+            lightbar_mode: "static".to_string(),
+            lightbar_speed: 50,
         }
     }
 }
@@ -854,6 +1022,7 @@ impl RgbService {
 
             if has_old_sysfs {
                 let zone_count = g.hw.zone_count as usize;
+                let mut current_frame = Vec::with_capacity(zone_count);
                 for i in 0..zone_count {
                     let eff_idx = if direction == "ltr" { i } else { zone_count - 1 - i };
                     let (r, g_c, b) = compute_anim_color(&mode, step, eff_idx, zone_count, r1, g1, b1, r2, g2, b2);
@@ -863,11 +1032,9 @@ impl RgbService {
                         ((g_c as f64) * scaler) as u8,
                         ((b as f64) * scaler) as u8
                     );
-                    if g.color_cache.get(&i) != Some(&scaled) {
-                        g.hw.write_zone(i, &scaled);
-                        g.color_cache.insert(i, scaled);
-                    }
+                    current_frame.push(scaled);
                 }
+                g.hw.write_zones_batch(&current_frame);
             }
 
             drop(g);
@@ -927,6 +1094,20 @@ impl RgbService {
             }
         }
 
+        // ── Lightbar ────────────────────────────────────────────────────────────
+        if g.hw.available {
+            let lb_colors: Vec<String> = if !g.config.lightbar_power || g.config.lightbar_brightness == 0 {
+                vec!["000000".to_string(); 4]
+            } else {
+                let scaler = (g.config.lightbar_brightness as f64 / 100.0).clamp(0.0, 1.0);
+                (0..4).map(|i| {
+                    let raw = g.config.lightbar_colors.get(i).cloned().unwrap_or_else(|| "000000".to_string());
+                    scale_hex_color(&raw, scaler)
+                }).collect()
+            };
+            g.hw.write_lightbar(&lb_colors);
+        }
+
         // ── Standard sysfs driver ───────────────────────────────────────────────
         if !g.hw.available { return; }
 
@@ -940,20 +1121,24 @@ impl RgbService {
             g.hw.write_brightness(brightness);
             g.hw.write_mode(&mode, speed);
             if mode == "static" {
-                for i in 0..g.hw.zone_count as usize {
-                    let hex = colors.get(i).cloned().unwrap_or_else(|| colors[0].clone());
-                    g.hw.write_zone(i, &hex);
+                let count = g.hw.zone_count as usize;
+                let mut zone_colors = Vec::with_capacity(count);
+                for i in 0..count {
+                    zone_colors.push(colors.get(i).cloned().unwrap_or_else(|| colors[0].clone()));
                 }
+                g.hw.write_zones_batch(&zone_colors);
             }
         } else {
             g.hw.write_brightness(1);
             if mode == "static" {
                 let scaler = (brightness as f64 / 100.0).clamp(0.0, 1.0);
-                for i in 0..g.hw.zone_count as usize {
+                let count = g.hw.zone_count as usize;
+                let mut scaled_colors = Vec::with_capacity(count);
+                for i in 0..count {
                     let raw = colors.get(i).cloned().unwrap_or_else(|| colors[0].clone());
-                    let scaled = scale_hex_color(&raw, scaler);
-                    g.hw.write_zone(i, &scaled);
+                    scaled_colors.push(scale_hex_color(&raw, scaler));
                 }
+                g.hw.write_zones_batch(&scaled_colors);
             }
         }
     }
@@ -1026,6 +1211,45 @@ impl RgbService {
         "OK".to_string()
     }
 
+    /// SetLightbarColor(z, h)
+    async fn set_lightbar_color(&self, zone_val: i32, hex_color: String) -> String {
+        let hex = hex_color.trim_start_matches('#').to_uppercase();
+        if hex.len() != 6 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            return "FAIL".to_string();
+        }
+        {
+            let mut g = self.inner.lock().await;
+            if g.config.lightbar_colors.len() < 4 {
+                g.config.lightbar_colors.resize(4, "000000".to_string());
+            }
+            if zone_val == 4 {
+                for i in 0..4 { g.config.lightbar_colors[i] = hex.clone(); }
+            } else if (0..4).contains(&zone_val) {
+                g.config.lightbar_colors[zone_val as usize] = hex;
+            } else {
+                return "FAIL".to_string();
+            }
+            g.config.lightbar_power = true;
+            g.config.save();
+        }
+        Self::apply_state(self.inner.clone()).await;
+        "OK".to_string()
+    }
+
+    /// SetLightbarGlobal(power, brightness, mode, speed)
+    async fn set_lightbar_global(&self, power_val: bool, brightness_val: i32, mode_str: String, speed_val: i32) -> String {
+        {
+            let mut g = self.inner.lock().await;
+            g.config.lightbar_power = power_val;
+            g.config.lightbar_brightness = (brightness_val as u32).clamp(0, 100);
+            g.config.lightbar_mode = mode_str;
+            g.config.lightbar_speed = (speed_val as u32).clamp(1, 100);
+            g.config.save();
+        }
+        Self::apply_state(self.inner.clone()).await;
+        "OK".to_string()
+    }
+
     /// GetState — mirrors Python GetState().
     async fn get_state(&self) -> String {
         let g = self.inner.lock().await;
@@ -1047,6 +1271,12 @@ impl RgbService {
             "per_key_available": g.hid_per_key.is_available(),
             "hw_effects": g.config.hw_effects,
             "hid_device_pid": g.hid_per_key.device_pid.map(|p| format!("{:04X}", p)).unwrap_or_default(),
+            "has_lightbar": g.hw.has_lightbar(),
+            "lightbar_colors": g.config.lightbar_colors,
+            "lightbar_power": g.config.lightbar_power,
+            "lightbar_brightness": g.config.lightbar_brightness,
+            "lightbar_mode": g.config.lightbar_mode,
+            "lightbar_speed": g.config.lightbar_speed,
         });
         if !g.hw.available && !g.hid_per_key.is_available() {
             snap["unavailable_reason"] = serde_json::Value::String(
@@ -1251,7 +1481,14 @@ fn compute_anim_color(
             let b = (b1 as f64 * factor + b2 as f64 * (1.0 - factor)) as u8;
             (r, g, b)
         }
-        "rainbow" | "cycle" | "wave_rainbow" => {
+        "cycle" => {
+            let hue = step;
+            let r = ((hue.sin() * 127.0) + 128.0) as u8;
+            let g = (((hue + 2.0 * PI / 3.0).sin() * 127.0) + 128.0) as u8;
+            let b = (((hue + 4.0 * PI / 3.0).sin() * 127.0) + 128.0) as u8;
+            (r, g, b)
+        }
+        "rainbow" | "wave_rainbow" => {
             let hue = step + (eff_idx as f64 * (2.0 * PI / zone_count as f64));
             let r = ((hue.sin() * 127.0) + 128.0) as u8;
             let g = (((hue + 2.0 * PI / 3.0).sin() * 127.0) + 128.0) as u8;

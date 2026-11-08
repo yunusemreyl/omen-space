@@ -446,6 +446,16 @@ static const struct dmi_system_id victus_s_thermal_profile_boards[] __initconst 
 		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8A17")},
 		.driver_data = (void *)&omen_v1_legacy_thermal_params,
 	},
+	{
+		/* 88FA: OMEN by HP Laptop 16-c0xxx */
+		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "88FA")},
+		.driver_data = (void *)&omen_v1_unknown_ec_thermal_params,
+	},
+	{
+		/* 8E71: Victus by HP Gaming Laptop 15-fa1xxx */
+		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8E71")},
+		.driver_data = (void *)&victus_s_thermal_params,
+	},
 	{},
 };
 
@@ -3847,6 +3857,14 @@ static const struct dmi_system_id broken_omen_hpc_guid_boards[] __initconst = {
 	{
 		/* 8A17: OMEN by HP Laptop 17t-ck100 */
 		.matches = { DMI_MATCH(DMI_BOARD_NAME, "8A17") },
+	},
+	{
+		/* 88FA: OMEN by HP Laptop 16-c0xxx */
+		.matches = { DMI_MATCH(DMI_BOARD_NAME, "88FA") },
+	},
+	{
+		/* 8E71: Victus by HP Gaming Laptop 15-fa1xxx */
+		.matches = { DMI_MATCH(DMI_BOARD_NAME, "8E71") },
 	},
 	{}
 };

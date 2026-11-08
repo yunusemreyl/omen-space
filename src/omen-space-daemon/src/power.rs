@@ -169,9 +169,30 @@ impl PowerService {
             }
         }
 
+        const FIRMWARE_BASELINE_PATH: &str = "/var/lib/omen-space/firmware_rapl_baseline.json";
+        if let Ok(raw) = std::fs::read_to_string(FIRMWARE_BASELINE_PATH) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
+                let p1 = val.get("boot_pl1_w").and_then(|v| v.as_u64()).map(|v| v as u32);
+                let p2 = val.get("boot_pl2_w").and_then(|v| v.as_u64()).map(|v| v as u32);
+                if let (Some(pl1), Some(pl2)) = (p1, p2) {
+                    if (5..=250).contains(&pl1) && (5..=250).contains(&pl2) {
+                        return (pl1, pl2.max(pl1));
+                    }
+                }
+            }
+        }
+
         let (hw_pl1, hw_pl2) = Self::read_current_rapl_limits().await;
         let boot_pl1_w = hw_pl1.unwrap_or(45);
         let boot_pl2_w = hw_pl2.unwrap_or(115).max(boot_pl1_w);
+
+        let _ = std::fs::create_dir_all("/var/lib/omen-space");
+        let fw_payload = serde_json::json!({
+            "boot_pl1_w": boot_pl1_w,
+            "boot_pl2_w": boot_pl2_w,
+            "provenance": "firmware",
+        });
+        let _ = std::fs::write(FIRMWARE_BASELINE_PATH, fw_payload.to_string());
 
         if !boot_id.is_empty() {
             let _ = std::fs::create_dir_all("/run/omen-space");

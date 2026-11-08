@@ -46,11 +46,19 @@ pub fn build_interactive_lightbar(state_json_opt: &Option<serde_json::Value>) ->
     }
     let mut initial_colors = default_colors.iter().map(|s| s.to_string()).collect::<Vec<_>>();
     if let Some(state) = state_json_opt {
-        if let Some(zones) = state.get("zones").and_then(|z| z.as_object()) {
+        if let Some(lb_colors) = state.get("lightbar_colors").and_then(|z| z.as_array()) {
+            for i in 0..4 {
+                if let Some(hex) = lb_colors.get(i).and_then(|h| h.as_str()) {
+                    let formatted = if hex.starts_with('#') { hex.to_string() } else { format!("#{}", hex) };
+                    initial_colors[i] = formatted;
+                }
+            }
+        } else if let Some(zones) = state.get("zones").and_then(|z| z.as_object()) {
             for i in 0..4 {
                 let key = format!("{}", i + 4); // Lightbar zones are 4, 5, 6, 7
                 if let Some(hex) = zones.get(&key).and_then(|h| h.as_str()) {
-                    initial_colors[i] = hex.to_string();
+                    let formatted = if hex.starts_with('#') { hex.to_string() } else { format!("#{}", hex) };
+                    initial_colors[i] = formatted;
                 }
             }
         }
@@ -84,7 +92,7 @@ pub fn build_interactive_lightbar(state_json_opt: &Option<serde_json::Value>) ->
                 }
                 dyn_local.load_from_string(&css_str);
                 
-                // Assuming lightbar uses zones 4, 5, 6, 7
+                crate::daemon_client::set_lightbar_color_sync(i as i32, hex.clone());
                 let zone_id = 4 + i as i32;
                 crate::daemon_client::set_color_sync(zone_id, hex.clone());
             }));
@@ -112,6 +120,7 @@ pub fn build_interactive_lightbar(state_json_opt: &Option<serde_json::Value>) ->
                 ));
                 crate::daemon_client::set_color_sync((4 + i) as i32, hex.clone());
             }
+            crate::daemon_client::set_lightbar_color_sync(4, hex.clone());
             dyn_local.load_from_string(&css_str);
         }));
     });

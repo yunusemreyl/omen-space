@@ -130,16 +130,17 @@ pub fn fetch_gpu_metrics_with_timeout() -> Option<GpuMetrics> {
                     let mut power = None;
                     let mut util = None;
                     
-                    if has_clients {
-                        if let Ok(u) = device.utilization_rates() {
-                            util = Some(u.gpu as f64 / 100.0);
-                        }
-                        if let Ok(t) = device.temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu) {
-                            temp = Some(t as i32);
-                        }
-                        if let Ok(p) = device.power_usage() {
-                            power = Some(p as f64 / 1000.0);
-                        }
+                    // FIX #344 & #341 A.1: The dGPU is already awake in D0 (check_nvidia_state() == Some(true)).
+                    // Querying metrics when awake does NOT wake a sleeping card.
+                    // Always read temperature, power, and utilization whenever NVML device is open.
+                    if let Ok(u) = device.utilization_rates() {
+                        util = Some(u.gpu as f64 / 100.0);
+                    }
+                    if let Ok(t) = device.temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu) {
+                        temp = Some(t as i32);
+                    }
+                    if let Ok(p) = device.power_usage() {
+                        power = Some(p as f64 / 1000.0);
                     }
                     let res = GpuMetrics { has_clients, temp, power, util };
                     let _ = tx.send(res.clone());
@@ -186,27 +187,20 @@ pub fn get_safe_gpu_temp() -> f64 {
     // to prevent hanging Tokio's blocking pool during NVIDIA power state transitions
     if let Some(metrics) = fetch_gpu_metrics_with_timeout() {
         has_active_clients = metrics.has_clients;
+        if let Some(t) = metrics.temp {
+            gpu_temp = t as f64;
+        }
         if has_active_clients {
-            // Active game/render client: clear cooldown and sample real temperature
-            {
-                let mut guard = GPU_IDLE_COOLDOWN.lock().unwrap_or_else(|e| e.into_inner());
-                *guard = None;
-            }
-            if let Some(t) = metrics.temp {
-                gpu_temp = t as f64;
-            }
+            // Active game/render client: clear cooldown
+            let mut guard = GPU_IDLE_COOLDOWN.lock().unwrap_or_else(|e| e.into_inner());
+            *guard = None;
+        } else {
+            // Card is awake in D0, but zero applications are using it.
+            // Arm 12s quiet window so the kernel's autosuspend timer can finish cleanly.
+            let mut guard = GPU_IDLE_COOLDOWN.lock().unwrap_or_else(|e| e.into_inner());
+            *guard = Some(std::time::Instant::now() + std::time::Duration::from_secs(12));
         }
     } else {
-        // NVML timeout (likely hanging in D3cold transition). Return 0.0 safely.
-        return 0.0;
-    }
-
-
-    if !has_active_clients {
-        // Card is awake in D0, but zero applications are using it.
-        // Start 12s quiet window so the kernel's autosuspend timer can finish cleanly.
-        let mut guard = GPU_IDLE_COOLDOWN.lock().unwrap_or_else(|e| e.into_inner());
-        *guard = Some(std::time::Instant::now() + std::time::Duration::from_secs(12));
         return 0.0;
     }
 

@@ -22,6 +22,14 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
         }
         state_json_opt = Some(state_json);
     }
+    let board_id = std::fs::read_to_string("/sys/class/dmi/id/board_name")
+        .unwrap_or_default()
+        .trim()
+        .to_uppercase();
+    let per_key_boards = ["8D41", "8D87", "8D88", "8A17", "8BD4", "8A44", "8901"];
+    if per_key_boards.iter().any(|b| board_id.contains(b)) {
+        is_per_key = true;
+    }
 
     let mut zone_override = 0;
     if let Ok(home) = std::env::var("HOME") {
@@ -81,13 +89,24 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
     glib::spawn_future_local(async move {
         if let Ok(json) = crate::daemon_client::get_rgb_state_async().await {
             if let Ok(state) = serde_json::from_str::<serde_json::Value>(&json) {
-                if let Some(zones) = state.get("zones").and_then(|z| z.as_object()) {
+                if let Some(colors) = state.get("colors").and_then(|c| c.as_array()) {
+                    let mut loaded_colors = zc_load.borrow_mut();
+                    for (idx, v) in colors.iter().enumerate() {
+                        if let Some(hex) = v.as_str() {
+                            if idx < loaded_colors.len() {
+                                let formatted = if hex.starts_with('#') { hex.to_string() } else { format!("#{}", hex) };
+                                loaded_colors[idx] = formatted;
+                            }
+                        }
+                    }
+                } else if let Some(zones) = state.get("zones").and_then(|z| z.as_object()) {
                     let mut loaded_colors = zc_load.borrow_mut();
                     for (i, v) in zones.iter() {
                         if let Ok(idx) = i.parse::<usize>() {
                             if let Some(hex) = v.as_str() {
                                 if idx < loaded_colors.len() {
-                                    loaded_colors[idx] = hex.to_string();
+                                    let formatted = if hex.starts_with('#') { hex.to_string() } else { format!("#{}", hex) };
+                                    loaded_colors[idx] = formatted;
                                 }
                             }
                         }
@@ -139,7 +158,7 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
                 3 => "cycle",
                 _ => "static",
             };
-            crate::daemon_client::set_mode_sync(mode, *lbs_c2.borrow() as i32);
+            crate::daemon_client::set_lightbar_global_sync(true, 100, mode, *lbs_c2.borrow() as i32);
         });
         lb_group.add(&lb_effect_row);
 
@@ -165,7 +184,7 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
                 3 => "cycle",
                 _ => "static",
             };
-            crate::daemon_client::set_mode_sync(mode, speed as i32);
+            crate::daemon_client::set_lightbar_global_sync(true, 100, mode, speed as i32);
         });
 
         let lb_bright_row = adw::ActionRow::builder().title(crate::i18n::t("lightbar_brightness")).build();
@@ -182,7 +201,7 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
         
         lb_bright_scale.connect_value_changed(move |scale| {
             let val = scale.value() as i32;
-            crate::daemon_client::set_global_sync(val > 0, val, "ltr");
+            crate::daemon_client::set_lightbar_global_sync(val > 0, val, "static", 50);
         });
 
         page.add(&lb_group);
@@ -205,6 +224,7 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
             lb_speed_row_c.set_visible(is_active);
             lb_bright_row_c.set_visible(is_active);
             lb_preview_group_c.set_visible(is_active);
+            crate::daemon_client::set_lightbar_global_sync(is_active, 100, "static", 50);
         });
         let lb_prod_lower = specs.product_name.to_lowercase();
         let has_lightbar_hardware = detected_mode == KeyboardMode::DesktopRgb || lb_prod_lower.contains("desktop") || lb_prod_lower.contains("transcend") || lb_prod_lower.contains("max");

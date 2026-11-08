@@ -18,6 +18,7 @@ mod desktop_rgb_gui;
 mod updater;
 mod daemon_client;
 mod asset_resolver;
+mod debug_center;
 const APP_ID: &str = "org.hp.OmenSpace";
 
 fn ensure_tray_running() {
@@ -361,6 +362,12 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
 
 
 
+    let page_debug = debug_center::build_page(window);
+    page_debug.set_margin_top(m);
+    page_debug.set_margin_start(m);
+    page_debug.set_margin_end(m);
+    page_debug.set_margin_bottom(m);
+
     stack.add_named(&gen_box, Some("performance"));
     stack.add_named(&page_undervolt, Some("undervolt"));
     stack.add_named(&page_mux, Some("mux"));
@@ -369,6 +376,7 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
     stack.add_named(&page_app_profiles, Some("appprof"));
     stack.add_named(&page_updater, Some("updater"));
     stack.add_named(&page_settings, Some("settings"));
+    stack.add_named(&page_debug, Some("debug"));
 
     stack.set_visible_child_name(initial_page);
 
@@ -448,10 +456,36 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
     sidebar_labels.push(s_revealer.clone());
     s_box.append(&s_revealer);
     settings_row.set_child(Some(&s_box));
+    settings_row.set_widget_name("settings");
     bottom_list.append(&settings_row);
+
+    let debug_row = gtk::ListBoxRow::builder().name("debug").build();
+    let d_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(0)
+        .margin_start(12)
+        .margin_end(12)
+        .margin_top(11)
+        .margin_bottom(11)
+        .build();
+    d_box.append(&gtk::Image::builder().icon_name("applications-engineering-symbolic").pixel_size(18).build());
+    let debug_label = gtk::Label::builder().label(i18n::t("nav_debug")).margin_start(12).build();
+    let d_revealer = gtk::Revealer::builder()
+        .transition_type(gtk::RevealerTransitionType::SlideRight)
+        .reveal_child(true)
+        .transition_duration(250)
+        .child(&debug_label)
+        .build();
+    sidebar_labels.push(d_revealer.clone());
+    d_box.append(&d_revealer);
+    debug_row.set_child(Some(&d_box));
+    debug_row.set_widget_name("debug");
+    bottom_list.append(&debug_row);
 
     if initial_page == "settings" {
         bottom_list.select_row(Some(&settings_row));
+    } else if initial_page == "debug" {
+        bottom_list.select_row(Some(&debug_row));
     } else {
         let mut selected = false;
         let mut idx = 0;

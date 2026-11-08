@@ -15,7 +15,7 @@
         packages = {
           omen-space = pkgs.rustPlatform.buildRustPackage {
             pname = "omen-space";
-            version = "2.2.0";
+            version = "2.2.1";
 
             src = ./.;
 
@@ -57,6 +57,7 @@
               mkdir -p $out/lib/sysusers.d
               mkdir -p $out/lib/udev/rules.d
               mkdir -p $out/share/dbus-1/system.d
+              mkdir -p $out/share/dbus-1/system-services
               mkdir -p $out/share/dbus-1/services
               mkdir -p $out/share/applications
               mkdir -p $out/share/pixmaps
@@ -72,6 +73,7 @@
               cp data/sysusers.d/omen-space.conf $out/lib/sysusers.d/
               cp data/99-omen-space.rules $out/lib/udev/rules.d/
               cp data/org.hp.omen.conf $out/share/dbus-1/system.d/
+              cp data/org.hp.omen.service $out/share/dbus-1/system-services/
               cp data/org.hp.OmenSpace.desktop $out/share/applications/
               cp data/org.hp.OmenSpace.service $out/share/dbus-1/services/
               cp src/omen-gui/assets/omenspace.png $out/share/pixmaps/
@@ -79,6 +81,10 @@
 
               # Fix systemd paths
               find $out/lib/systemd/system -type f -exec sed -i "s|/usr/libexec|$out/libexec|g" {} +
+
+              # Fix D-Bus system-service paths
+              substituteInPlace $out/share/dbus-1/system-services/org.hp.omen.service \
+                --replace-fail "/usr/libexec/omen-space/omen-space-daemon" "$out/libexec/omen-space/omen-space-daemon"
 
               substituteInPlace $out/lib/systemd/system/omen-space-daemon.service \
                 --replace-fail "ExecStartPre=/bin/sleep 2" "ExecStartPre=${pkgs.coreutils}/bin/sleep 2" \
@@ -133,21 +139,19 @@
             boot.kernelModules = [ "hp-wmi" "hp-omen-extra" ];
 
             boot.extraModulePackages = [
-              (pkgs.linuxPackages.callPackage ({ stdenv, kernel }: stdenv.mkDerivation {
+              (config.boot.kernelPackages.callPackage ({ stdenv, lib, kernel }: stdenv.mkDerivation {
                 pname = "omen-space-driver";
-                version = "2.2.0";
+                version = "2.2.1";
                 src = "${self.packages.${system}.omen-space.src}/driver";
                 hardeningDisable = [ "pic" ];
                 nativeBuildInputs = kernel.moduleBuildDependencies;
-                makeFlags = [
-                  "KERNELRELEASE=${kernel.modDirVersion}"
+                makeFlags = (kernel.makeFlags or []) ++ [
                   "KDIR=${kernel.dev}/lib/modules/${kernel.modDirVersion}/build"
+                  "M=$(PWD)"
                   "INSTALL_MOD_PATH=$(out)"
                 ];
-                installPhase = ''
-                  make -C ${kernel.dev}/lib/modules/${kernel.modDirVersion}/build M=$(pwd) INSTALL_MOD_PATH=$out modules_install
-                '';
-              }) { kernel = config.boot.kernelPackages.kernel; })
+                installTargets = [ "modules_install" ];
+              }) {})
             ];
           };
         };

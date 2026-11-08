@@ -85,10 +85,34 @@ pub fn build_interactive_keyboard(
     btn_zone.set_group(Some(&btn_off));
     btn_all.set_group(Some(&btn_off));
     
-    let sm_o = sel_mode.clone(); btn_off.connect_toggled(move |b| if b.is_active() { *sm_o.borrow_mut() = SelectionMode::Off; });
-    let sm_k = sel_mode.clone(); btn_key.connect_toggled(move |b| if b.is_active() { *sm_k.borrow_mut() = SelectionMode::Key; });
-    let sm_z = sel_mode.clone(); btn_zone.connect_toggled(move |b| if b.is_active() { *sm_z.borrow_mut() = SelectionMode::Zone; });
-    let sm_a = sel_mode.clone(); btn_all.connect_toggled(move |b| if b.is_active() { *sm_a.borrow_mut() = SelectionMode::All; });
+    let sm_o = sel_mode.clone();
+    btn_off.connect_toggled(move |b| {
+        if b.is_active() {
+            *sm_o.borrow_mut() = SelectionMode::Off;
+            crate::daemon_client::set_global_sync(false, 0, "ltr");
+        }
+    });
+    let sm_k = sel_mode.clone();
+    btn_key.connect_toggled(move |b| {
+        if b.is_active() {
+            *sm_k.borrow_mut() = SelectionMode::Key;
+            crate::daemon_client::set_global_sync(true, 100, "ltr");
+        }
+    });
+    let sm_z = sel_mode.clone();
+    btn_zone.connect_toggled(move |b| {
+        if b.is_active() {
+            *sm_z.borrow_mut() = SelectionMode::Zone;
+            crate::daemon_client::set_global_sync(true, 100, "ltr");
+        }
+    });
+    let sm_a = sel_mode.clone();
+    btn_all.connect_toggled(move |b| {
+        if b.is_active() {
+            *sm_a.borrow_mut() = SelectionMode::All;
+            crate::daemon_client::set_global_sync(true, 100, "ltr");
+        }
+    });
     
     sel_btns_box.append(&btn_off);
     sel_btns_box.append(&btn_key);

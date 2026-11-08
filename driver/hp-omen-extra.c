@@ -48,6 +48,8 @@ enum hp_wmi_backlight_commandtype {
   HPWMI_COLOR_SET_QUERY = 0x03,
   HPWMI_BRIGHTNESS_GET_QUERY = 0x04,
   HPWMI_BRIGHTNESS_SET_QUERY = 0x05,
+  HPWMI_LIGHTBAR_GET_QUERY = 0x0A,
+  HPWMI_LIGHTBAR_SET_QUERY = 0x0B,
 };
 
 
@@ -243,6 +245,140 @@ static ssize_t zone_store(struct device *dev, struct device_attribute *attr,
   return ret ? -EIO : count;
 }
 
+/* ── all_zones: batch write/read all zones in a single WMI call ── */
+static ssize_t all_zones_show(struct device *dev, struct device_attribute *attr,
+                              char *buf) {
+  u8 tbl[COLOR_TABLE_SIZE];
+  int ret, z, offset = 0;
+
+  memset(tbl, 0, sizeof(tbl));
+  ret = hp_wmi_perform_query(HPWMI_COLOR_GET_QUERY, HPWMI_BACKLIGHT, tbl,
+                             sizeof(tbl), sizeof(tbl));
+  if (ret)
+    return -EIO;
+
+  for (z = 0; z < 4; z++) {
+    offset += sysfs_emit_at(buf, offset, "%s%02X%02X%02X",
+                            z > 0 ? " " : "",
+                            tbl[COLOR_OFFSET + z * 3 + 0],
+                            tbl[COLOR_OFFSET + z * 3 + 1],
+                            tbl[COLOR_OFFSET + z * 3 + 2]);
+  }
+  offset += sysfs_emit_at(buf, offset, "\n");
+  return offset;
+}
+
+static ssize_t all_zones_store(struct device *dev, struct device_attribute *attr,
+                               const char *buf, size_t count) {
+  u8 tbl[COLOR_TABLE_SIZE];
+  int ret, z = 0;
+  const char *cur = buf;
+  char token[32];
+
+  memset(tbl, 0, sizeof(tbl));
+  ret = hp_wmi_perform_query(HPWMI_COLOR_GET_QUERY, HPWMI_BACKLIGHT, tbl,
+                             sizeof(tbl), sizeof(tbl));
+  if (ret)
+    return -EIO;
+
+  while (*cur && z < RGB_ZONE_COUNT) {
+    while (*cur == ' ' || *cur == '\t' || *cur == ',' || *cur == '\n') cur++;
+    if (!*cur) break;
+    int len = 0;
+    while (cur[len] && cur[len] != ' ' && cur[len] != '\t' && cur[len] != ',' && cur[len] != '\n' && len < 31)
+      len++;
+    memcpy(token, cur, len);
+    token[len] = '\0';
+    cur += len;
+
+    u32 rgb = 0;
+    if (kstrtou32(token, 16, &rgb) == 0) {
+      tbl[COLOR_OFFSET + z * 3 + 0] = (rgb >> 16) & 0xFF;
+      tbl[COLOR_OFFSET + z * 3 + 1] = (rgb >> 8) & 0xFF;
+      tbl[COLOR_OFFSET + z * 3 + 2] = rgb & 0xFF;
+      z++;
+    }
+  }
+
+  if (z == 0)
+    return -EINVAL;
+
+  ret = hp_wmi_perform_query(HPWMI_COLOR_SET_QUERY, HPWMI_BACKLIGHT, tbl,
+                             sizeof(tbl), sizeof(tbl));
+  return ret ? -EIO : count;
+}
+
+/* ── lightbar: support 4-zone lightbar controls via query 0x0B / 0x03 ── */
+static ssize_t lightbar_show(struct device *dev, struct device_attribute *attr,
+                             char *buf) {
+  u8 tbl[COLOR_TABLE_SIZE];
+  int ret;
+
+  memset(tbl, 0, sizeof(tbl));
+  ret = hp_wmi_perform_query(HPWMI_LIGHTBAR_GET_QUERY, HPWMI_BACKLIGHT, tbl,
+                             sizeof(tbl), sizeof(tbl));
+  if (ret) {
+    ret = hp_wmi_perform_query(HPWMI_COLOR_GET_QUERY, HPWMI_BACKLIGHT, tbl,
+                               sizeof(tbl), sizeof(tbl));
+  }
+  if (ret)
+    return -EIO;
+
+  return sysfs_emit(buf, "%02X%02X%02X %02X%02X%02X %02X%02X%02X %02X%02X%02X\n",
+                    tbl[COLOR_OFFSET + 0], tbl[COLOR_OFFSET + 1], tbl[COLOR_OFFSET + 2],
+                    tbl[COLOR_OFFSET + 3], tbl[COLOR_OFFSET + 4], tbl[COLOR_OFFSET + 5],
+                    tbl[COLOR_OFFSET + 6], tbl[COLOR_OFFSET + 7], tbl[COLOR_OFFSET + 8],
+                    tbl[COLOR_OFFSET + 9], tbl[COLOR_OFFSET + 10], tbl[COLOR_OFFSET + 11]);
+}
+
+static ssize_t lightbar_store(struct device *dev, struct device_attribute *attr,
+                              const char *buf, size_t count) {
+  u8 tbl[COLOR_TABLE_SIZE];
+  int ret, z = 0;
+  const char *cur = buf;
+  char token[32];
+
+  memset(tbl, 0, sizeof(tbl));
+  ret = hp_wmi_perform_query(HPWMI_LIGHTBAR_GET_QUERY, HPWMI_BACKLIGHT, tbl,
+                             sizeof(tbl), sizeof(tbl));
+  if (ret) {
+    ret = hp_wmi_perform_query(HPWMI_COLOR_GET_QUERY, HPWMI_BACKLIGHT, tbl,
+                               sizeof(tbl), sizeof(tbl));
+  }
+  if (ret)
+    return -EIO;
+
+  while (*cur && z < 4) {
+    while (*cur == ' ' || *cur == '\t' || *cur == ',' || *cur == '\n') cur++;
+    if (!*cur) break;
+    int len = 0;
+    while (cur[len] && cur[len] != ' ' && cur[len] != '\t' && cur[len] != ',' && cur[len] != '\n' && len < 31)
+      len++;
+    memcpy(token, cur, len);
+    token[len] = '\0';
+    cur += len;
+
+    u32 rgb = 0;
+    if (kstrtou32(token, 16, &rgb) == 0) {
+      tbl[COLOR_OFFSET + z * 3 + 0] = (rgb >> 16) & 0xFF;
+      tbl[COLOR_OFFSET + z * 3 + 1] = (rgb >> 8) & 0xFF;
+      tbl[COLOR_OFFSET + z * 3 + 2] = rgb & 0xFF;
+      z++;
+    }
+  }
+
+  if (z == 0)
+    return -EINVAL;
+
+  ret = hp_wmi_perform_query(HPWMI_LIGHTBAR_SET_QUERY, HPWMI_BACKLIGHT, tbl,
+                             sizeof(tbl), sizeof(tbl));
+  if (ret) {
+    ret = hp_wmi_perform_query(HPWMI_COLOR_SET_QUERY, HPWMI_BACKLIGHT, tbl,
+                               sizeof(tbl), sizeof(tbl));
+  }
+  return ret ? -EIO : count;
+}
+
 /* ── brightness on/off ── */
 static ssize_t brightness_show(struct device *dev,
                                struct device_attribute *attr, char *buf) {
@@ -336,14 +472,17 @@ static DEVICE_ATTR(zone4, 0644, zone_show, zone_store);
 static DEVICE_ATTR(zone5, 0644, zone_show, zone_store);
 static DEVICE_ATTR(zone6, 0644, zone_show, zone_store);
 static DEVICE_ATTR(zone7, 0644, zone_show, zone_store);
+static DEVICE_ATTR_RW(all_zones);
+static DEVICE_ATTR_RW(lightbar);
 static DEVICE_ATTR_RW(brightness);
 static DEVICE_ATTR_RW(win_lock);
 
 static struct attribute *hp_omen_extra_attrs[] = {
     &dev_attr_zone0.attr, &dev_attr_zone1.attr, &dev_attr_zone2.attr,
     &dev_attr_zone3.attr, &dev_attr_zone4.attr, &dev_attr_zone5.attr,
-    &dev_attr_zone6.attr, &dev_attr_zone7.attr, &dev_attr_brightness.attr,
-    &dev_attr_win_lock.attr, NULL,
+    &dev_attr_zone6.attr, &dev_attr_zone7.attr,
+    &dev_attr_all_zones.attr, &dev_attr_lightbar.attr,
+    &dev_attr_brightness.attr, &dev_attr_win_lock.attr, NULL,
 };
 ATTRIBUTE_GROUPS(hp_omen_extra);
 

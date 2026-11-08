@@ -412,23 +412,41 @@ impl FanService {
             return true;
         }
 
-        let duty = if pct == 0 {
-            0
+        let (duty, effective_pct) = if pct == 0 {
+            (0, 0)
         } else {
-            let d = Self::pct_to_pwm(pct);
-            if d > 0 && d < 50 { 50 } else { d }
+            // FIX #346: Enforce safe spinning duty (min 35% / duty 89, ~2000 RPM)
+            // On HP OMEN/Victus fans, PWM duties below 80 cause the fan motor to stall at 0 RPM.
+            let safe_pct = pct.max(35);
+            let d = Self::pct_to_pwm(safe_pct);
+            (if d > 0 && d < 89 { 89 } else { d }, safe_pct)
         };
 
         // If the hardware does not expose a manual PWM node, intermediate duty cycles cannot be set
         if !sysfs_exists(&pwm_path).await {
             if sysfs_exists(&pwm_enable_path).await {
                 let current = sysfs_read(&pwm_enable_path, 2).await;
-                if current != 2 {
-                    let _ = sysfs_write(&pwm_enable_path, "2").await;
+                let target_mode = if pct == 0 { 2 } else { 1 };
+                if current != target_mode {
+                    let _ = sysfs_write(&pwm_enable_path, target_mode.to_string()).await;
                 }
             }
             state.last_written_duty = Some(duty);
             state.last_written_duty_time = Some(now);
+            return true;
+        }
+
+        // For pct == 0 in Auto/Quiet: delegate to BIOS auto mode (pwm1_enable=2) to allow 0 RPM fan stop (#347)
+        if pct == 0 {
+            if sysfs_exists(&pwm_enable_path).await {
+                let _ = sysfs_write(&pwm_enable_path, "2").await;
+            }
+            let _ = sysfs_write(&pwm_path, "0").await;
+            state.last_written_duty = Some(0);
+            state.last_written_duty_time = Some(now);
+            for &fan_num in &state.found_fans.clone() {
+                state.last_targets.insert(fan_num, 0);
+            }
             return true;
         }
 
@@ -457,9 +475,15 @@ impl FanService {
             state.last_written_duty = Some(duty);
             state.last_written_duty_time = Some(now);
             let max_speed = state.max_speeds.values().max().copied().unwrap_or(6000);
-            let rpm = ((max_speed as f64 * pct as f64) / 100.0).round() as u32;
+            let rpm = ((max_speed as f64 * effective_pct as f64) / 100.0).round() as u32;
             for &fan_num in &state.found_fans.clone() {
                 state.last_targets.insert(fan_num, rpm);
+                if let Some(ref hwmon) = state.hwmon_path {
+                    let target_path = hwmon.join(format!("fan{}_target", fan_num));
+                    if sysfs_exists(&target_path).await {
+                        let _ = sysfs_write(&target_path, rpm.to_string()).await;
+                    }
+                }
             }
             true
         } else {
@@ -516,10 +540,11 @@ impl FanService {
             let (mode, curve_json, fans, thermal_active, manual_pct) = {
                 let mut state = self.state.lock().await;
 
-                // Fan-Stall Detection (#301 / #311): If temp >= 75°C while all discovered hwmon fans
-                // explicitly report Some(0) RPM for 5 consecutive seconds, trigger an emergency Max Fan kick
-                // and send a critical desktop alert. Missing/unreadable telemetry (None) does NOT count as 0 RPM.
-                if temp >= 75.0 && !state.found_fans.is_empty() {
+                // Fan-Stall Detection (#301 / #311 / #346):
+                // Only trigger stall kick if fans were actively commanded to spin (duty >= 80)
+                // and temp >= 78°C while all discovered hwmon fans explicitly report 0 RPM for 5s.
+                let commanded_duty = state.last_written_duty.unwrap_or(0);
+                if temp >= 78.0 && commanded_duty >= 80 && !state.found_fans.is_empty() {
                     let (all_confirmed_zero, any_unreadable) = if let Some(ref hwmon) = state.hwmon_path {
                         let mut all_zero = true;
                         let mut unreadable = false;
@@ -619,9 +644,12 @@ impl FanService {
                     });
                 }
                 
-                // Thermal Protection Logic ALWAYS uses raw temp for safety
-                if state.thermal_protection_enabled && temp > THERMAL_PROTECTION_TRIGGER_TEMP && !state.thermal_protection_active {
-                    warn!("Temperature exceeded {}°C ({}°C). Activating Thermal Protection Mode (Max Fan).", THERMAL_PROTECTION_TRIGGER_TEMP, temp);
+                // Thermal Protection Logic: requires sustained high load (smoothed_temp >= 91.0 or 3s)
+                // so transient 1-second turbo spikes to 96°C do not blast fans at 100% until 82°C (#341 A.4, #349).
+                let is_sustained_overheat = temp > THERMAL_PROTECTION_TRIGGER_TEMP && (smoothed_temp >= 91.0 || temp >= 99.0);
+                if state.thermal_protection_enabled && is_sustained_overheat && !state.thermal_protection_active {
+                    warn!("Sustained temperature exceeded {}°C (raw: {:.1}°C, smoothed: {:.1}°C). Activating Thermal Protection Mode (Max Fan).",
+                        THERMAL_PROTECTION_TRIGGER_TEMP, temp, smoothed_temp);
                     state.thermal_protection_active = true;
                     state.thermal_protection_entered_at = std::time::Instant::now();
                     state.pre_protection_mode = Some(state.mode.clone());
@@ -769,11 +797,12 @@ impl FanService {
                         // When in performance power mode, we don't turn off the fans.
                         Self::evaluate_step(&perf_curve, smoothed_temp).round() as u32
                     } else {
-                        // Standard Auto curve (Step-based)
+                        // Standard Auto curve (Step-based) with 0 RPM fan stop support (< 48°C) (#347)
                         let auto_curve = vec![
-                            CurvePoint(0.0,  0.0),   
-                            CurvePoint(50.0, 40.0),  
-                            CurvePoint(60.0, 55.0),
+                            CurvePoint(0.0,   0.0),   
+                            CurvePoint(48.0,  0.0),   
+                            CurvePoint(52.0, 35.0),  
+                            CurvePoint(65.0, 55.0),
                             CurvePoint(75.0, 75.0),
                             CurvePoint(85.0, 100.0),
                         ];
@@ -786,11 +815,11 @@ impl FanService {
                                 0
                             }
                         } else {
-                            if smoothed_temp < 43.0 {
+                            if smoothed_temp < 45.0 {
                                 0
                             } else {
                                 let pct = Self::evaluate_step(&auto_curve, smoothed_temp);
-                                (pct.round() as u32).max(40) // Enforce minimum fan speed while ON
+                                (pct.round() as u32).max(35) // Enforce minimum safe spinning speed while ON
                             }
                         }
                     };
@@ -895,7 +924,18 @@ impl FanService {
                     if !curve_points.is_empty() {
                         curve_points.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
                         let pct = Self::evaluate_spline(&curve_points, smoothed_temp);
-                        let target_pct = (pct.round() as u32).clamp(0, 100);
+                        let mut target_pct = (pct.round() as u32).clamp(0, 100);
+                        // FIX #346: Fan-stop (0%) is only permitted when temp < 50°C.
+                        // At or above 50°C, always enforce minimum safe spinning duty (35%) so fans never stall.
+                        if target_pct <= 5 {
+                            if smoothed_temp < 50.0 {
+                                target_pct = 0;
+                            } else {
+                                target_pct = 35;
+                            }
+                        } else if target_pct < 35 {
+                            target_pct = 35;
+                        }
                         
                         let mut state = self.state.lock().await;
                         Self::write_pwm_duty(&mut state, target_pct).await;

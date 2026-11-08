@@ -37,13 +37,15 @@
 
           nativeBuildInputs = kernel.moduleBuildDependencies;
 
-          makeFlags = [
+          makeFlags = (kernel.makeFlags or []) ++ [
             "KDIR=${kernel.dev}/lib/modules/${kernel.modDirVersion}/build"
+            "M=$(PWD)"
+            "INSTALL_MOD_PATH=$(out)"
           ];
 
           enableParallelBuilding = true;
 
-          installFlags = [ "INSTALL_MOD_PATH=$(out)" ];
+          installTargets = [ "modules_install" ];
 
           meta = {
             description = "Linux kernel module for HP Laptops";

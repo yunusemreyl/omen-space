@@ -398,6 +398,8 @@ pub fn drive_usage(
         if let Some(fs) = group.iter().find_map(|m| statvfs(&m.mountpoint)) {
             slot.used_bytes = slot.used_bytes.saturating_add(fs.used);
             slot.total_bytes = slot.total_bytes.saturating_add(fs.total);
+        } else if let Some(blk_size) = block_size_bytes(sys_root, group[0]) {
+            slot.total_bytes = slot.total_bytes.saturating_add(blk_size);
         }
     }
     usage

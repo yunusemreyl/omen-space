@@ -183,6 +183,7 @@ fn translate_tr(key: &'static str) -> &'static str {
         "nav_overlay" => "Hızlı Menü",
         "nav_updater" => "Güncelleme Merkezi",
         "nav_settings" => "Ayarlar",
+        "nav_debug" => "Debug Merkezi",
 
         // Titles
         "title_performance" => "Performans",
@@ -195,6 +196,8 @@ fn translate_tr(key: &'static str) -> &'static str {
         "title_overlay" => "Oyun İçi Hızlı Menü (Shift+F2)",
         "title_updater" => "Güncelleme Merkezi",
         "title_settings" => "Ayarlar",
+        "title_debug" => "Debug ve Tanılama Merkezi",
+        "debug_desc" => "Donanım testi, EC/WMI tanılaması, sensör denetimi ve sorun giderme raporları",
 
         // Overlay Page & Settings
         "overlay_desc" => "Kısayol tuşu ile oyun içi hızlı menüyü yapılandırın, konumunu ve kısayolunu özelleştirin.",
@@ -616,6 +619,7 @@ fn translate_en(key: &'static str) -> &'static str {
         "nav_overlay" => "Quick Overlay",
         "nav_updater" => "Update Center",
         "nav_settings" => "Settings",
+        "nav_debug" => "Debug Center",
 
         // Titles
         "title_performance" => "Performance",
@@ -628,6 +632,8 @@ fn translate_en(key: &'static str) -> &'static str {
         "title_overlay" => "Quick HUD Overlay (Shift+F2)",
         "title_updater" => "Update Center",
         "title_settings" => "Settings",
+        "title_debug" => "Debug & Diagnostics Center",
+        "debug_desc" => "Hardware tests, EC/WMI diagnostics, live sensor inspection, and triage reports",
 
         // Overlay Page & Settings
         "overlay_desc" => "Configure position, hotkey, and test the in-game floating HUD overlay.",
@@ -1051,6 +1057,7 @@ fn translate_es(key: &'static str) -> &'static str {
         "nav_overlay" => "Superposición rápida",
         "nav_updater" => "Centro de actualizaciones",
         "nav_settings" => "Ajustes",
+        "nav_debug" => "Centro de Depuración",
 
         // Titles
         "title_performance" => "Rendimiento",
@@ -1062,6 +1069,8 @@ fn translate_es(key: &'static str) -> &'static str {
         "title_overlay" => "Superposición HUD rápida (Shift+F2)",
         "title_updater" => "Centro de actualizaciones",
         "title_settings" => "Ajustes",
+        "title_debug" => "Centro de Depuración y Diagnóstico",
+        "debug_desc" => "Pruebas de hardware, diagnóstico EC/WMI, inspección de sensores e informes",
 
         // Overlay Page & Settings
         "overlay_desc" => "Configura y prueba la superposición HUD flotante dentro del juego, activada con Shift+F2.",

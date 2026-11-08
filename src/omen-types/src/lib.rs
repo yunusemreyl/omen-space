@@ -132,6 +132,8 @@ pub struct HardwareSpecs {
     pub vbios_version: String,
     pub nvidia_driver: String,
     pub kernel_version: String,
+    #[serde(default)]
+    pub board_name: String,
     /// Primary battery description, e.g. "Primary Li-ion (55.6 Wh · 100% Health)". Empty on desktops.
     #[serde(default)]
     pub battery_spec: String,
@@ -197,6 +199,8 @@ pub trait Rgb {
     async fn set_color(&self, zone_val: i32, hex_color: &str) -> zbus::Result<String>;
     async fn set_mode(&self, mode_str: &str, speed_val: i32) -> zbus::Result<String>;
     async fn set_global(&self, power_val: bool, brightness_val: i32, direction_str: &str) -> zbus::Result<String>;
+    async fn set_lightbar_color(&self, zone_val: i32, hex_color: &str) -> zbus::Result<String>;
+    async fn set_lightbar_global(&self, power_val: bool, brightness_val: i32, mode_str: &str, speed_val: i32) -> zbus::Result<String>;
     async fn get_state(&self) -> zbus::Result<String>;
     async fn set_per_key_colors(&self, colors_json: &str) -> zbus::Result<String>;
     async fn set_hw_effects(&self, enabled: bool) -> zbus::Result<String>;
