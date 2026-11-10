@@ -381,6 +381,7 @@ fn write_hwdb_rules(prtsc: bool, f1: bool) {
     lines.push(" KEYBOARD_KEY_102=f16".to_string());
     lines.push(" KEYBOARD_KEY_103=f17".to_string());
     lines.push(" KEYBOARD_KEY_104=f18".to_string());
+    lines.push(String::new()); // hwdb records must be separated by a blank line.
     // Also include DMI-specific matcher for 8A17 / Omen 17 programmable keys
     lines.push("evdev:atkbd:dmi:bvn*:bvr*:bd*:svnHP*:pn*OMEN*17*:*".to_string());
     lines.push(" KEYBOARD_KEY_95=f13".to_string());

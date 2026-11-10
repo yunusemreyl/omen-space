@@ -257,7 +257,7 @@ static ssize_t all_zones_show(struct device *dev, struct device_attribute *attr,
   if (ret)
     return -EIO;
 
-  for (z = 0; z < 4; z++) {
+  for (z = 0; z < RGB_ZONE_COUNT; z++) {
     offset += sysfs_emit_at(buf, offset, "%s%02X%02X%02X",
                             z > 0 ? " " : "",
                             tbl[COLOR_OFFSET + z * 3 + 0],

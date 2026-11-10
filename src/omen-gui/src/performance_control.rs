@@ -52,17 +52,7 @@ pub fn build_page() -> gtk::Box {
                 dot.add_css_class("daemon-dot-off");
             }
         });
-        // Set initial state based on ping
-        let dot_init = daemon_dot.clone();
-        glib::timeout_add_local_once(std::time::Duration::from_millis(200), move || {
-            if crate::daemon_client::ping_daemon_sync() {
-                dot_init.remove_css_class("daemon-dot-off");
-                dot_init.add_css_class("daemon-dot-on");
-            } else {
-                dot_init.remove_css_class("daemon-dot-on");
-                dot_init.add_css_class("daemon-dot-off");
-            }
-        });
+
     }
 
     page.append(&gtk::Label::builder()

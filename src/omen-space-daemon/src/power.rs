@@ -127,8 +127,7 @@ struct AppState {
 pub struct PowerService {
     config: Arc<Mutex<PowerConfig>>,
     app_state: Arc<Mutex<AppState>>,
-    boot_pl1_w: u32,
-    boot_pl2_w: u32,
+    rapl_baseline: Option<(crate::rapl_baseline::Baseline, bool)>,
 }
 
 impl PowerService {
@@ -146,65 +145,15 @@ impl PowerService {
         (p1, p2)
     }
 
-    async fn load_or_capture_boot_rapl_baseline() -> (u32, u32) {
-        const BASELINE_PATH: &str = "/run/omen-space/rapl_baseline.json";
-        let boot_id = std::fs::read_to_string("/proc/sys/kernel/random/boot_id")
-            .unwrap_or_default()
-            .trim()
-            .to_string();
-
-        if !boot_id.is_empty() {
-            if let Ok(raw) = std::fs::read_to_string(BASELINE_PATH) {
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
-                    if val.get("boot_id").and_then(|v| v.as_str()) == Some(boot_id.as_str()) {
-                        let p1 = val.get("boot_pl1_w").and_then(|v| v.as_u64()).map(|v| v as u32);
-                        let p2 = val.get("boot_pl2_w").and_then(|v| v.as_u64()).map(|v| v as u32);
-                        if let (Some(pl1), Some(pl2)) = (p1, p2) {
-                            if (5..=250).contains(&pl1) && (5..=250).contains(&pl2) {
-                                return (pl1, pl2.max(pl1));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        const FIRMWARE_BASELINE_PATH: &str = "/var/lib/omen-space/firmware_rapl_baseline.json";
-        if let Ok(raw) = std::fs::read_to_string(FIRMWARE_BASELINE_PATH) {
-            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
-                let p1 = val.get("boot_pl1_w").and_then(|v| v.as_u64()).map(|v| v as u32);
-                let p2 = val.get("boot_pl2_w").and_then(|v| v.as_u64()).map(|v| v as u32);
-                if let (Some(pl1), Some(pl2)) = (p1, p2) {
-                    if (5..=250).contains(&pl1) && (5..=250).contains(&pl2) {
-                        return (pl1, pl2.max(pl1));
-                    }
-                }
-            }
-        }
-
-        let (hw_pl1, hw_pl2) = Self::read_current_rapl_limits().await;
-        let boot_pl1_w = hw_pl1.unwrap_or(45);
-        let boot_pl2_w = hw_pl2.unwrap_or(115).max(boot_pl1_w);
-
-        let _ = std::fs::create_dir_all("/var/lib/omen-space");
-        let fw_payload = serde_json::json!({
-            "boot_pl1_w": boot_pl1_w,
-            "boot_pl2_w": boot_pl2_w,
-            "provenance": "firmware",
-        });
-        let _ = std::fs::write(FIRMWARE_BASELINE_PATH, fw_payload.to_string());
-
-        if !boot_id.is_empty() {
-            let _ = std::fs::create_dir_all("/run/omen-space");
-            let payload = serde_json::json!({
-                "boot_id": boot_id,
-                "boot_pl1_w": boot_pl1_w,
-                "boot_pl2_w": boot_pl2_w,
-            });
-            let _ = std::fs::write(BASELINE_PATH, payload.to_string());
-        }
-
-        (boot_pl1_w, boot_pl2_w)
+    async fn load_or_capture_boot_rapl_baseline() -> Option<(crate::rapl_baseline::Baseline,bool)> {
+        let boot_id = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap_or_default();
+        let (pl1,pl2) = Self::read_current_rapl_limits().await;
+        crate::rapl_baseline::load_or_capture(
+            std::path::Path::new("/var/lib/omen-space-daemon/rapl_baseline.json"),
+            std::path::Path::new("/run/omen-space/rapl_baseline.json"),
+            std::path::Path::new("/var/lib/omen-space/firmware_rapl_baseline.json"),
+            boot_id.trim(),pl1.zip(pl2),
+        )
     }
 
     pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
@@ -212,11 +161,10 @@ impl PowerService {
         // Detect real hardware profile on start
         config.power_profile = Self::detect_current_profile().await;
 
-        // Capture firmware/boot RAPL PL1 & PL2 BEFORE applying any saved overrides (#311, #338)
-        let (boot_pl1_w, boot_pl2_w) = Self::load_or_capture_boot_rapl_baseline().await;
+        // The first observed state may already include earlier userspace tuning.
+        let rapl_baseline = Self::load_or_capture_boot_rapl_baseline().await;
         if !config.pl_enabled {
-            config.pl1_w = boot_pl1_w;
-            config.pl2_w = boot_pl2_w;
+            if let Some((b,_)) = &rapl_baseline { config.pl1_w=b.pl1_w; config.pl2_w=b.pl2_w; }
         }
 
         let app_state = Arc::new(Mutex::new(AppState {
@@ -228,8 +176,7 @@ impl PowerService {
         let svc = Self {
             config: Arc::new(Mutex::new(config)),
             app_state: app_state.clone(),
-            boot_pl1_w,
-            boot_pl2_w,
+            rapl_baseline,
         };
 
         // Re-apply saved limits on startup (mirrors Python _apply_power_tuning)
@@ -840,8 +787,11 @@ impl PowerService {
             "tcc_offset": cfg.tcc_offset,
             "pl1_w": real_pl1,
             "pl2_w": real_pl2,
-            "boot_pl1_w": self.boot_pl1_w,
-            "boot_pl2_w": self.boot_pl2_w,
+            "boot_pl1_w": self.rapl_baseline.as_ref().map(|(b,_)| b.pl1_w),
+            "boot_pl2_w": self.rapl_baseline.as_ref().map(|(b,_)| b.pl2_w),
+            "baseline_available": self.rapl_baseline.is_some(),
+            "baseline_provenance": self.rapl_baseline.as_ref().map(|(b,_)| &b.provenance),
+            "baseline_persisted": self.rapl_baseline.as_ref().is_some_and(|(_,persisted)| *persisted),
             "pl_enabled": cfg.pl_enabled,
             "gpu_w": cfg.gpu_w,
         });
@@ -886,18 +836,19 @@ impl PowerService {
     /// SetPowerLimits — mirrors Python SetPowerLimits(enabled, pl1, pl2).
     async fn set_power_limits(&self, enabled: bool, pl1: i32, pl2: i32) -> String {
         // Strict range validation (same as Python)
-        if !(1..=200).contains(&pl1) {
+        if enabled && !(1..=200).contains(&pl1) {
             warn!("SetPowerLimits: pl1={} out of safe range [1, 200]", pl1);
             return "FAIL".to_string();
         }
-        if !(1..=250).contains(&pl2) {
+        if enabled && !(1..=250).contains(&pl2) {
             warn!("SetPowerLimits: pl2={} out of safe range [1, 250]", pl2);
             return "FAIL".to_string();
         }
         let pl2 = pl2.max(pl1); // clamp: pl2 must >= pl1
 
-        let target_pl1 = if enabled { pl1 as u32 } else { self.boot_pl1_w };
-        let target_pl2 = if enabled { pl2 as u32 } else { self.boot_pl2_w };
+        let (target_pl1,target_pl2) = if enabled { (pl1 as u32,pl2 as u32) }
+        else if let Some((b,_)) = &self.rapl_baseline { (b.pl1_w,b.pl2_w) }
+        else { return "FAIL: no observed power-limit baseline is available".to_string(); };
 
         {
             let mut cfg = self.config.lock().await;

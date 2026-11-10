@@ -161,3 +161,94 @@ pub fn draw_rounded_rect(cr: &gtk::cairo::Context, x: f64, y: f64, w: f64, h: f6
     cr.arc(x + r, y + r, r, std::f64::consts::PI, 3.0 * std::f64::consts::FRAC_PI_2);
     cr.close_path();
 }
+
+/// None means metadata is unknown; runtime detection can still be used.
+pub fn board_per_key_rgb(board_id: &str) -> Option<bool> {
+    let db: serde_json::Value = serde_json::from_str(include_str!("../../../omen-space-daemon/src/boards.json")).ok()?;
+    db["models"].as_array()?.iter()
+        .find(|m| m["product_id"].as_str().is_some_and(|id| id.eq_ignore_ascii_case(board_id.trim())))?
+        .get("has_per_key_rgb")?.as_bool()
+}
+
+#[cfg(test)]
+mod board_tests {
+    #[test]
+    fn capabilities_match_the_authoritative_board_database() {
+        assert_eq!(super::board_per_key_rgb("8D41"),Some(true));
+        for board in ["8901","8A17","8BD4"] { assert_eq!(super::board_per_key_rgb(board),Some(false)); }
+        assert_eq!(super::board_per_key_rgb("unknown"),None);
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LightbarSettings {
+    pub power: bool, pub brightness: i32, pub mode: String, pub speed: i32,
+}
+impl LightbarSettings {
+    pub fn from_snapshot(v: &serde_json::Value) -> Option<Self> {
+        Some(Self {
+            power: v.get("lightbar_power")?.as_bool()?,
+            brightness: v.get("lightbar_brightness")?.as_i64()?.clamp(0,100) as i32,
+            mode: v.get("lightbar_mode")?.as_str()?.to_string(),
+            speed: v.get("lightbar_speed")?.as_i64()?.clamp(1,100) as i32,
+        })
+    }
+    pub fn send(&self) {
+        crate::daemon_client::set_lightbar_global_sync(self.power,self.brightness,&self.mode,self.speed);
+    }
+}
+impl Default for LightbarSettings {
+    fn default() -> Self { Self {power:true,brightness:100,mode:"static".into(),speed:50} }
+}
+
+#[cfg(test)]
+mod lightbar_tests {
+    use super::*;
+    #[test]
+    fn independent_control_changes_preserve_saved_fields() {
+        let snapshot=serde_json::json!({"lightbar_power":false,"lightbar_brightness":5,"lightbar_mode":"breathing","lightbar_speed":17});
+        let saved=LightbarSettings::from_snapshot(&snapshot).unwrap();
+        let mut state=saved.clone();state.speed=23;
+        assert_eq!(state.brightness,5);assert!(!state.power);assert_eq!(state.mode,"breathing");
+        state.power=true;assert_eq!(state.brightness,5);assert_eq!(state.speed,23);
+        assert!(LightbarSettings::from_snapshot(&serde_json::json!({})).is_none());
+    }
+}
+
+pub fn fill_all_key_slots(colors: &mut [String], color: &str) { colors.fill(color.to_string()); }
+#[cfg(test)]
+mod all_key_tests {
+    #[test] fn all_includes_the_six_slots_absent_from_the_preview() {
+        let mut frame=vec!["0099ED".to_string();104];
+        super::fill_all_key_slots(&mut frame,"FF0000");
+        assert_eq!(frame.len(),104);assert!(frame.iter().all(|c|c=="FF0000"));
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct KeyboardGlobals { pub power:bool, pub brightness:i32, pub direction:String }
+impl KeyboardGlobals {
+    pub fn from_snapshot(v:Option<&serde_json::Value>) -> Self {
+        Self {
+            power:v.and_then(|v|v["power"].as_bool()).unwrap_or(true),
+            brightness:v.and_then(|v|v["brightness"].as_i64()).unwrap_or(100).clamp(0,100) as i32,
+            direction:v.and_then(|v|v["direction"].as_str()).unwrap_or("ltr").to_string(),
+        }
+    }
+    pub fn send(&self) {crate::daemon_client::set_global_sync(self.power,self.brightness,&self.direction);}
+}
+
+/// Runtime HID evidence takes precedence over an optional board capability hint.
+pub fn detect_per_key_rgb(board_id: &str, runtime_available: bool) -> bool {
+    runtime_available || board_per_key_rgb(board_id).unwrap_or(false)
+}
+#[cfg(test)]
+mod capability_detection_tests {
+    #[test] fn board_metadata_never_downgrades_detected_hardware() {
+        assert!(!super::detect_per_key_rgb("8901",false));
+        assert!(super::detect_per_key_rgb("8901",true));
+        assert!(super::detect_per_key_rgb("8D41",false));
+        assert!(super::detect_per_key_rgb("unknown",true));
+        assert!(!super::detect_per_key_rgb("unknown",false));
+    }
+}

@@ -189,14 +189,19 @@ pub fn fetch_system_stats() -> SystemStats {
     if has_nvidia && !is_nvidia_awake {
         stats.gpu_temp = 0;
         stats.gpu_pwr = -1.0;
+        stats.gpu_sample_state = omen_types::GpuSampleState::Suspended;
     } else if has_nvidia && in_cooldown {
         stats.gpu_temp = 0;
         stats.gpu_pwr = -2.0;
+        stats.gpu_sample_state = omen_types::GpuSampleState::Deferred;
     } else if is_nvidia_awake {
         // 3. GPU is active AND cooldown expired. Safe to sample NVML for active processes.
         let mut has_active_clients = false;
 
         if let Some(metrics) = fetch_gpu_metrics_with_timeout() {
+            stats.gpu_sample_state = if metrics.temp.is_some() || metrics.power.is_some() {
+                omen_types::GpuSampleState::Active
+            } else { omen_types::GpuSampleState::Unavailable };
             has_active_clients = metrics.has_clients;
             if let Some(t) = metrics.temp {
                 stats.gpu_temp = t;
@@ -216,6 +221,7 @@ pub fn fetch_system_stats() -> SystemStats {
         }
         else {
             // NVML timed out! The NVIDIA driver is busy/hanging.
+            stats.gpu_sample_state = omen_types::GpuSampleState::Unavailable;
             nvml_timed_out = true; 
         }
         if !has_active_clients {
@@ -248,7 +254,13 @@ pub fn fetch_system_stats() -> SystemStats {
         }
     }
 
-    // Total System Power
+    if !has_nvidia && (stats.gpu_temp > 0 || stats.gpu_pwr > 0.0) {
+        stats.gpu_sample_state = omen_types::GpuSampleState::Active;
+    }
+    // Total System Power: expose the provenance instead of presenting a fixed overhead as measured.
+    stats.total_power_estimated = Some(true);
+    stats.total_power_partial = Some(stats.cpu_pwr <= 0.0 || !matches!(stats.gpu_sample_state,
+        omen_types::GpuSampleState::Active | omen_types::GpuSampleState::Suspended));
     let mut real_pwr = false;
     if stats.cpu_pwr > 0.0 || stats.gpu_pwr > 0.0 {
         stats.total_pwr = stats.cpu_pwr.max(0.0) + stats.gpu_pwr.max(0.0) + 11.5;
@@ -259,6 +271,8 @@ pub fn fetch_system_stats() -> SystemStats {
             if let Ok(s) = fs::read_to_string(p) {
                 if let Ok(micro) = s.trim().parse::<f64>() {
                     stats.total_pwr = micro / 1_000_000.0;
+                    stats.total_power_estimated = Some(false);
+                    stats.total_power_partial = Some(false);
                     real_pwr = true;
                 }
             }
@@ -275,6 +289,7 @@ pub fn fetch_system_stats() -> SystemStats {
 
     if has_nvidia && !is_nvidia_awake {
         stats.gpu_pwr = -1.0;
+        stats.gpu_sample_state = omen_types::GpuSampleState::Suspended;
     }
 
     // Sanitize any NaNs that might crash JSON serialization

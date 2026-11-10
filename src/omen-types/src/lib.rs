@@ -1,6 +1,27 @@
 use serde::{Deserialize, Serialize};
 use zbus::proxy;
 
+/// Sampling availability is distinct from PCI runtime power state.
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GpuSampleState {
+    Active, Suspended, Deferred, Unavailable,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+impl GpuSampleState {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Active => "Active (sampled)",
+            Self::Suspended => "Runtime suspended",
+            Self::Deferred => "Not sampled (quiet window)",
+            Self::Unavailable => "Sample unavailable",
+            Self::Unknown => "Sampling state unknown",
+        }
+    }
+}
+
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct SystemStats {
     pub cpu_temp: i32,
@@ -12,6 +33,12 @@ pub struct SystemStats {
     pub gpu_temp: i32,
     pub gpu_load: f64,
     pub gpu_pwr: f64,
+    #[serde(default)]
+    pub gpu_sample_state: GpuSampleState,
+    #[serde(default)]
+    pub total_power_estimated: Option<bool>,
+    #[serde(default)]
+    pub total_power_partial: Option<bool>,
     pub ram_used_gb: f64,
     pub ram_total_gb: f64,
     pub ram_frac: f64,
@@ -116,6 +143,8 @@ pub struct DriveUsage {
     pub total_bytes: u64,
     /// Where this drive's filesystems are mounted (for a tooltip), e.g. `["/", "/boot"]`.
     pub mounts: Vec<String>,
+    /// None for older daemons; false means at least one mounted filesystem was unreadable.
+    pub usage_complete: Option<bool>,
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -442,5 +471,47 @@ pub fn repair_graphical_session_env() {
                 }
             }
         }
+    }
+}
+
+/// GitHub commit endpoints must supply a complete object ID, not an error payload.
+pub fn is_commit_sha(value: &str) -> bool {
+    value.len() == 40 && value.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+#[cfg(test)]
+mod update_metadata_tests {
+    #[test] fn reject_missing_short_and_nonhex_commit_ids() {
+        assert!(super::is_commit_sha("6a5adaed55a6f74b14a489ec31d355727ac45c22"));
+        for invalid in ["", "unknown", "6a5adae", "API rate limit exceeded", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"] {
+            assert!(!super::is_commit_sha(invalid));
+        }
+    }
+}
+
+/// Require the GitHub commit object rather than accepting rate-limit/error JSON.
+pub fn parse_commit_metadata(raw: &str) -> Result<(String,String),String> {
+    let v:serde_json::Value=serde_json::from_str(raw).map_err(|e|e.to_string())?;
+    let sha=v["sha"].as_str().filter(|s|is_commit_sha(s)).ok_or("Missing or invalid upstream commit SHA")?;
+    Ok((sha.to_string(),v["commit"]["message"].as_str().unwrap_or("").to_string()))
+}
+/// Compare API errors must never become a zero-commits-behind success.
+pub fn parse_comparison_ahead(raw: &str) -> Result<u32,String> {
+    let v:serde_json::Value=serde_json::from_str(raw).map_err(|e|e.to_string())?;
+    if !matches!(v["status"].as_str(),Some("ahead"|"behind"|"diverged"|"identical")) {
+        return Err("Missing or invalid comparison status".into());
+    }
+    u32::try_from(v["ahead_by"].as_u64().ok_or("Missing comparison count")?).map_err(|e|e.to_string())
+}
+#[cfg(test)]
+mod github_response_tests {
+    use super::*;
+    #[test] fn api_error_objects_never_report_up_to_date() {
+        for raw in [r#"{"message":"API rate limit exceeded"}"#,r#"{"sha":""}"#,r#"{"status":"ahead"}"#,"not json"] {
+            assert!(parse_commit_metadata(raw).is_err());assert!(parse_comparison_ahead(raw).is_err());
+        }
+        assert!(parse_commit_metadata(r#"{"sha":"6a5adaed55a6f74b14a489ec31d355727ac45c22"}"#).is_ok());
+        assert_eq!(parse_comparison_ahead(r#"{"status":"identical","ahead_by":0}"#).unwrap(),0);
+        assert_eq!(parse_comparison_ahead(r#"{"status":"ahead","ahead_by":2}"#).unwrap(),2);
     }
 }

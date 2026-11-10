@@ -249,9 +249,15 @@ pub fn set_hw_effects_sync(enabled: bool) {
 }
 
 pub fn set_global_sync(power_val: bool, brightness_val: i32, direction_str: &str) {
+    static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    static IO:tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let generation=GENERATION.fetch_add(1,std::sync::atomic::Ordering::SeqCst)+1;
     let direction = direction_str.to_string();
     let rt = get_runtime();
     rt.spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+        let _io=IO.lock().await;
+        if GENERATION.load(std::sync::atomic::Ordering::SeqCst)!=generation {return;}
         if let Ok(conn) = get_conn().await {
             if let Ok(proxy) = RgbProxy::new(&conn).await {
                 let _ = proxy.set_global(power_val, brightness_val, &direction).await;
@@ -272,9 +278,15 @@ pub fn set_lightbar_color_sync(zone_val: i32, hex_color: String) {
 }
 
 pub fn set_lightbar_global_sync(power_val: bool, brightness_val: i32, mode_str: &str, speed_val: i32) {
+    static IO:tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let generation = GENERATION.fetch_add(1,std::sync::atomic::Ordering::SeqCst) + 1;
     let mode = mode_str.to_string();
     let rt = get_runtime();
     rt.spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+        let _io=IO.lock().await;
+        if GENERATION.load(std::sync::atomic::Ordering::SeqCst) != generation { return; }
         if let Ok(conn) = get_conn().await {
             if let Ok(proxy) = RgbProxy::new(&conn).await {
                 let _ = proxy.set_lightbar_global(power_val, brightness_val, &mode, speed_val).await;
@@ -324,7 +336,7 @@ pub enum DaemonStatus {
 
 static TELEMETRY_SENDERS: OnceLock<std::sync::Mutex<Vec<glib::Sender<SystemStats>>>> = OnceLock::new();
 static DAEMON_STATUS_SENDERS: OnceLock<std::sync::Mutex<Vec<glib::Sender<DaemonStatus>>>> = OnceLock::new();
-static CURRENT_DAEMON_STATUS: OnceLock<std::sync::Mutex<DaemonStatus>> = OnceLock::new();
+static CURRENT_DAEMON_STATUS: OnceLock<std::sync::Mutex<Option<DaemonStatus>>> = OnceLock::new();
 static TELEMETRY_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Subscribe to daemon online/offline transitions.
@@ -344,13 +356,17 @@ where
 
     if let Some(cur) = CURRENT_DAEMON_STATUS.get() {
         let status = cur.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let _ = tx.send(status);
+        if let Some(status)=status { let _ = tx.send(status); }
     }
 }
 
 fn broadcast_daemon_status(status: DaemonStatus) {
-    let cur = CURRENT_DAEMON_STATUS.get_or_init(|| std::sync::Mutex::new(DaemonStatus::Offline));
-    *cur.lock().unwrap_or_else(|e| e.into_inner()) = status.clone();
+    let cur = CURRENT_DAEMON_STATUS.get_or_init(|| std::sync::Mutex::new(None));
+    {
+        let mut previous = cur.lock().unwrap_or_else(|e| e.into_inner());
+        if previous.as_ref() == Some(&status) { return; }
+        *previous = Some(status.clone());
+    }
 
     if let Some(mutex) = DAEMON_STATUS_SENDERS.get() {
         let mut senders = mutex.lock().unwrap_or_else(|e| e.into_inner());
@@ -376,47 +392,31 @@ where
         let rt = get_runtime();
         rt.spawn(async move {
             use zbus::export::futures_util::StreamExt;
-            #[allow(unused_assignments)]
-            let mut was_online = false;
             loop {
-                if let Ok(conn) = get_conn().await {
-                    if let Ok(proxy) = SysMonProxy::new(&conn).await {
-                        if let Ok(mut stream) = proxy.receive_telemetry_updated().await {
-                            // We successfully connected — broadcast Online if we weren't before
-                            if !was_online {
-                                was_online = true;
-                                broadcast_daemon_status(DaemonStatus::Online);
-                            }
-                            while let Some(signal) = stream.next().await {
-                                if !was_online {
-                                    was_online = true;
-                                    broadcast_daemon_status(DaemonStatus::Online);
-                                }
+                let timeout=std::time::Duration::from_secs(3);
+                if let Ok(Ok(conn)) = tokio::time::timeout(timeout,get_conn()).await {
+                    if let Ok(Ok(proxy)) = tokio::time::timeout(timeout,SysMonProxy::new(&conn)).await {
+                        if let Ok(Ok(mut stream)) = tokio::time::timeout(timeout,proxy.receive_telemetry_updated()).await {
+                            let mut deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+                            loop {
+                                let Ok(Some(signal)) = tokio::time::timeout_at(deadline, stream.next()).await else { break; };
                                 if let Ok(args) = signal.args() {
-                                    let json_str = args.json_stats();
-                                    if let Ok(stats) = serde_json::from_str::<SystemStats>(json_str) {
+                                    if let Ok(stats) = serde_json::from_str::<SystemStats>(args.json_stats()) {
+                                        deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+                                        broadcast_daemon_status(DaemonStatus::Online);
                                         if let Some(mutex) = TELEMETRY_SENDERS.get() {
                                             let mut senders = mutex.lock().unwrap_or_else(|e| e.into_inner());
                                             senders.retain(|tx| tx.send(stats.clone()).is_ok());
                                         }
-                                    } else {
-                                        eprintln!("Telemetry parse error. JSON: {}", json_str);
                                     }
                                 }
                             }
-                            // Stream ended — daemon went offline
-                            was_online = false;
-                            broadcast_daemon_status(DaemonStatus::Offline);
                         }
                     }
-                } else {
-                    // Could not connect at all
-                    if was_online {
-                        was_online = false;
-                        broadcast_daemon_status(DaemonStatus::Offline);
-                    }
                 }
-                // Backoff before retrying
+                broadcast_daemon_status(DaemonStatus::Offline);
+                // Drop a stale bus connection before retrying; other calls acquire the fresh one.
+                *SHARED_CONN.lock().await = None;
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
             }
         });
@@ -597,36 +597,6 @@ pub async fn set_offset_async(plane: String, mv: i32) -> Result<String, Box<dyn 
     }
 }
 
-pub fn set_undervolt_sync(core_mv: i32, cache_mv: i32) {
-    let rt = get_runtime();
-    rt.spawn(async move {
-        if let Ok(conn) = get_conn().await {
-            if let Ok(proxy) = UndervoltProxy::new(&conn).await {
-                match proxy.set_offset("core", core_mv).await {
-                    Ok(resp) if resp.starts_with("FAIL") => {
-                        notify_dbus_error("Undervolt (core) uygulanamıyor", &resp).await;
-                    }
-                    Err(e) => {
-                        notify_dbus_error("Undervolt (core) uygulanamıyor", &e).await;
-                    }
-                    _ => {}
-                }
-                match proxy.set_offset("cache", cache_mv).await {
-                    Ok(resp) if resp.starts_with("FAIL") => {
-                        notify_dbus_error("Undervolt (cache) uygulanamıyor", &resp).await;
-                    }
-                    Err(e) => {
-                        notify_dbus_error("Undervolt (cache) uygulanamıyor", &e).await;
-                    }
-                    _ => {}
-                }
-            } else {
-                notify_dbus_error_bg("Daemon bağlantısı kurulamadı (Undervolt)",
-                    "Daemon çalışmıyor olabilir".into());
-            }
-        }
-    });
-}
 
 pub fn set_power_limits_sync(pl1: i32, pl2: i32) {
     let rt = get_runtime();

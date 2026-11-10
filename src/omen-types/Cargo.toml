@@ -4,5 +4,6 @@ version = "2.2.1"
 edition = "2024"
 
 [dependencies]
+serde_json = "1.0"
 serde = { version = "1.0.229", features = ["derive"] }
 zbus = "4.4"

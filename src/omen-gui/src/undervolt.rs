@@ -271,44 +271,19 @@ pub fn build_page() -> gtk::Box {
     let default_pl2 = Rc::new(RefCell::new(95.0_f64));
 
     let reset_btn = gtk::Button::builder()
-        .label(i18n::t("reset_defaults"))
+        .label("Restore initial power limits")
+        .sensitive(false)
+        .tooltip_text("Restore the first observed limits, which may include earlier tuning; these are not verified firmware defaults.")
         .css_classes(["ec-btn"])
         .build();
-    let core_s_c = core_scale.clone();
-    let cache_s_c = cache_scale.clone();
     let pl1_s_c = pl1_scale.clone();
     let pl2_s_c = pl2_scale.clone();
-    let tcc_s_c = tcc_scale.clone();
     let def_pl1_reset = default_pl1.clone();
     let def_pl2_reset = default_pl2.clone();
-    let v_locked_reset = is_voltage_locked.clone();
-    let tcc_locked_reset = is_tcc_locked.clone();
-    let loaded_core_reset = loaded_core_mv.clone();
-    let loaded_cache_reset = loaded_cache_mv.clone();
-    let loaded_tcc_reset = loaded_tcc.clone();
     reset_btn.connect_clicked(move |_| {
-        let def1 = *def_pl1_reset.borrow();
-        let def2 = *def_pl2_reset.borrow();
-        pl1_s_c.set_value(def1);
-        pl2_s_c.set_value(def2);
-        crate::daemon_client::reset_power_limits_sync(def1 as i32, def2 as i32);
-
-        if !*v_locked_reset.borrow() {
-            core_s_c.set_value(0.0);
-            cache_s_c.set_value(0.0);
-            if *loaded_core_reset.borrow() != 0 || *loaded_cache_reset.borrow() != 0 {
-                crate::daemon_client::set_undervolt_sync(0, 0);
-                *loaded_core_reset.borrow_mut() = 0;
-                *loaded_cache_reset.borrow_mut() = 0;
-            }
-        }
-        if !*tcc_locked_reset.borrow() {
-            tcc_s_c.set_value(0.0);
-            if *loaded_tcc_reset.borrow() != 0 {
-                crate::daemon_client::set_tcc_offset_sync(0);
-                *loaded_tcc_reset.borrow_mut() = 0;
-            }
-        }
+        let def1 = *def_pl1_reset.borrow(); let def2 = *def_pl2_reset.borrow();
+        pl1_s_c.set_value(def1); pl2_s_c.set_value(def2);
+        crate::daemon_client::reset_power_limits_sync(def1 as i32,def2 as i32);
     });
 
     let apply_btn = gtk::Button::builder()
@@ -387,6 +362,7 @@ pub fn build_page() -> gtk::Box {
     let pl1_row_load = pl1_row.clone();
     let pl2_row_load = pl2_row.clone();
     let badge_load = status_badge.clone();
+    let reset_btn_load = reset_btn.clone();
     let def_pl1_load = default_pl1.clone();
     let def_pl2_load = default_pl2.clone();
     
@@ -544,13 +520,14 @@ pub fn build_page() -> gtk::Box {
         // Load Power Limits separately
         if let Ok(json) = crate::daemon_client::get_power_profile_raw_async().await {
             if let Ok(state) = serde_json::from_str::<serde_json::Value>(&json) {
+                reset_btn_load.set_sensitive(state.get("baseline_available").and_then(|v|v.as_bool()).unwrap_or(false));
                 if let Some(boot_pl1) = state.get("boot_pl1_w").and_then(|v| v.as_f64()) {
                     *def_pl1_load.borrow_mut() = boot_pl1;
-                    pl1_row_load.set_subtitle(&format!("{} (Boot default: {:.0} W)", i18n::t("pl1_sub"), boot_pl1));
+                    pl1_row_load.set_subtitle(&format!("{} (Initially observed: {:.0} W)", i18n::t("pl1_sub"), boot_pl1));
                 }
                 if let Some(boot_pl2) = state.get("boot_pl2_w").and_then(|v| v.as_f64()) {
                     *def_pl2_load.borrow_mut() = boot_pl2;
-                    pl2_row_load.set_subtitle(&format!("{} (Boot default: {:.0} W)", i18n::t("pl2_sub"), boot_pl2));
+                    pl2_row_load.set_subtitle(&format!("{} (Initially observed: {:.0} W)", i18n::t("pl2_sub"), boot_pl2));
                 }
                 if let Some(pl1) = state.get("pl1_w").and_then(|v| v.as_f64()) {
                     pl1_s_load.set_value(pl1);

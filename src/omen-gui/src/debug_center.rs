@@ -4,6 +4,15 @@ use adw::prelude::*;
 use crate::daemon_client::{self, DaemonStatus, SystemStats};
 use crate::i18n;
 
+// GLib futures do not enter a Tokio runtime. Run process I/O on the shared
+// runtime and await only its join handle on the GTK main context.
+async fn command_output(program: &'static str, args: &[&str]) -> std::io::Result<std::process::Output> {
+    let args: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
+    daemon_client::get_runtime().spawn(async move {
+        tokio::process::Command::new(program).args(args).output().await
+    }).await.map_err(std::io::Error::other)?
+}
+
 /// Builds the comprehensive, unified Debug Center page.
 pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     let root_box = gtk::Box::builder()
@@ -49,11 +58,9 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     restart_btn.connect_clicked(move |_| {
         let win_clone = win_c_restart.clone();
         glib::spawn_future_local(async move {
-            let res = std::process::Command::new("pkexec")
-                .args(["systemctl", "restart", "omen-space-daemon"])
-                .status();
+            let res = command_output("pkexec", &["systemctl", "restart", "omen-space-daemon"]).await;
             match res {
-                Ok(s) if s.success() => {
+                Ok(output) if output.status.success() => {
                     let toast = adw::Toast::new("omen-space-daemon restarted successfully");
                     toast.set_timeout(3);
                     if let Some(content) = win_clone.content() {
@@ -234,11 +241,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
             stats.cpu_temp, stats.cpu_pwr, stats.cpu_load
         ));
 
-        let gpu_state = if stats.gpu_temp > 0 || stats.gpu_pwr > 0.0 {
-            "Active (D0)"
-        } else {
-            "Suspended / Sleep (D3)"
-        };
+        let gpu_state = stats.gpu_sample_state.label();
         gpu_row_c.set_subtitle(&format!(
             "Temperature: {}°C | Power: {:.1} W | Usage: {:.0}% | State: {}",
             stats.gpu_temp, stats.gpu_pwr, stats.gpu_load, gpu_state
@@ -268,12 +271,12 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     let mut paths_found = Vec::new();
     for p in &[
         "/sys/devices/platform/hp-wmi",
-        "/sys/devices/platform/hp-wmi/all_zones",
-        "/sys/devices/platform/hp-wmi/lightbar",
+        "/sys/devices/platform/hp-omen-extra/all_zones",
+        "/sys/devices/platform/hp-omen-extra/lightbar",
         "/sys/devices/platform/hp-wmi/thermal_profile",
         "/sys/class/leds/hp::omen-0/multi_intensity",
         "/sys/kernel/debug/ec/ec0/io",
-        "/var/lib/omen-space/firmware_rapl_baseline.json",
+        "/var/lib/omen-space-daemon/rapl_baseline.json",
     ] {
         let exists = std::path::Path::new(p).exists();
         paths_found.push(format!("{}: {}", p, if exists { "EXISTS" } else { "NOT FOUND" }));
@@ -504,7 +507,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
             } else {
                 out.push_str("EC sysfs node not directly accessible (/sys/kernel/debug/ec/ec0/io).\n");
                 out.push_str("To enable direct EC debug access, run:\n");
-                out.push_str("  sudo modprobe ec_sys write_support=1\n\n");
+                out.push_str("  sudo modprobe ec_sys\n\n");
                 out.push_str("Querying daemon diagnostic report for EC state...\n");
                 if let Ok(rep) = daemon_client::generate_diagnostic_report_async().await {
                     for line in rep.lines().filter(|l| l.contains("EC") || l.contains("Thermal") || l.contains("Fan")) {
@@ -619,15 +622,12 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
         glib::spawn_future_local(async move {
             let mut out = String::new();
             out.push_str("=== omen-space-daemon journal logs (last 40 lines) ===\n");
-            if let Ok(output) = std::process::Command::new("journalctl")
-                .args(["-u", "omen-space-daemon", "-n", "40", "--no-pager"])
-                .output()
+            if let Ok(output) = command_output("journalctl", &["-u", "omen-space-daemon", "-n", "40", "--no-pager"]).await
             {
                 out.push_str(&String::from_utf8_lossy(&output.stdout));
             }
             out.push_str("\n=== Kernel dmesg (hp_wmi / hp-omen) ===\n");
-            if let Ok(output) = std::process::Command::new("dmesg")
-                .output()
+            if let Ok(output) = command_output("dmesg", &[]).await
             {
                 let text = String::from_utf8_lossy(&output.stdout);
                 for line in text.lines().filter(|l| l.contains("hp_wmi") || l.contains("hp-wmi") || l.contains("omen")) {
@@ -733,4 +733,14 @@ fn show_report_dialog<F>(
         }
         dialog_c.add_response("ok", i18n::t("btn_close"));
     });
+}
+
+#[cfg(test)]
+mod process_tests {
+    #[test]
+    fn process_io_can_be_awaited_from_glib_without_a_tokio_reactor() {
+        let context = glib::MainContext::new();
+        let output = context.block_on(super::command_output("true", &[])).unwrap();
+        assert!(output.status.success());
+    }
 }

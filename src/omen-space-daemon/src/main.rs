@@ -4,6 +4,7 @@ mod fan;
 mod config;
 mod sysmon;
 mod power;
+mod rapl_baseline;
 mod rgb;
 mod mux;
 mod platform;

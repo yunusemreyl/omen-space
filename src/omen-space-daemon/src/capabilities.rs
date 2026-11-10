@@ -47,6 +47,9 @@ pub struct ModelCapabilities {
     pub fan_zone_count: u32,
     pub max_fan_speed_percent: u32,
     pub min_fan_speed_percent: u32,
+    /// Minimum nonzero manual duty (0..255), distinct from firmware fan-stop support.
+    #[serde(default = "default_minimum_manual_pwm")]
+    pub minimum_manual_pwm: u32,
     
     // Performance Modes
     pub supports_performance_modes: bool,
@@ -81,6 +84,8 @@ pub struct ModelCapabilities {
     pub notes: String,
 }
 
+fn default_minimum_manual_pwm() -> u32 { 50 }
+
 impl Default for ModelCapabilities {
     fn default() -> Self {
         Self {
@@ -97,6 +102,7 @@ impl Default for ModelCapabilities {
             fan_zone_count: 2,
             max_fan_speed_percent: 100,
             min_fan_speed_percent: 0,
+            minimum_manual_pwm: default_minimum_manual_pwm(),
             
             supports_performance_modes: true,
             performance_modes: vec!["Default".to_string(), "Performance".to_string(), "Cool".to_string()],
@@ -315,5 +321,16 @@ mod tests {
         assert!(cap.allow_decoupled_wmi_thermal_policy_fallback);
         assert!(!cap.supports_undervolt); // AMD should not have undervolt enabled
         assert!(LinuxCapabilityClassifier::is_wmaa_abort_prone_board("8786"));
+    }
+}
+
+#[cfg(test)]
+mod fan_minimum_tests {
+    #[test]
+    fn stall_workaround_does_not_change_confirmed_low_speed_boards() {
+        for (board,minimum) in [("8EEF",89),("8D41",50),("8A17",50)] {
+            assert_eq!(super::get_known_model(board).unwrap().minimum_manual_pwm,minimum);
+        }
+        assert_eq!(super::ModelCapabilities::default().minimum_manual_pwm,50);
     }
 }
