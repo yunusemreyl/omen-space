@@ -2971,6 +2971,7 @@
             "fan_zone_count": 2,
             "max_fan_speed_percent": 100,
             "min_fan_speed_percent": 0,
+            "minimum_manual_pwm": 89,
             "supports_performance_modes": true,
             "performance_modes": [
                 "Default",

@@ -93,8 +93,7 @@ pub fn build_interactive_lightbar(state_json_opt: &Option<serde_json::Value>) ->
                 dyn_local.load_from_string(&css_str);
                 
                 crate::daemon_client::set_lightbar_color_sync(i as i32, hex.clone());
-                let zone_id = 4 + i as i32;
-                crate::daemon_client::set_color_sync(zone_id, hex.clone());
+
             }));
         });
 
@@ -118,7 +117,7 @@ pub fn build_interactive_lightbar(state_json_opt: &Option<serde_json::Value>) ->
                     "#lightbar_seg_{} {{ background: {}; background-image: none; color: #fff; border-radius: 6px; font-size: 11px; font-weight: bold; border: 1px solid rgba(255,255,255,0.25); box-shadow: 0 0 14px {}60; transition: all 0.25s ease; }}\n",
                     i, hex, hex
                 ));
-                crate::daemon_client::set_color_sync((4 + i) as i32, hex.clone());
+
             }
             crate::daemon_client::set_lightbar_color_sync(4, hex.clone());
             dyn_local.load_from_string(&css_str);

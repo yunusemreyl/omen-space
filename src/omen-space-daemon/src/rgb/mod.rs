@@ -191,20 +191,23 @@ impl RgbHardware {
         let Some(ref base) = self.driver_path else { return; };
         let all_zones_path = format!("{}/all_zones", base);
         if Path::new(&all_zones_path).exists() {
-            let mut mapped_colors = vec!["000000".to_string(); 4];
-            for i in 0..4 {
+            let count = self.zone_count.clamp(1, 8) as usize;
+            let mut mapped_colors = vec!["000000".to_string(); count];
+            for i in 0..count {
                 let actual = if self.zone_count == 4 {
                     map_four_zone_index(&self.board_id, i)
                 } else {
                     i
                 };
-                if actual < 4 {
+                if actual < count {
                     mapped_colors[actual] = colors.get(i).cloned().unwrap_or_else(|| "000000".to_string());
                 }
             }
             let payload = mapped_colors.join(" ");
-            let _ = std::fs::write(&all_zones_path, payload);
-            return;
+            if std::fs::write(&all_zones_path, payload).is_ok() {
+                return;
+            }
+            warn!("RGB batch write failed; falling back to individual zones");
         }
         for (i, c) in colors.iter().enumerate().take(self.zone_count as usize) {
             self.write_zone(i, c);
@@ -433,7 +436,7 @@ impl HidPerKeyBackend {
                 let mut pkt = [0u8; 64];
                 pkt[0] = cmd;
                 pkt[1] = chunk_idx as u8;
-                pkt[2] = 0x3C; // 60 bytes payload
+                pkt[2] = 0x00; // Native static pages require BLength=0 (60 payload bytes follow).
                 pkt[3] = 0x00;
                 let start_idx = chunk_idx * 60;
                 for led in 0..60 {
@@ -1015,7 +1018,8 @@ impl RgbService {
                 }
                 
                 if out_colors != last_per_key_colors {
-                    g.hid_per_key.set_zone_colors(&out_colors);
+                    let frame: Vec<_> = out_colors.iter().map(|c| parse_hex_color(c)).collect();
+                    g.hid_per_key.write_per_key_colors(&frame);
                     last_per_key_colors = out_colors;
                 }
             }
@@ -1574,5 +1578,29 @@ mod mcu_effect_tests {
         assert_eq!(&r[24..27], &[0, 255, 0]);
         assert!(b.mcu_effect_for("reactive", 50, "ltr", &c).is_none());
         assert!(b.mcu_effect_for("wave", 50, "ltr", &c).is_none());
+    }
+}
+
+#[cfg(test)]
+mod regression_rgb {
+    use super::*;
+    #[test]
+    fn regression_darfon_static_pages_require_zero_blength() {
+        let path=std::env::temp_dir().join(format!("omen-review-hid-{}",std::process::id()));
+        std::fs::write(&path,[0u8;64]).unwrap();
+        let h=HidPerKeyBackend{hidraw_paths:vec![path.to_string_lossy().to_string()],device_pid:Some(0x54BF)};
+        assert!(h.write_darfon_colors(&vec![(255,255,255);104]));
+        let packet=std::fs::read(&path).unwrap();let _=std::fs::remove_file(path);
+        assert_eq!(&packet[..4],&[0x07,0x02,0x00,0x00],"native static channel pages require BLength=0, despite carrying 60 data bytes");
+    }
+    #[test]
+    fn regression_batch_preserves_eight_zone_payload() {
+        let dir=std::env::temp_dir().join(format!("omen-review-zones-{}",std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();std::fs::write(dir.join("all_zones"),"").unwrap();
+        let h=RgbHardware{driver_path:Some(dir.to_string_lossy().to_string()),is_new_driver:false,zone_count:8,available:true,board_id:"TEST".into()};
+        let colors=(0..8).map(|i|format!("{:06X}",i+1)).collect::<Vec<_>>();
+        h.write_zones_batch(&colors);
+        let payload=std::fs::read_to_string(dir.join("all_zones")).unwrap();let _=std::fs::remove_dir_all(dir);
+        assert_eq!(payload.split_whitespace().count(),8,"adding all_zones must not drop zones 4-7");
     }
 }

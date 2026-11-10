@@ -21,6 +21,7 @@ pub struct CurvePoint(pub f64, pub f64); // [Temp, Pct]
 
 pub struct FanState {
     pub hwmon_path: Option<PathBuf>,
+    pub minimum_manual_pwm: u32,
     pub found_fans: Vec<u32>,
     pub max_speeds: HashMap<u32, u32>,
     pub fallback_paths: HashMap<u32, PathBuf>,
@@ -78,13 +79,20 @@ async fn sysfs_write<P: AsRef<Path>, S: AsRef<str>>(path: P, val: S) -> bool {
     tokio::fs::write(path, val.as_ref().as_bytes()).await.is_ok()
 }
 
+async fn state_minimum_manual_pwm(state: &Arc<Mutex<FanState>>) -> u32 {
+    state.lock().await.minimum_manual_pwm
+}
+
 impl FanService {
     pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let config_manager = crate::config::ConfigManager::new();
         let config = config_manager.load().await;
 
+        let board = std::fs::read_to_string("/sys/class/dmi/id/board_name").unwrap_or_default();
+        let caps = crate::capabilities::detect(board.trim(), "", "");
         let mut state = FanState {
             hwmon_path: None,
+            minimum_manual_pwm: caps.minimum_manual_pwm.clamp(1, 255),
             found_fans: Vec::new(),
             max_speeds: HashMap::new(),
             fallback_paths: HashMap::new(),
@@ -415,11 +423,8 @@ impl FanService {
         let (duty, effective_pct) = if pct == 0 {
             (0, 0)
         } else {
-            // FIX #346: Enforce safe spinning duty (min 35% / duty 89, ~2000 RPM)
-            // On HP OMEN/Victus fans, PWM duties below 80 cause the fan motor to stall at 0 RPM.
-            let safe_pct = pct.max(35);
-            let d = Self::pct_to_pwm(safe_pct);
-            (if d > 0 && d < 89 { 89 } else { d }, safe_pct)
+            let d = Self::pct_to_pwm(pct).max(state.minimum_manual_pwm);
+            (d, ((d as f64 * 100.0) / 255.0).round() as u32)
         };
 
         // If the hardware does not expose a manual PWM node, intermediate duty cycles cannot be set
@@ -441,7 +446,7 @@ impl FanService {
             if sysfs_exists(&pwm_enable_path).await {
                 let _ = sysfs_write(&pwm_enable_path, "2").await;
             }
-            let _ = sysfs_write(&pwm_path, "0").await;
+            // AUTO owns the target now; writing pwm1 in this mode is rejected by hp-wmi.
             state.last_written_duty = Some(0);
             state.last_written_duty_time = Some(now);
             for &fan_num in &state.found_fans.clone() {
@@ -478,12 +483,7 @@ impl FanService {
             let rpm = ((max_speed as f64 * effective_pct as f64) / 100.0).round() as u32;
             for &fan_num in &state.found_fans.clone() {
                 state.last_targets.insert(fan_num, rpm);
-                if let Some(ref hwmon) = state.hwmon_path {
-                    let target_path = hwmon.join(format!("fan{}_target", fan_num));
-                    if sysfs_exists(&target_path).await {
-                        let _ = sysfs_write(&target_path, rpm.to_string()).await;
-                    }
-                }
+                // Do not overwrite the driver's per-fan conversion / GPU RPM delta.
             }
             true
         } else {
@@ -926,15 +926,17 @@ impl FanService {
                         let pct = Self::evaluate_spline(&curve_points, smoothed_temp);
                         let mut target_pct = (pct.round() as u32).clamp(0, 100);
                         // FIX #346: Fan-stop (0%) is only permitted when temp < 50°C.
-                        // At or above 50°C, always enforce minimum safe spinning duty (35%) so fans never stall.
+                        // At or above 50°C, enforce this board's minimum nonzero duty.
                         if target_pct <= 5 {
                             if smoothed_temp < 50.0 {
                                 target_pct = 0;
                             } else {
-                                target_pct = 35;
+                                target_pct = 1;
                             }
-                        } else if target_pct < 35 {
-                            target_pct = 35;
+                        }
+                        if target_pct > 0 {
+                            let minimum_pct = (state_minimum_manual_pwm(&self.state).await * 100).div_ceil(255);
+                            target_pct = target_pct.max(minimum_pct);
                         }
                         
                         let mut state = self.state.lock().await;
@@ -1506,5 +1508,55 @@ mod tests {
         );
         assert!(fired_at_3s, "Must fire after 3 full seconds of continuous >=90°C");
         assert!(warn_episode_notified);
+    }
+}
+
+#[cfg(test)]
+mod regression_fan {
+    use super::*;
+    #[tokio::test]
+    async fn regression_preserve_working_25_percent_request() {
+        let mut state = FanState {
+            hwmon_path: None,
+            minimum_manual_pwm: 50,
+            found_fans: Vec::new(),
+            max_speeds: HashMap::new(),
+            fallback_paths: HashMap::new(),
+            fan_count: 0,
+            mode: "custom".to_string(),
+            custom_curve_json: "[]".to_string(),
+            last_targets: HashMap::new(),
+            thermal_protection_active: false,
+            thermal_protection_enabled: true,
+            thermal_protection_entered_at: std::time::Instant::now(),
+            suppress_ec_notice: false,
+            pre_protection_mode: None,
+            manual_target_pct: None,
+            last_keepalive: std::time::Instant::now(),
+            auto_fan_activated_at: None,
+            temp_history: std::collections::VecDeque::new(),
+            last_auto_pct: 0,
+            last_auto_pct_time: std::time::Instant::now(),
+            perf_cooldown_start: None,
+            last_perf_pct: 0,
+            last_perf_pct_time: std::time::Instant::now(),
+            last_power_profile_was_perf: false,
+            last_written_duty: None,
+            last_written_duty_time: None,
+            last_hw_detect_attempt: std::time::Instant::now(),
+            signal_ctx: None,
+        };
+
+        let dir=std::env::temp_dir().join(format!("omen-review-fan-{}",std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("pwm1"),"0").unwrap();
+        std::fs::write(dir.join("pwm1_enable"),"1").unwrap();
+        state.hwmon_path=Some(dir.clone());
+        state.found_fans=vec![1,2];
+        state.max_speeds.insert(1,6000);state.max_speeds.insert(2,6000);
+        assert!(FanService::write_pwm_duty(&mut state,25).await);
+        let actual=std::fs::read_to_string(dir.join("pwm1")).unwrap();
+        let _=std::fs::remove_dir_all(dir);
+        assert_eq!(actual,"64","a known-working 25% target should remain 25% instead of a global board-independent 35% override");
     }
 }

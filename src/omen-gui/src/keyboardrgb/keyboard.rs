@@ -63,6 +63,7 @@ pub fn build_interactive_keyboard(
         ),
     };
 
+    let globals=Rc::new(RefCell::new(KeyboardGlobals::from_snapshot(state_json_opt.as_ref())));
     let top_bar = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).build();
 
     // -- Selection Tools (Left-aligned) --
@@ -86,31 +87,35 @@ pub fn build_interactive_keyboard(
     btn_all.set_group(Some(&btn_off));
     
     let sm_o = sel_mode.clone();
+    let globals_sm_o=globals.clone();
     btn_off.connect_toggled(move |b| {
         if b.is_active() {
             *sm_o.borrow_mut() = SelectionMode::Off;
-            crate::daemon_client::set_global_sync(false, 0, "ltr");
+            let mut state=globals_sm_o.borrow_mut();state.power=false;state.send();
         }
     });
     let sm_k = sel_mode.clone();
+    let globals_sm_k=globals.clone();
     btn_key.connect_toggled(move |b| {
         if b.is_active() {
             *sm_k.borrow_mut() = SelectionMode::Key;
-            crate::daemon_client::set_global_sync(true, 100, "ltr");
+            let mut state=globals_sm_k.borrow_mut();state.power=true;state.send();
         }
     });
     let sm_z = sel_mode.clone();
+    let globals_sm_z=globals.clone();
     btn_zone.connect_toggled(move |b| {
         if b.is_active() {
             *sm_z.borrow_mut() = SelectionMode::Zone;
-            crate::daemon_client::set_global_sync(true, 100, "ltr");
+            let mut state=globals_sm_z.borrow_mut();state.power=true;state.send();
         }
     });
     let sm_a = sel_mode.clone();
+    let globals_sm_a=globals.clone();
     btn_all.connect_toggled(move |b| {
         if b.is_active() {
             *sm_a.borrow_mut() = SelectionMode::All;
-            crate::daemon_client::set_global_sync(true, 100, "ltr");
+            let mut state=globals_sm_a.borrow_mut();state.power=true;state.send();
         }
     });
     
@@ -162,6 +167,7 @@ pub fn build_interactive_keyboard(
     let msl_local = msl_c.clone();
     let aa_local = aa_hook.clone();
     let speed_ref = speed_rc.clone();
+    let direction_globals=globals.clone();
     effects_dropdown.connect_selected_notify(move |dd| {
         let i = dd.selected() as usize;
         if i < msl_local.len() {
@@ -170,10 +176,10 @@ pub fn build_interactive_keyboard(
             let speed = *speed_ref.borrow();
             if m == "wave_ltr" {
                 crate::daemon_client::set_mode_sync("wave", speed as i32);
-                crate::daemon_client::set_global_sync(true, 100, "ltr");
+                let mut state=direction_globals.borrow_mut();state.direction="ltr".into();state.send();
             } else if m == "wave_rtl" {
                 crate::daemon_client::set_mode_sync("wave", speed as i32);
-                crate::daemon_client::set_global_sync(true, 100, "rtl");
+                let mut state=direction_globals.borrow_mut();state.direction="rtl".into();state.send();
             } else {
                 crate::daemon_client::set_mode_sync(m, speed as i32);
             }
@@ -440,6 +446,7 @@ pub fn build_interactive_keyboard(
             }
             
             if detected_mode == KeyboardMode::PerKey {
+                if mode == SelectionMode::All { fill_all_key_slots(&mut pk_mut,&hex); }
                 crate::daemon_client::set_per_key_colors_sync(pk_mut.clone());
             } else if detected_mode == KeyboardMode::Omen4Zone {
                 for z in zones_changed { crate::daemon_client::set_color_sync(z-1, hex.clone()); }
@@ -728,9 +735,10 @@ pub fn build_interactive_keyboard(
     bright_scale.set_value(bval);
     bright_scale.set_size_request(150, -1);
     bright_scale.set_valign(gtk::Align::Center);
+    let brightness_globals=globals.clone();
     bright_scale.connect_value_changed(move |sc| {
-        let val = sc.value() as i32;
-        crate::daemon_client::set_global_sync(val > 0, val, "ltr");
+        let mut state=brightness_globals.borrow_mut();
+        state.brightness=sc.value() as i32;state.send();
     });
     bright_box.append(&bright_scale);
     

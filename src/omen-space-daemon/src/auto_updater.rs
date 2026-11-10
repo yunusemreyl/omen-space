@@ -19,6 +19,8 @@ pub struct AppUpdateInfo {
     pub release_url: String,
     pub download_url: String,
     pub status_message: String,
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 pub struct AutoUpdateService;
@@ -63,6 +65,7 @@ impl AutoUpdateService {
             notes,
             release_url,
             download_url,
+            metadata_error,
         ) = fetch_github_update_metadata(&installed_sha).await;
 
         let semver_newer = is_newer_semver(CURRENT_VERSION, &latest_version);
@@ -71,9 +74,14 @@ impl AutoUpdateService {
             && installed_sha != latest_sha
             && commits_behind > 0;
 
-        let update_available = semver_newer || commit_newer;
+        let error = if metadata_error.is_some() { metadata_error } else if latest_sha == "unknown" {
+            Some("Could not verify the upstream commit. Retry the update check.".to_string())
+        } else if installed_sha == "unknown" {
+            Some("Installed commit is unknown; only version information could be compared.".to_string())
+        } else { None };
+        let update_available = error.is_none() && (semver_newer || commit_newer);
 
-        let status_message = if update_available {
+        let status_message = if let Some(error) = &error { error.clone() } else if update_available {
             if semver_newer {
                 format!(
                     "New Omen Space version v{} ({}) available! (Current: v{} • {})",
@@ -118,6 +126,7 @@ impl AutoUpdateService {
             release_url,
             download_url,
             status_message,
+            error,
         }
     }
 
@@ -224,7 +233,7 @@ async fn curl_get(url: &str) -> Option<String> {
             "--proto",
             "=https",
             "--tlsv1.2",
-            "-sSL",
+            "-fsSL",
             "--connect-timeout",
             "8",
             "--max-time",
@@ -244,7 +253,7 @@ async fn curl_get(url: &str) -> Option<String> {
 
 async fn fetch_github_update_metadata(
     installed_sha: &str,
-) -> (String, String, String, u32, String, String, String) {
+) -> (String, String, String, u32, String, String, String, Option<String>) {
     let release_api = format!(
         "https://api.github.com/repos/{}/releases/latest",
         REPO_OWNER_NAME
@@ -308,7 +317,7 @@ async fn fetch_github_update_metadata(
 
     if let Some(c_json) = commit_res {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&c_json) {
-            if let Some(sha) = v["sha"].as_str() {
+            if let Some(sha) = v["sha"].as_str().filter(|sha|omen_types::is_commit_sha(sha)) {
                 latest_sha = sha.to_string();
                 latest_short = sha.chars().take(7).collect();
             }
@@ -319,18 +328,22 @@ async fn fetch_github_update_metadata(
     }
 
     let mut commits_behind = 0u32;
+    let mut comparison_error = None;
     let mut commit_changelog = String::new();
     if installed_sha != "unknown"
         && latest_sha != "unknown"
         && installed_sha != latest_sha
     {
         let compare_url = format!(
-            "https://api.github.com/repos/{}/compare/{}...main",
-            REPO_OWNER_NAME, installed_sha
+            "https://api.github.com/repos/{}/compare/{}...{}",
+            REPO_OWNER_NAME, installed_sha, latest_sha
         );
         if let Some(cmp_json) = curl_get(&compare_url).await {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&cmp_json) {
-                commits_behind = v["ahead_by"].as_u64().unwrap_or(1) as u32;
+                match omen_types::parse_comparison_ahead(&cmp_json) {
+                    Ok(count) => commits_behind=count,
+                    Err(error) => comparison_error=Some(error),
+                }
                 if let Some(commits) = v["commits"].as_array() {
                     let mut lines = Vec::new();
                     for c in commits.iter().rev().take(15) {
@@ -354,9 +367,9 @@ async fn fetch_github_update_metadata(
                         commit_changelog = lines.join("\n");
                     }
                 }
-            }
+            } else { comparison_error=Some("Invalid comparison response".to_string()); }
         } else {
-            commits_behind = 1;
+            comparison_error=Some("Could not compare the installed and upstream commits".to_string());
         }
     }
 
@@ -383,6 +396,7 @@ async fn fetch_github_update_metadata(
         combined_notes,
         html_url,
         download_url,
+        comparison_error,
     )
 }
 

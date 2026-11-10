@@ -110,7 +110,7 @@ async fn curl_fetch(url: &str) -> Result<String, String> {
             "--proto",
             "=https",
             "--tlsv1.2",
-            "-sSL",
+            "-fsSL",
             "--connect-timeout",
             "8",
             "--max-time",
@@ -151,7 +151,9 @@ async fn check_github_updates_async() -> RemoteUpdateCheck {
         curl_fetch(&release_url),
     );
 
-    if commit_res.is_err() && cargo_res.is_err() && release_res.is_err() {
+    let valid_commit = commit_res.as_ref().ok()
+        .is_some_and(|raw|omen_types::parse_commit_metadata(raw).is_ok());
+    if !valid_commit {
         return RemoteUpdateCheck {
             installed_ver: installed_ver.clone(),
             installed_short,
@@ -160,7 +162,7 @@ async fn check_github_updates_async() -> RemoteUpdateCheck {
             commits_ahead: 0,
             update_available: false,
             changelog: String::new(),
-            error: Some(i18n::t("connection_err").to_string()),
+            error: Some("Could not verify the upstream commit. Retry the update check.".to_string()),
         };
     }
 
@@ -213,6 +215,7 @@ async fn check_github_updates_async() -> RemoteUpdateCheck {
     }
 
     let mut commits_ahead = 0u32;
+    let mut comparison_error = None;
     let mut commit_list = Vec::new();
 
     if installed_sha != "unknown"
@@ -220,13 +223,16 @@ async fn check_github_updates_async() -> RemoteUpdateCheck {
         && installed_sha != remote_sha
     {
         let cmp_url = format!(
-            "https://api.github.com/repos/{}/compare/{}...main",
-            REPO_OWNER_NAME, installed_sha
+            "https://api.github.com/repos/{}/compare/{}...{}",
+            REPO_OWNER_NAME, installed_sha, remote_sha
         );
         if let Ok(cmp_str) = curl_fetch(&cmp_url).await {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&cmp_str) {
                 let status = v["status"].as_str().unwrap_or("");
-                commits_ahead = v["ahead_by"].as_u64().unwrap_or(0) as u32;
+                match omen_types::parse_comparison_ahead(&cmp_str) {
+                    Ok(count) => commits_ahead=count,
+                    Err(error) => comparison_error=Some(error),
+                }
                 if status == "diverged" && commits_ahead == 0 {
                     commits_ahead = 1;
                 }
@@ -249,9 +255,9 @@ async fn check_github_updates_async() -> RemoteUpdateCheck {
                         }
                     }
                 }
-            }
+            } else { comparison_error=Some("Invalid comparison response".to_string()); }
         } else {
-            commits_ahead = 1;
+            comparison_error=Some("Could not compare the installed and upstream commits".to_string());
         }
     }
 
@@ -280,7 +286,7 @@ async fn check_github_updates_async() -> RemoteUpdateCheck {
         commits_ahead,
         update_available,
         changelog,
-        error: None,
+        error: comparison_error.or_else(|| (installed_sha == "unknown").then(|| "Installed commit is unknown; only version information could be compared.".to_string())),
     }
 }
 
@@ -815,7 +821,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
                         "mkdir -p /var/cache/omen-space /etc/omen-space; ",
                         "if [ -d \"$CACHE_REPO/.git\" ]; then ",
                         "  git -c safe.directory=\"$CACHE_REPO\" -C \"$CACHE_REPO\" fetch --all --prune && ",
-                        "  git -c safe.directory=\"$CACHE_REPO\" -C \"$CACHE_REPO\" reset --hard origin/main; ",
+                        "  git -c safe.directory=\"$CACHE_REPO\" -C \"$CACHE_REPO\" merge --ff-only origin/main; ",
                         "else ",
                         "  rm -rf \"$CACHE_REPO\" && git clone --depth 1 https://github.com/yunusemreyl/omen-space.git \"$CACHE_REPO\"; ",
                         "fi; ",

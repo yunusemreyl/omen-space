@@ -26,10 +26,7 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
         .unwrap_or_default()
         .trim()
         .to_uppercase();
-    let per_key_boards = ["8D41", "8D87", "8D88", "8A17", "8BD4", "8A44", "8901"];
-    if per_key_boards.iter().any(|b| board_id.contains(b)) {
-        is_per_key = true;
-    }
+    is_per_key = detect_per_key_rgb(&board_id, is_per_key);
 
     let mut zone_override = 0;
     if let Ok(home) = std::env::var("HOME") {
@@ -126,108 +123,84 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
             .description(crate::i18n::t("lightbar_desc"))
             .build();
 
+        let lb_prod_lower = specs.product_name.to_lowercase();
+        let has_lightbar_hardware = detected_mode == KeyboardMode::DesktopRgb || lb_prod_lower.contains("desktop") || lb_prod_lower.contains("transcend") || lb_prod_lower.contains("max");
+        let initial = state_json_opt.as_ref().and_then(LightbarSettings::from_snapshot);
+        let lb_state = Rc::new(RefCell::new(initial.clone().unwrap_or_default()));
+        let syncing = Rc::new(std::cell::Cell::new(false));
+        let enabled = lb_state.borrow().power;
         let lb_enable_row = adw::SwitchRow::builder()
             .title(crate::i18n::t("lightbar_enable"))
             .subtitle(crate::i18n::t("lightbar_enable_sub"))
-            .build();
-        lb_enable_row.set_active(true);
+            .active(enabled).build();
         lb_group.add(&lb_enable_row);
 
+        let modes = ["static", "wave", "breathing", "cycle"];
         let lb_effect_model = gtk::StringList::new(&[
-            crate::i18n::t("effect_static"),
-            crate::i18n::t("effect_wave"),
-            crate::i18n::t("effect_breathing"),
-            crate::i18n::t("effect_cycle"),
+            crate::i18n::t("effect_static"), crate::i18n::t("effect_wave"),
+            crate::i18n::t("effect_breathing"), crate::i18n::t("effect_cycle"),
         ]);
-        let lb_speed_rc = Rc::new(RefCell::new(50.0));
-        let lb_speed_rc_c1 = lb_speed_rc.clone();
-        
         let lb_effect_row = adw::ComboRow::builder()
-            .title(crate::i18n::t("lightbar_effect"))
-            .model(&lb_effect_model)
-            .build();
-            
-        let lb_effect_row_rc = Rc::new(lb_effect_row.clone());
-        let lber_c = lb_effect_row_rc.clone();
-        let lbs_c2 = lb_speed_rc.clone();
-        
-        lb_effect_row.connect_selected_notify(move |row| {
-            let mode = match row.selected() {
-                1 => "wave",
-                2 => "breathing",
-                3 => "cycle",
-                _ => "static",
-            };
-            crate::daemon_client::set_lightbar_global_sync(true, 100, mode, *lbs_c2.borrow() as i32);
-        });
+            .title(crate::i18n::t("lightbar_effect")).model(&lb_effect_model)
+            .selected(modes.iter().position(|m| *m == lb_state.borrow().mode).unwrap_or(0) as u32)
+            .visible(enabled).build();
         lb_group.add(&lb_effect_row);
-
-        let lb_speed_row = adw::ActionRow::builder().title(crate::i18n::t("kb_effect_speed")).build();
-        let lb_speed_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
-        lb_speed_scale.set_value(50.0);
-        lb_speed_scale.set_draw_value(true);
-        lb_speed_scale.set_hexpand(false);
-        lb_speed_scale.set_size_request(250, -1);
-        lb_speed_scale.set_margin_start(12);
-        lb_speed_scale.set_margin_end(12);
-        lb_speed_scale.set_valign(gtk::Align::Center);
-        lb_speed_row.add_suffix(&lb_speed_scale);
-        lb_group.add(&lb_speed_row);
-        
-        lb_speed_scale.connect_value_changed(move |scale| {
-            let speed = scale.value();
-            *lb_speed_rc_c1.borrow_mut() = speed;
-            let row = &*lber_c;
-            let mode = match row.selected() {
-                1 => "wave",
-                2 => "breathing",
-                3 => "cycle",
-                _ => "static",
-            };
-            crate::daemon_client::set_lightbar_global_sync(true, 100, mode, speed as i32);
-        });
-
-        let lb_bright_row = adw::ActionRow::builder().title(crate::i18n::t("lightbar_brightness")).build();
-        let lb_bright_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
-        lb_bright_scale.set_value(80.0);
-        lb_bright_scale.set_draw_value(true);
-        lb_bright_scale.set_hexpand(false);
-        lb_bright_scale.set_size_request(250, -1);
-        lb_bright_scale.set_margin_start(12);
-        lb_bright_scale.set_margin_end(12);
-        lb_bright_scale.set_valign(gtk::Align::Center);
-        lb_bright_row.add_suffix(&lb_bright_scale);
-        lb_group.add(&lb_bright_row);
-        
-        lb_bright_scale.connect_value_changed(move |scale| {
-            let val = scale.value() as i32;
-            crate::daemon_client::set_lightbar_global_sync(val > 0, val, "static", 50);
-        });
-
+        let lb_speed_row = adw::ActionRow::builder().title(crate::i18n::t("kb_effect_speed")).visible(enabled).build();
+        let lb_speed_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal,1.0,100.0,1.0);
+        lb_speed_scale.set_value(lb_state.borrow().speed as f64);
+        lb_speed_scale.set_size_request(250,-1);
+        lb_speed_row.add_suffix(&lb_speed_scale);lb_group.add(&lb_speed_row);
+        let lb_bright_row = adw::ActionRow::builder().title(crate::i18n::t("lightbar_brightness")).visible(enabled).build();
+        let lb_bright_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal,0.0,100.0,1.0);
+        lb_bright_scale.set_value(lb_state.borrow().brightness as f64);
+        lb_bright_scale.set_size_request(250,-1);
+        lb_bright_row.add_suffix(&lb_bright_scale);lb_group.add(&lb_bright_row);
         page.add(&lb_group);
+        let lb_preview_group = adw::PreferencesGroup::builder().title(crate::i18n::t("lightbar_segments")).visible(enabled).build();
+        lb_preview_group.add(&build_interactive_lightbar(&state_json_opt));page.add(&lb_preview_group);
 
-        let lb_preview_group = adw::PreferencesGroup::builder()
-            .title(crate::i18n::t("lightbar_segments"))
-            .build();
-        let lb_widget = build_interactive_lightbar(&state_json_opt);
-        lb_preview_group.add(&lb_widget);
-        page.add(&lb_preview_group);
-
-        let lb_effect_row_c = lb_effect_row.clone();
-        let lb_bright_row_c = lb_bright_row.clone();
-        let lb_speed_row_c = lb_speed_row.clone();
-        let lb_preview_group_c = lb_preview_group.clone();
-
-        lb_enable_row.connect_active_notify(move |row| {
-            let is_active = row.is_active();
-            lb_effect_row_c.set_visible(is_active);
-            lb_speed_row_c.set_visible(is_active);
-            lb_bright_row_c.set_visible(is_active);
-            lb_preview_group_c.set_visible(is_active);
-            crate::daemon_client::set_lightbar_global_sync(is_active, 100, "static", 50);
+        let state=lb_state.clone();let guard=syncing.clone();
+        lb_effect_row.connect_selected_notify(move |row| {
+            if guard.get() {return;}
+            let mut state=state.borrow_mut();state.mode=modes.get(row.selected() as usize).unwrap_or(&"static").to_string();state.send();
         });
-        let lb_prod_lower = specs.product_name.to_lowercase();
-        let has_lightbar_hardware = detected_mode == KeyboardMode::DesktopRgb || lb_prod_lower.contains("desktop") || lb_prod_lower.contains("transcend") || lb_prod_lower.contains("max");
+        let state=lb_state.clone();let guard=syncing.clone();
+        lb_speed_scale.connect_value_changed(move |scale| {
+            if guard.get() {return;}
+            let mut state=state.borrow_mut();state.speed=scale.value() as i32;state.send();
+        });
+        let state=lb_state.clone();let guard=syncing.clone();
+        lb_bright_scale.connect_value_changed(move |scale| {
+            if guard.get() {return;}
+            let mut state=state.borrow_mut();state.brightness=scale.value() as i32;state.send();
+        });
+        let state=lb_state.clone();let guard=syncing.clone();
+        let effect=lb_effect_row.clone();let speed=lb_speed_row.clone();let brightness=lb_bright_row.clone();let preview=lb_preview_group.clone();
+        lb_enable_row.connect_active_notify(move |row| {
+            if guard.get() {return;}
+            let active=row.is_active();effect.set_visible(active);speed.set_visible(active);brightness.set_visible(active);preview.set_visible(active);
+            let mut state=state.borrow_mut();state.power=active;state.send();
+        });
+        if initial.is_none() {
+            // Do not let an initial timeout become an accidental write of guessed defaults.
+            lb_group.set_sensitive(false);lb_preview_group.set_sensitive(false);
+            let group=lb_group.clone();let preview=lb_preview_group.clone();
+            let enable=lb_enable_row.clone();let effect=lb_effect_row.clone();
+            let speed_row=lb_speed_row.clone();let bright_row=lb_bright_row.clone();
+            glib::spawn_future_local(async move {
+                if let Ok(raw)=crate::daemon_client::get_rgb_state_async().await {
+                    if let Ok(v)=serde_json::from_str::<serde_json::Value>(&raw) {
+                        if let Some(state)=LightbarSettings::from_snapshot(&v) {
+                            syncing.set(true);*lb_state.borrow_mut()=state.clone();
+                            enable.set_active(state.power);effect.set_selected(modes.iter().position(|m|*m==state.mode).unwrap_or(0) as u32);
+                            lb_speed_scale.set_value(state.speed as f64);lb_bright_scale.set_value(state.brightness as f64);
+                            effect.set_visible(state.power);speed_row.set_visible(state.power);bright_row.set_visible(state.power);preview.set_visible(state.power);
+                            group.set_sensitive(has_lightbar_hardware);preview.set_sensitive(has_lightbar_hardware);syncing.set(false);
+                        }
+                    }
+                }
+            });
+        }
         let mut show_lightbar = true;
         if let Ok(home) = std::env::var("HOME") {
             let path = format!("{}/.config/omenspace/settings.json", home);

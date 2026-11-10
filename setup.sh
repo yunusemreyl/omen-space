@@ -423,7 +423,7 @@ EOF
     echo "====================================="
     cd driver
     chmod +x setup.sh
-    ./setup.sh install || true
+    ./setup.sh install
     cd ..
 
     emit_step 5 94 "Starting omen-space-daemon service & verifying connection..."
@@ -555,8 +555,12 @@ prepare_update_repo() {
         echo "Source tree not found in $(pwd); fetching latest repository into $CACHE_REPO..."
         mkdir -p "/var/cache/omen-space"
         if [ -d "$CACHE_REPO/.git" ]; then
-            git -c safe.directory="$CACHE_REPO" -C "$CACHE_REPO" fetch --all --prune && \
-            git -c safe.directory="$CACHE_REPO" -C "$CACHE_REPO" reset --hard origin/main
+            if [ -n "$(git -c safe.directory="$CACHE_REPO" -C "$CACHE_REPO" status --porcelain)" ]; then
+                echo "ERROR: Cached checkout contains local changes; preserve them before updating." >&2
+                return 1
+            fi
+            git -c safe.directory="$CACHE_REPO" -C "$CACHE_REPO" fetch origin main --prune
+            git -c safe.directory="$CACHE_REPO" -C "$CACHE_REPO" merge --ff-only FETCH_HEAD
         else
             rm -rf "$CACHE_REPO"
             git clone --depth 1 https://github.com/yunusemreyl/omen-space.git "$CACHE_REPO"
@@ -569,17 +573,15 @@ prepare_update_repo() {
 
     if [ -d ".git" ] && [ "${OMEN_POST_PULL:-0}" != "1" ]; then
         echo "Pulling latest changes from origin/main in $SCRIPT_DIR..."
-        # Revert automated build-time edits so git pull never aborts on Cargo.toml/Cargo.lock
-        git -c safe.directory="$SCRIPT_DIR" checkout -- src/omen-space-daemon/Cargo.toml Cargo.lock 2>/dev/null || true
+        if [ -n "$(git -c safe.directory="$SCRIPT_DIR" status --porcelain)" ]; then
+            echo "ERROR: Local source changes found in $SCRIPT_DIR. Commit or stash them before updating." >&2
+            return 1
+        fi
 
         if git -c safe.directory="$SCRIPT_DIR" fetch origin main --prune; then
             if ! git -c safe.directory="$SCRIPT_DIR" merge --ff-only FETCH_HEAD; then
-                if [[ "$SCRIPT_DIR" == "/var/cache/omen-space/repo" ]] || [[ "${OMEN_UPDATER_UI:-0}" == "1" ]]; then
-                    echo "Fast-forward merge not possible; resetting working tree to origin/main..."
-                    git -c safe.directory="$SCRIPT_DIR" reset --hard FETCH_HEAD
-                else
-                    echo "Warning: Local repository has diverged from origin/main; building current checkout."
-                fi
+                echo "ERROR: Local history diverges from origin/main. Resolve it before updating; no commits were discarded." >&2
+                return 1
             fi
             export OMEN_POST_PULL=1
             exec bash "$SCRIPT_DIR/setup.sh" update "$@"

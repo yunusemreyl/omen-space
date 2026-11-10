@@ -364,7 +364,7 @@ pub fn drive_usage(
 ) -> Vec<DriveUsage> {
     let mut usage: Vec<DriveUsage> = drives
         .iter()
-        .map(|d| DriveUsage { name: d.name.clone(), ..Default::default() })
+        .map(|d| DriveUsage { name: d.name.clone(), usage_complete: Some(true), ..Default::default() })
         .collect();
 
     let mut order: Vec<&str> = Vec::new();
@@ -398,8 +398,8 @@ pub fn drive_usage(
         if let Some(fs) = group.iter().find_map(|m| statvfs(&m.mountpoint)) {
             slot.used_bytes = slot.used_bytes.saturating_add(fs.used);
             slot.total_bytes = slot.total_bytes.saturating_add(fs.total);
-        } else if let Some(blk_size) = block_size_bytes(sys_root, group[0]) {
-            slot.total_bytes = slot.total_bytes.saturating_add(blk_size);
+        } else {
+            slot.usage_complete = Some(false);
         }
     }
     usage
@@ -860,6 +860,24 @@ mod tests {
         assert!(usage.iter().all(|u| u.total_bytes == 0 && u.mounts.is_empty()));
     }
 
+
+    #[test]
+    fn missing_filesystem_statistics_do_not_look_like_empty_block_capacity() {
+        let t=Tree::new("unreadable-regression");t.disk("sda","pci/sda",1_000_000,false,Some("SATA"));
+        let mounts=parse_mountinfo("10 1 8:0 / /mnt/private rw - ext4 /dev/sda rw\n");
+        let usage=drive_usage(&list_internal_drives(t.sys()),&mounts,t.sys(),&|_|None);
+        assert_eq!((usage[0].used_bytes,usage[0].total_bytes),(0,0));
+        assert_eq!(usage[0].usage_complete,Some(false));
+    }
+    #[test]
+    fn mixed_readable_and_unreadable_filesystems_are_explicitly_partial() {
+        let t=this_machine("partial-regression");
+        let mounts=parse_mountinfo("10 1 259:2 / / rw - ext4 /dev/nvme0n1p2 rw\n11 1 259:1 / /boot rw - vfat /dev/nvme0n1p1 rw\n");
+        let usage=drive_usage(&list_internal_drives(t.sys()),&mounts,t.sys(),&|p|if p=="/" {Some(FsUsage{used:100,total:400})}else{None});
+        assert_eq!((usage[0].used_bytes,usage[0].total_bytes),(100,400));
+        assert_eq!(usage[0].usage_complete,Some(false));
+    }
+
     // ── legacy fields ──
 
     #[test]
@@ -875,8 +893,8 @@ mod tests {
     #[test]
     fn legacy_disk_fields_describe_the_first_drive_in_decimal_gb() {
         let usage = vec![
-            DriveUsage { name: "a".into(), used_bytes: 48_000_000_000, total_bytes: 1_024_000_000_000, mounts: vec![] },
-            DriveUsage { name: "b".into(), used_bytes: 9, total_bytes: 10, mounts: vec![] },
+            DriveUsage { name: "a".into(), used_bytes: 48_000_000_000, total_bytes: 1_024_000_000_000, mounts: vec![], ..Default::default() },
+            DriveUsage { name: "b".into(), used_bytes: 9, total_bytes: 10, mounts: vec![], ..Default::default() },
         ];
         let (used, total, frac) = legacy_disk_fields(&usage);
         assert!((used - 48.0).abs() < 1e-9 && (total - 1024.0).abs() < 1e-9);
@@ -915,7 +933,7 @@ mod tests {
         assert_eq!(serde_json::from_str::<HardwareSpecs>(&json).unwrap().drives, specs.drives);
 
         let mut stats = SystemStats::default();
-        stats.drives = vec![DriveUsage { name: "nvme0n1".into(), used_bytes: 48, total_bytes: 1024, mounts: vec!["/".into()] }];
+        stats.drives = vec![DriveUsage { name: "nvme0n1".into(), used_bytes: 48, total_bytes: 1024, mounts: vec!["/".into()], ..Default::default() }];
         stats.disk_total_gb = 1.0;
         let json = serde_json::to_string(&stats).unwrap();
         assert!(json.contains("\"disk_total_gb\""), "old GUIs still read the scalar fields");
