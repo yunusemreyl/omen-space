@@ -361,11 +361,11 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     app_group.add(&ver_row);
 
     // Live Update Status Row
-    let status_row = adw::ActionRow::builder()
-        .title(i18n::t("checking_updates_title"))
-        .subtitle(i18n::t("updater_checking_sub"))
-        .use_markup(false)
-        .build();
+    let status_row = adw::ActionRow::builder().use_markup(false).build();
+    // Set plain text after construction: ActionRow otherwise parses the initial
+    // title/subtitle as markup before applying use-markup=false.
+    status_row.set_title(i18n::t("checking_updates_title"));
+    status_row.set_subtitle(i18n::t("updater_checking_sub"));
     let status_icon = gtk::Image::builder()
         .icon_name("emblem-synchronizing-symbolic")
         .pixel_size(24)
@@ -1015,15 +1015,13 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     // Live DKMS driver status row
     let dkms_loaded = std::path::Path::new("/sys/module/hp_wmi").exists()
         && std::path::Path::new("/sys/module/hp_omen_extra").exists();
-    let dkms_row = adw::ActionRow::builder()
-        .title(i18n::t("updater_dkms_driver"))
-        .subtitle(if dkms_loaded {
-            i18n::t("updater_dkms_loaded")
-        } else {
-            i18n::t("updater_dkms_missing")
-        })
-        .use_markup(false)
-        .build();
+    let dkms_row = adw::ActionRow::builder().use_markup(false).build();
+    dkms_row.set_title(i18n::t("updater_dkms_driver"));
+    dkms_row.set_subtitle(if dkms_loaded {
+        i18n::t("updater_dkms_loaded")
+    } else {
+        i18n::t("updater_dkms_missing")
+    });
     let dkms_icon = gtk::Image::builder()
         .icon_name(if dkms_loaded {
             "object-select-symbolic"
