@@ -116,7 +116,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     // 1. Hardware & Driver Status Group
     // ─────────────────────────────────────────────────────────────────────────
     let hw_group = adw::PreferencesGroup::builder()
-        .title("Hardware & Driver Environment")
+        .title("Hardware &amp; Driver Environment")
         .description("Detected system identity, ACPI WMI tables, and kernel module bindings")
         .build();
 
@@ -179,7 +179,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
         }
     }
     let conflict_row = adw::ActionRow::builder()
-        .title("Power & Thermal Service Conflicts")
+        .title("Power &amp; Thermal Service Conflicts")
         .subtitle(if conflicts.is_empty() {
             "No interfering services detected (thermald, power-profiles-daemon, tlp, throttled are inactive)".to_string()
         } else {
@@ -201,7 +201,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     // 2. Live Sensor & Telemetry Inspector Group
     // ─────────────────────────────────────────────────────────────────────────
     let telem_group = adw::PreferencesGroup::builder()
-        .title("Live Sensor & Hardware Telemetry")
+        .title("Live Sensor &amp; Hardware Telemetry")
         .description("Real-time metrics sampled directly from kernel sysfs, hwmon, and NVML")
         .build();
 
@@ -224,7 +224,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     telem_group.add(&fan_telem_row);
 
     let battery_telem_row = adw::ActionRow::builder()
-        .title("Battery & Power Source")
+        .title("Battery &amp; Power Source")
         .subtitle("Charge: --% | Care Limit: --% | Status: --")
         .build();
     telem_group.add(&battery_telem_row);
@@ -264,7 +264,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
 
     // Sysfs / hwmon explorer expander row
     let sysfs_expander = adw::ExpanderRow::builder()
-        .title("Sysfs & Hwmon Detected Paths")
+        .title("Sysfs &amp; Hwmon Detected Paths")
         .subtitle("Click to inspect discovered kernel paths on this device")
         .build();
 
@@ -354,7 +354,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     // RGB Lighting Test Row
     let rgb_test_row = adw::ActionRow::builder()
         .title("RGB Color Diagnostics")
-        .subtitle("Quick color verification across all zones & lightbar")
+        .subtitle("Quick color verification across all zones &amp; lightbar")
         .build();
 
     let rgb_btn_box = gtk::Box::builder()
@@ -413,7 +413,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
 
     // Hotkey & Macro Key Realtime Event Monitor
     let macro_row = adw::ActionRow::builder()
-        .title("Macro Key & Hotkey Event Listener")
+        .title("Macro Key &amp; Hotkey Event Listener")
         .subtitle("Press OMEN Key, Calculator, or P1..P6 to see live events")
         .build();
 
@@ -456,7 +456,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     // 4. EC (Embedded Controller) & WMI Diagnostic Explorer
     // ─────────────────────────────────────────────────────────────────────────
     let ec_group = adw::PreferencesGroup::builder()
-        .title("Embedded Controller & ACPI WMI Explorer")
+        .title("Embedded Controller &amp; ACPI WMI Explorer")
         .description("Inspect 256-byte EC register memory and BIOS query responses")
         .build();
 
@@ -539,12 +539,12 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     // 5. Diagnostics, Logs & GitHub Triage Bundle
     // ─────────────────────────────────────────────────────────────────────────
     let triage_group = adw::PreferencesGroup::builder()
-        .title("Diagnostic Reports & Issue Bundles")
+        .title("Diagnostic Reports &amp; Issue Bundles")
         .description("Generate complete hardware reports and open GitHub issues in 1-click")
         .build();
 
     let diag_row = adw::ActionRow::builder()
-        .title("Full Diagnostic Report (DSDT, EC & Sensors)")
+        .title("Full Diagnostic Report (DSDT, EC &amp; Sensors)")
         .subtitle("Analyzes ACPI WMI tables, sensor bindings, fan modes and thermal curves")
         .activatable(true)
         .build();
@@ -558,7 +558,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     triage_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
 
     let rgb_issue_row = adw::ActionRow::builder()
-        .title("RGB Keyboard & Lightbar Issue Bundle")
+        .title("RGB Keyboard &amp; Lightbar Issue Bundle")
         .subtitle("Dumps HID descriptors, USB endpoints, and WMI lighting status")
         .activatable(true)
         .build();
@@ -592,7 +592,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
 
     // Live System Logs Expander
     let logs_expander = adw::ExpanderRow::builder()
-        .title("System & Daemon Journal Logs")
+        .title("System &amp; Daemon Journal Logs")
         .subtitle("View recent output from omen-space-daemon and kernel dmesg")
         .build();
 

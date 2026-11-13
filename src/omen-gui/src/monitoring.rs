@@ -831,49 +831,6 @@ pub fn build_page(is_general: bool) -> gtk::Box {
     }
 
 
-    // ── Daemon Offline Dialog ────────────────────────────────────────────────
-    use libadwaita as adw;
-    use libadwaita::prelude::*;
-
-    let sec_clone = sec.clone();
-    crate::daemon_client::subscribe_daemon_status(move |status| {
-        use crate::daemon_client::DaemonStatus;
-        if status == DaemonStatus::Offline {
-            if let Some(win) = sec_clone.root().and_downcast::<gtk::Window>() {
-                let dialog = adw::MessageDialog::new(
-                    Some(&win),
-                    Some(crate::i18n::t("daemon_offline_title")),
-                    Some(crate::i18n::t("daemon_offline_msg"))
-                );
-                dialog.add_response("cancel", crate::i18n::t("btn_cancel"));
-                dialog.add_response("restart", crate::i18n::t("btn_restart"));
-                dialog.set_response_appearance("restart", adw::ResponseAppearance::Suggested);
-                
-                dialog.connect_response(None, |d, response| {
-                    if response == "restart" {
-                        let spawned = std::process::Command::new("pkexec")
-                            .args(["systemctl", "restart", "omen-space-daemon"])
-                            .spawn();
-                        match spawned {
-                            Ok(mut child) => {
-                                std::thread::spawn(move || { let _ = child.wait(); });
-                            }
-                            Err(_) => {
-                                if let Ok(mut child) = std::process::Command::new("systemctl")
-                                    .args(["restart", "omen-space-daemon"])
-                                    .spawn() {
-                                    std::thread::spawn(move || { let _ = child.wait(); });
-                                }
-                            }
-                        }
-                    }
-                    d.close();
-                });
-                dialog.present();
-            }
-        }
-    });
-
     // 2. Main monitor row: CPU + GPU + Device
 
     let mon_row = gtk::Box::builder()
