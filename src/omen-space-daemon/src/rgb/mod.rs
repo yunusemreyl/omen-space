@@ -47,6 +47,19 @@ struct RgbHardware {
     board_id: String,
 }
 
+pub(crate) fn lightbar_allowed_for(
+    board_id: &str,
+    caps: &crate::capabilities::ModelCapabilities,
+    product_name: &str,
+) -> bool {
+    let known_board = caps.product_id.eq_ignore_ascii_case(board_id.trim());
+    if !known_board || caps.has_light_bar {
+        return true;
+    }
+    let prod = product_name.to_lowercase();
+    prod.contains("desktop") || prod.contains("transcend") || prod.contains("max")
+}
+
 pub(crate) fn map_four_zone_index(board_id: &str, zone: usize) -> usize {
     if matches!(board_id.trim().to_uppercase().as_str(), "8EEF" | "8EDD" | "8EEC") {
         // OMEN HyperX 15/16 (boards 8EEF / 8EDD / 8EEC) wire their 4-zone WMI buffer in the
@@ -236,6 +249,15 @@ impl RgbHardware {
                 let _ = std::fs::write(&led_path, format!("{} {} {}", r, g, b));
             }
         }
+    }
+
+    /// False only when the capability database has an exact entry for this board saying it
+    /// has no light bar and the product name is not one of the light-bar families. Boards
+    /// missing from the database keep the previous behaviour.
+    fn lightbar_write_allowed(&self) -> bool {
+        let prod_name = std::fs::read_to_string("/sys/class/dmi/id/product_name").unwrap_or_default();
+        let caps = crate::capabilities::detect(&self.board_id, "", "");
+        lightbar_allowed_for(&self.board_id, &caps, &prod_name)
     }
 
     fn has_lightbar(&self) -> bool {
@@ -1099,7 +1121,11 @@ impl RgbService {
         }
 
         // ── Lightbar ────────────────────────────────────────────────────────────
-        if g.hw.available {
+        // hp-omen-extra always exposes a `lightbar` node and, when the lightbar WMI queries
+        // (0x0A/0x0B) fail, falls back to the keyboard colour table. On boards the database
+        // knows have no light bar (e.g. 878A) that painted the lightbar colours onto the
+        // keyboard zones on every apply before the real keyboard colours were written.
+        if g.hw.available && g.hw.lightbar_write_allowed() {
             let lb_colors: Vec<String> = if !g.config.lightbar_power || g.config.lightbar_brightness == 0 {
                 vec!["000000".to_string(); 4]
             } else {
@@ -1578,6 +1604,31 @@ mod mcu_effect_tests {
         assert_eq!(&r[24..27], &[0, 255, 0]);
         assert!(b.mcu_effect_for("reactive", 50, "ltr", &c).is_none());
         assert!(b.mcu_effect_for("wave", 50, "ltr", &c).is_none());
+    }
+}
+
+#[cfg(test)]
+mod lightbar_gate_tests {
+    use super::lightbar_allowed_for;
+
+    #[test]
+    fn known_board_without_light_bar_is_not_written() {
+        let caps = crate::capabilities::detect("878A", "", "");
+        assert_eq!(caps.product_id, "878A");
+        assert!(!lightbar_allowed_for("878A", &caps, "OMEN Laptop 15-ek0xxx"));
+    }
+
+    #[test]
+    fn unknown_and_light_bar_boards_keep_previous_behaviour() {
+        let unknown = crate::capabilities::detect("ZZZZ", "", "");
+        assert!(lightbar_allowed_for("ZZZZ", &unknown, "Some HP Laptop"));
+        let with_bar = crate::capabilities::detect("8D41", "", "");
+        assert!(with_bar.has_light_bar);
+        assert!(lightbar_allowed_for("8D41", &with_bar, "OMEN MAX Gaming Laptop 16-ah0xxx"));
+        // Known board flagged without a light bar, but in a light-bar product family.
+        let mut odd = crate::capabilities::detect("878A", "", "");
+        odd.has_light_bar = false;
+        assert!(lightbar_allowed_for("878A", &odd, "OMEN Transcend 16"));
     }
 }
 
