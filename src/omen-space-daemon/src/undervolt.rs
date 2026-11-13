@@ -280,6 +280,7 @@ impl UndervoltService {
         if available {
             svc.check_startup_recovery().await;
             svc.apply_all_offsets().await;
+            svc.restore_saved_tcc_offset().await;
         } else {
             if is_amd {
                 warn!("Undervolt: ryzenadj is not installed. AMD tuning unavailable.");
@@ -317,6 +318,27 @@ impl UndervoltService {
                 }
             }
         }
+    }
+
+    /// The TCC offset lives in MSR 0x1a2, which firmware resets on every boot, so a saved
+    /// offset was silently lost after a reboot while the config still showed it. Re-apply it
+    /// at startup. Only a non-zero saved value is restored: 0 is also the "never set" default,
+    /// and writing it could lower a firmware-provided offset.
+    async fn restore_saved_tcc_offset(&self) {
+        let saved = self.config.lock().await.tcc_offset;
+        if !Self::should_restore_tcc(saved, if self.is_amd { None } else { read_intel_tcc_hw().1 }) {
+            return;
+        }
+        let result = self.set_tcc_offset(saved).await;
+        if result == "OK" {
+            info!("Undervolt: restored saved TCC offset {}°C", saved);
+        } else {
+            warn!("Undervolt: could not restore saved TCC offset {}°C: {}", saved, result);
+        }
+    }
+
+    pub(crate) fn should_restore_tcc(saved: i32, hw_offset: Option<i32>) -> bool {
+        saved > 0 && hw_offset != Some(saved)
     }
 
     async fn check_startup_recovery(&self) {
@@ -623,6 +645,15 @@ impl UndervoltService {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn saved_tcc_offset_is_restored_only_when_set_and_different() {
+        use super::UndervoltService as U;
+        assert!(U::should_restore_tcc(15, Some(3)), "boot reset to firmware default must be restored");
+        assert!(U::should_restore_tcc(15, None));
+        assert!(!U::should_restore_tcc(15, Some(15)), "already applied");
+        assert!(!U::should_restore_tcc(0, Some(3)), "0 is the never-set default; keep firmware offset");
+    }
+
     use super::is_cpu_voltage_locked;
 
     #[test]

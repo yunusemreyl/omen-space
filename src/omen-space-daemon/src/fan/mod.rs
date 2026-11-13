@@ -384,6 +384,17 @@ impl FanService {
         pwm.clamp(0, 255)
     }
 
+    /// True when a curve-driven mode cannot be honoured because the hwmon has no `pwm1` node.
+    pub(crate) fn curve_mode_delegates_to_firmware(mode: &str, has_hwmon: bool, has_pwm_node: bool) -> bool {
+        has_hwmon && !has_pwm_node && matches!(mode, "auto" | "performance" | "custom")
+    }
+
+    /// pwm1_enable value to request on boards whose hwmon has no `pwm1` node, i.e. where
+    /// only max boost (0) and firmware control (2) exist. Manual mode (1) is never valid there.
+    pub(crate) fn pwm_enable_without_pwm_node(pct: u32) -> i64 {
+        if pct >= 100 { 0 } else { 2 }
+    }
+
     /// Write PWM duty cycle to hwmon. This sets both the mode (pwm1_enable=1 or 0 for max)
     /// and the duty value (pwm1=0..255), matching OmenCore's SetHwmonPwmDutyPercent.
     async fn write_pwm_duty(state: &mut FanState, pct: u32) -> bool {
@@ -427,15 +438,27 @@ impl FanService {
             (d, ((d as f64 * 100.0) / 255.0).round() as u32)
         };
 
-        // If the hardware does not expose a manual PWM node, intermediate duty cycles cannot be set
+        // If the hardware does not expose a manual PWM node, intermediate duty cycles cannot be set.
+        // The driver rejects pwm1_enable=1 (-EOPNOTSUPP) on these boards (e.g. 878A, where
+        // hp-wmi blocks manual fan writes), so asking for manual mode here left the fans
+        // latched in max boost (pwm1_enable=0) forever once a curve had requested 100%.
+        // Anything below 100% is therefore handed back to firmware control (pwm1_enable=2).
         if !sysfs_exists(&pwm_path).await {
             if sysfs_exists(&pwm_enable_path).await {
                 let current = sysfs_read(&pwm_enable_path, 2).await;
-                let target_mode = if pct == 0 { 2 } else { 1 };
+                let target_mode = Self::pwm_enable_without_pwm_node(pct);
                 if current != target_mode {
-                    let _ = sysfs_write(&pwm_enable_path, target_mode.to_string()).await;
+                    if sysfs_write(&pwm_enable_path, target_mode.to_string()).await {
+                        if current == 0 {
+                            info!("Released max fan boost: pwm1_enable=2 (no manual PWM node, requested {}%)", pct);
+                        }
+                    } else {
+                        warn!("Failed to set pwm1_enable={} (no manual PWM node, requested {}%)", target_mode, pct);
+                    }
                 }
             }
+            // Firmware owns the fan speed now; drop the stale max-boost targets.
+            state.last_targets.clear();
             state.last_written_duty = Some(duty);
             state.last_written_duty_time = Some(now);
             return true;
@@ -740,6 +763,19 @@ impl FanService {
 
             if fans.is_empty() {
                 continue;
+            }
+
+            // Boards without a manual PWM node (e.g. 878A) can only do firmware control or max
+            // boost. A software curve there degenerates into "firmware until 85°C, then full
+            // blast", so leave curve-driven modes entirely to the firmware. Explicit Max mode
+            // and thermal protection (handled above) still engage max boost.
+            {
+                let mut state = self.state.lock().await;
+                let has_pwm = Self::has_pwm_fallback(&state).await;
+                if Self::curve_mode_delegates_to_firmware(&mode, state.hwmon_path.is_some(), has_pwm) {
+                    Self::write_pwm_duty(&mut state, 0).await;
+                    continue;
+                }
             }
 
             match mode.as_str() {
@@ -1052,6 +1088,8 @@ impl FanService {
 
         // Step 1: Write pwm1_enable
         let mut ok = false;
+        // Value actually written (differs from pwm_enable_val when the board has no pwm1 node).
+        let mut written_enable_val = pwm_enable_val;
         if let Some(ref hwmon) = state.hwmon_path {
             if pwm_enable_val == 0 {
                 // Max boost mode: write 1, write 255 if pwm1 exists, then write 0
@@ -1065,6 +1103,7 @@ impl FanService {
                     // Manual PWM control is not supported without pwm1 sysfs node.
                     // Fall back to hardware EC mode (pwm1_enable=2) instead of failing.
                     ok = sysfs_write(hwmon.join("pwm1_enable"), "2").await;
+                    written_enable_val = 2;
                 } else {
                     let current = sysfs_read(hwmon.join("pwm1_enable"), 2).await;
                     if current == 0 {
@@ -1077,7 +1116,7 @@ impl FanService {
                 ok = sysfs_write(hwmon.join("pwm1_enable"), "2").await;
             }
             if ok {
-                info!("Set pwm1_enable={} (mode={})", pwm_enable_val, mode);
+                info!("Set pwm1_enable={} (mode={})", written_enable_val, mode);
                 if mode == "ec" {
                     info!("Hardware (EC) fan control delegated; BIOS watchdog handoff may take up to 120s.");
                 }
@@ -1514,6 +1553,90 @@ mod tests {
 #[cfg(test)]
 mod regression_fan {
     use super::*;
+
+    fn test_state(hwmon: PathBuf) -> FanState {
+        let mut max_speeds = HashMap::new();
+        max_speeds.insert(1, 6000);
+        max_speeds.insert(2, 6000);
+        FanState {
+            hwmon_path: Some(hwmon),
+            minimum_manual_pwm: 50,
+            found_fans: vec![1, 2],
+            max_speeds,
+            fallback_paths: HashMap::new(),
+            fan_count: 2,
+            mode: "auto".to_string(),
+            custom_curve_json: "[]".to_string(),
+            last_targets: HashMap::new(),
+            thermal_protection_active: false,
+            thermal_protection_enabled: true,
+            thermal_protection_entered_at: std::time::Instant::now(),
+            suppress_ec_notice: false,
+            pre_protection_mode: None,
+            manual_target_pct: None,
+            last_keepalive: std::time::Instant::now(),
+            auto_fan_activated_at: None,
+            temp_history: std::collections::VecDeque::new(),
+            last_auto_pct: 0,
+            last_auto_pct_time: std::time::Instant::now(),
+            perf_cooldown_start: None,
+            last_perf_pct: 0,
+            last_perf_pct_time: std::time::Instant::now(),
+            last_power_profile_was_perf: false,
+            last_written_duty: None,
+            last_written_duty_time: None,
+            last_hw_detect_attempt: std::time::Instant::now(),
+            signal_ctx: None,
+        }
+    }
+
+    #[test]
+    fn curve_modes_delegate_to_firmware_only_without_pwm_node() {
+        for mode in ["auto", "performance", "custom"] {
+            assert!(FanService::curve_mode_delegates_to_firmware(mode, true, false), "{}", mode);
+            assert!(!FanService::curve_mode_delegates_to_firmware(mode, true, true), "{}", mode);
+            assert!(!FanService::curve_mode_delegates_to_firmware(mode, false, false), "{}", mode);
+        }
+        for mode in ["max", "ec"] {
+            assert!(!FanService::curve_mode_delegates_to_firmware(mode, true, false), "{}", mode);
+        }
+    }
+
+    #[test]
+    fn pwm_enable_without_pwm_node_never_requests_manual() {
+        assert_eq!(FanService::pwm_enable_without_pwm_node(100), 0);
+        for pct in [0, 1, 35, 75, 99] {
+            assert_eq!(FanService::pwm_enable_without_pwm_node(pct), 2, "pct {}", pct);
+        }
+    }
+
+    /// Board 878A (OMEN 15-ek0xxx): hwmon exposes pwm1_enable but no pwm1. A curve request of
+    /// 100% latches max boost (0); the next lower request must hand control back to firmware (2)
+    /// instead of asking for manual mode (1), which the driver rejects, leaving fans stuck at max.
+    #[tokio::test]
+    async fn regression_max_boost_released_without_pwm_node() {
+        let dir = std::env::temp_dir().join(format!("omen-fan-nopwm-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("pwm1_enable"), "2").unwrap();
+        let mut state = test_state(dir.clone());
+
+        assert!(FanService::write_pwm_duty(&mut state, 100).await);
+        let at_max = std::fs::read_to_string(dir.join("pwm1_enable")).unwrap();
+        assert!(!state.last_targets.is_empty());
+
+        assert!(FanService::write_pwm_duty(&mut state, 75).await);
+        let after_cooldown = std::fs::read_to_string(dir.join("pwm1_enable")).unwrap();
+        let targets_cleared = state.last_targets.is_empty();
+
+        assert!(FanService::write_pwm_duty(&mut state, 0).await);
+        let at_zero = std::fs::read_to_string(dir.join("pwm1_enable")).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+
+        assert_eq!(at_max, "0", "100% must still engage max boost");
+        assert_eq!(after_cooldown, "2", "a sub-100% request must release max boost to firmware control");
+        assert!(targets_cleared, "stale max-boost targets must be dropped once firmware owns the fans");
+        assert_eq!(at_zero, "2");
+    }
     #[tokio::test]
     async fn regression_preserve_working_25_percent_request() {
         let mut state = FanState {

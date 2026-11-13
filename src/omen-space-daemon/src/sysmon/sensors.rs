@@ -59,6 +59,28 @@ pub fn smooth_cpu_temp(raw_celsius: i32) -> i32 {
     *guard = Some(smoothed);
     smoothed.round() as i32
 }
+/// Returns true when `path` exists and reads back as a plausible RPM value.
+pub(crate) fn fan_input_reads_ok(path: &std::path::Path) -> bool {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|s| s.trim().parse::<i32>().ok())
+        .is_some_and(|rpm| (0..=20_000).contains(&rpm))
+}
+
+/// One-shot verdict for WMAA-abort-prone boards: probe fan1_input once and remember the
+/// answer, so a board whose fan query really does abort is not re-queried on every rescan.
+/// Nothing is cached while the node is absent (hp-wmi may not have finished probing yet).
+fn abort_prone_fan_readback_ok(fan1_input: &std::path::Path) -> bool {
+    static VERDICT: OnceLock<bool> = OnceLock::new();
+    if let Some(ok) = VERDICT.get() {
+        return *ok;
+    }
+    if !fan1_input.exists() {
+        return false;
+    }
+    *VERDICT.get_or_init(|| fan_input_reads_ok(fan1_input))
+}
+
 pub fn init_sensor_paths() -> SensorPaths {
     let mut cpu_temp_path = None;
     let mut cpu_pwr_path = None;
@@ -83,10 +105,15 @@ pub fn init_sensor_paths() -> SensorPaths {
                     if p1.exists() { cpu_pwr_path = Some(p1); }
                 } else if name == "hp_wmi" || name == "hp" || name == "omen" {
                     let board_id = std::fs::read_to_string("/sys/class/dmi/id/board_name").unwrap_or_default();
-                    if !crate::capabilities::LinuxCapabilityClassifier::is_wmaa_abort_prone_board(&board_id) {
-                        let f1 = entry.join("fan1_input");
+                    let abort_prone = crate::capabilities::LinuxCapabilityClassifier::is_wmaa_abort_prone_board(&board_id);
+                    let f1 = entry.join("fan1_input");
+                    let f2 = entry.join("fan2_input");
+                    // WMAA-abort-prone boards (878A etc.) used to be denied hwmon RPM outright,
+                    // which left the monitor at 0 RPM even when the legacy fan-speed query works.
+                    // hp-wmi only exposes fan*_input when that query succeeded at probe, so a
+                    // single cached read-back check is enough to tell working boards apart.
+                    if !abort_prone || abort_prone_fan_readback_ok(&f1) {
                         if f1.exists() { fan1_path = Some(f1); }
-                        let f2 = entry.join("fan2_input");
                         if f2.exists() { fan2_path = Some(f2); }
                     }
                 } else if name.contains("nouveau") || name.contains("amdgpu") || name.contains("nvidia") {
@@ -152,6 +179,9 @@ pub fn get_hardware_specs() -> HardwareSpecs {
             prod = "Victus by HP Gaming Laptop 16".to_string();
         }
         specs.product_name = prod;
+        specs.board_name = fs::read_to_string("/sys/class/dmi/id/board_name")
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
 
         // 2. CPU info
         let mut cpu_name = String::from("Intel Core Processor");
@@ -320,4 +350,31 @@ pub fn get_hardware_specs() -> HardwareSpecs {
 
         specs
     }).clone()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fan_input_readback_accepts_only_parseable_rpm() {
+        let dir = std::env::temp_dir().join(format!("omen-sensors-fan-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let ok = dir.join("fan1_input");
+        let stopped = dir.join("fan2_input");
+        let garbage = dir.join("fan3_input");
+        fs::write(&ok, "2591\n").unwrap();
+        fs::write(&stopped, "0\n").unwrap();
+        fs::write(&garbage, "Invalid argument\n").unwrap();
+
+        let results = (
+            fan_input_reads_ok(&ok),
+            fan_input_reads_ok(&stopped),
+            fan_input_reads_ok(&garbage),
+            fan_input_reads_ok(&dir.join("fan4_input")),
+        );
+        let _ = fs::remove_dir_all(&dir);
+
+        assert_eq!(results, (true, true, false, false));
+    }
 }
