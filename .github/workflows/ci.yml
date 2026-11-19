@@ -19,9 +19,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Linux GUI & HID build dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          NEEDRESTART_MODE: a
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
+          sudo -E apt-get install -y --no-install-recommends \
+            -o Dpkg::Options::="--force-confdef" \
+            -o Dpkg::Options::="--force-confold" \
             build-essential \
             pkg-config \
             libgtk-4-dev \
