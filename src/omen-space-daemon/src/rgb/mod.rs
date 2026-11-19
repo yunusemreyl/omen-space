@@ -1766,7 +1766,7 @@ impl RgbService {
                 g.config.colors.resize(17, "FF0000".to_string());
             }
             if zone_val == 8 {
-                for i in 0..8 { g.config.colors[i] = hex.clone(); }
+                for slot in g.config.colors.iter_mut().take(8) { *slot = hex.clone(); }
             } else {
                 g.config.colors[zone_val as usize] = hex.clone();
             }
@@ -1823,7 +1823,7 @@ impl RgbService {
                 g.config.lightbar_colors.resize(4, "000000".to_string());
             }
             if zone_val == 4 {
-                for i in 0..4 { g.config.lightbar_colors[i] = hex.clone(); }
+                for slot in g.config.lightbar_colors.iter_mut().take(4) { *slot = hex.clone(); }
             } else if (0..4).contains(&zone_val) {
                 g.config.lightbar_colors[zone_val as usize] = hex;
             } else {

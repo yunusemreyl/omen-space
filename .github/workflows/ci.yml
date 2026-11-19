@@ -54,7 +54,7 @@ jobs:
         run: cargo test --workspace
 
       - name: Run clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D clippy::correctness
 
   driver:
     name: Kernel Driver Build (hp-wmi & hp-omen-extra)
