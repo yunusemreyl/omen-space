@@ -374,7 +374,7 @@ pub fn repair_graphical_session_env() {
                     }
                 }
             }
-            candidates.sort_by(|a, b| b.0.cmp(&a.0));
+            candidates.sort_by_key(|a| std::cmp::Reverse(a.0));
 
             let mut found_live = false;
             for (_mtime, name, path) in candidates {
@@ -416,7 +416,7 @@ pub fn repair_graphical_session_env() {
                     }
                 }
             }
-            auth_candidates.sort_by(|a, b| b.0.cmp(&a.0));
+            auth_candidates.sort_by_key(|a| std::cmp::Reverse(a.0));
             if let Some((_, newest_auth)) = auth_candidates.first() {
                 unsafe {
                     std::env::set_var("XAUTHORITY", newest_auth);
@@ -449,19 +449,20 @@ pub fn repair_graphical_session_env() {
             if let Ok(entries) = std::fs::read_dir("/tmp/.X11-unix") {
                 for entry in entries.flatten() {
                     let name = entry.file_name().to_string_lossy().to_string();
-                    if let Some(num) = name.strip_prefix('X') {
-                        if !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()) {
-                            let path = entry.path();
-                            let mtime = entry
-                                .metadata()
-                                .and_then(|m| m.modified())
-                                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                            x_candidates.push((mtime, format!(":{}", num), path));
-                        }
+                    if let Some(num) = name.strip_prefix('X')
+                        && !num.is_empty()
+                        && num.chars().all(|c| c.is_ascii_digit())
+                    {
+                        let path = entry.path();
+                        let mtime = entry
+                            .metadata()
+                            .and_then(|m| m.modified())
+                            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                        x_candidates.push((mtime, format!(":{}", num), path));
                     }
                 }
             }
-            x_candidates.sort_by(|a, b| b.0.cmp(&a.0));
+            x_candidates.sort_by_key(|a| std::cmp::Reverse(a.0));
             for (_mtime, disp, path) in x_candidates {
                 if is_unix_socket_alive(&path) {
                     unsafe {
