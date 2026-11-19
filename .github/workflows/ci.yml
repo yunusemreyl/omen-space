@@ -26,7 +26,6 @@ jobs:
             pkg-config \
             libgtk-4-dev \
             libadwaita-1-dev \
-            libgtk4-layer-shell-dev \
             libsystemd-dev \
             libdbus-1-dev \
             libudev-dev \
