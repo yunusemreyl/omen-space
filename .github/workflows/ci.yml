@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust Build, Test & Clippy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux GUI & HID build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            libgtk-4-dev \
+            libadwaita-1-dev \
+            libgtk4-layer-shell-dev \
+            libsystemd-dev \
+            libdbus-1-dev \
+            libudev-dev \
+            libhidapi-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check & build workspace
+        run: cargo build --workspace
+
+      - name: Run unit tests
+        run: cargo test --workspace
+
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  driver:
+    name: Kernel Driver Build (hp-wmi & hp-omen-extra)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kernel headers
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends build-essential bc flex bison libssl-dev libelf-dev
+          if [ ! -d "/lib/modules/$(uname -r)/build" ]; then
+            sudo apt-get install -y "linux-headers-$(uname -r)" || sudo apt-get install -y linux-headers-generic
+          fi
+
+      - name: Build hp-wmi.ko and hp-omen-extra.ko
+        run: |
+          KDIR="/lib/modules/$(uname -r)/build"
+          if [ ! -d "$KDIR" ]; then
+            KDIR=$(ls -d /usr/src/linux-headers-* 2>/dev/null | sort -V | tail -n 1)
+          fi
+          echo "Using KDIR=$KDIR"
+          make -C driver KDIR="$KDIR" modules
+          ls -lh driver/hp-wmi.ko driver/hp-omen-extra.ko
+
+  scripts:
+    name: Shell, Boards JSON & Python Tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check shell script syntax
+        run: bash -n setup.sh driver/setup.sh install.sh data/omen-space-daemon.openrc
+
+      - name: Validate boards.json
+        run: python3 -c "import json; d=json.load(open('src/omen-space-daemon/src/boards.json')); print(len(d['models']), 'models,', len(d['verified_boards']), 'verified')"
+
+      - name: Run Python test suites
+        run: |
+          python3 tests/test_update_safety.py
+          python3 tests/test_hwdb.py
