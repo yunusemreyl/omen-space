@@ -456,6 +456,16 @@ static const struct dmi_system_id victus_s_thermal_profile_boards[] __initconst 
 		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8E71")},
 		.driver_data = (void *)&victus_s_thermal_params,
 	},
+	{
+		/* 8DCF: Victus by HP Gaming Laptop 15-fa2xxx (#360, #369) */
+		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8DCF")},
+		.driver_data = (void *)&omen_v1_unknown_ec_thermal_params,
+	},
+	{
+		/* 8A4F: Victus by HP Gaming Laptop 15-fa0xxx (#356) */
+		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8A4F")},
+		.driver_data = (void *)&victus_s_thermal_params,
+	},
 	{},
 };
 
@@ -662,6 +672,11 @@ static bool force_fan_control_support = true;
 module_param(force_fan_control_support, bool, 0444);
 MODULE_PARM_DESC(force_fan_control_support,
 		 "Force support for manual fan control features (default: true)");
+
+static unsigned int max_fan_rpm = 0;
+module_param(max_fan_rpm, uint, 0444);
+MODULE_PARM_DESC(max_fan_rpm,
+		 "Override fallback max fan speed when firmware fan table is bogus (0=auto, 3000-7500 RPM or 30-75 x100 RPM)");
 
 static struct rfkill *wifi_rfkill;
 static struct rfkill *bluetooth_rfkill;
@@ -1648,16 +1663,17 @@ static int hp_wmi_get_mux_supported_modes(u8 *supported)
 	/* Try modern BIOS design data query (128-byte buffer) */
 	ret = hp_wmi_perform_query(HPWMI_GET_SYSTEM_DESIGN_DATA, HPWMI_GM,
 				   buffer, zero_if_sup(req_packet), sizeof(buffer));
-	if (ret == 0) {
+	if (ret == 0 && buffer[7] != 0) {
 		*supported = buffer[7];
 		return 0;
 	}
 
 	/*
 	 * (Fallback): Legacy BIOS behavior based on Omen Gaming Hub.
-	 * If the modern query is not supported, check if the MUX query endpoint
-	 * responds to a read request. If it succeeds, the hardware has MUX
-	 * capability but lacks the mode map, defaulting to Hybrid + Discrete.
+	 * If the modern query is not supported or reports a zero MUX mask,
+	 * check if the MUX query endpoint responds to a read request. If it
+	 * succeeds, the hardware has MUX capability but lacks the mode map,
+	 * defaulting to Hybrid + Discrete.
 	 *
 	 * DANGER: Sending HPWMI_GRAPHICS_MUX_QUERY to unsupported models (e.g.,
 	 * AMD Advantage laptops like OMEN 16-xd0xxx) will cause a severe ACPI
@@ -1704,6 +1720,23 @@ static int hp_wmi_set_mux_mode(u8 mode)
 
 	ret = hp_wmi_perform_query(HPWMI_GRAPHICS_MUX_QUERY, HPWMI_WRITE,
 				   buffer, sizeof(buffer), sizeof(buffer));
+	if (ret) {
+		buffer[0] = mode;
+		buffer[1] = 0;
+		buffer[2] = 0;
+		buffer[3] = 0;
+		ret = hp_wmi_perform_query(HPWMI_GRAPHICS_MUX_QUERY, HPWMI_WRITE,
+					   buffer, sizeof(buffer), 0);
+	}
+	if (ret) {
+		/* Fallback to HPWMI_READ (0x01) command as used by legacy Omen BIOSes (#369) */
+		buffer[0] = mode;
+		buffer[1] = 0;
+		buffer[2] = 0;
+		buffer[3] = 0;
+		ret = hp_wmi_perform_query(HPWMI_GRAPHICS_MUX_QUERY, HPWMI_READ,
+					   buffer, sizeof(buffer), sizeof(buffer));
+	}
 	if (ret < 0)
 		return ret;
 	if (ret > 0)
@@ -3549,14 +3582,38 @@ static void hp_wmi_hwmon_keep_alive_handler(struct work_struct *work)
 	mutex_unlock(&priv->hwmon_lock);
 }
 
+static u8 hp_wmi_resolve_fallback_max_rpm_fw(void)
+{
+	const char *board_name;
+
+	if (max_fan_rpm > 0) {
+		unsigned int fw = max_fan_rpm >= 1000 ? (max_fan_rpm / 100) : max_fan_rpm;
+		fw = clamp_val(fw, 30U, 75U);
+		pr_info("Using module parameter max_fan_rpm override: %u RPM\n", fw * 100);
+		return (u8)fw;
+	}
+
+	board_name = dmi_get_system_info(DMI_BOARD_NAME);
+	if (board_name) {
+		/* 8A17 (OMEN 17-ck1xxx): firmware fan table reports bogus max_rpm=20,
+		 * while real OGH Upper_Bound_List & measured max is 4600 RPM (#359). */
+		if (!strcmp(board_name, "8A17"))
+			return 46;
+	}
+
+	return VICTUS_S_FALLBACK_MAX_RPM_FW;
+}
+
 static void hp_wmi_set_fallback_fan_limits(struct hp_wmi_hwmon_priv *priv)
 {
+	u8 max_fw = hp_wmi_resolve_fallback_max_rpm_fw();
+
 	priv->min_rpm             = 0;
 	/* firmware uses units of 100 RPM (50 == 5000 RPM) */
-	priv->max_rpm             = VICTUS_S_FALLBACK_MAX_RPM_FW;
+	priv->max_rpm             = max_fw;
 	priv->gpu_delta           = 0;
-	priv->max_rpms[0]         = VICTUS_S_FALLBACK_MAX_RPM;
-	priv->max_rpms[1]         = VICTUS_S_FALLBACK_MAX_RPM;
+	priv->max_rpms[0]         = (u16)max_fw * 100;
+	priv->max_rpms[1]         = (u16)max_fw * 100;
 	priv->target_rpms[0]      = 0;
 	priv->target_rpms[1]      = 0;
 	priv->prev_mode           = -1;
@@ -3866,6 +3923,14 @@ static const struct dmi_system_id broken_omen_hpc_guid_boards[] __initconst = {
 		/* 8E71: Victus by HP Gaming Laptop 15-fa1xxx */
 		.matches = { DMI_MATCH(DMI_BOARD_NAME, "8E71") },
 	},
+	{
+		/* 8DCF: Victus by HP Gaming Laptop 15-fa2xxx (#360, #369) */
+		.matches = { DMI_MATCH(DMI_BOARD_NAME, "8DCF") },
+	},
+	{
+		/* 8A4F: Victus by HP Gaming Laptop 15-fa0xxx (#356) */
+		.matches = { DMI_MATCH(DMI_BOARD_NAME, "8A4F") },
+	},
 	{}
 };
 
@@ -3902,8 +3967,8 @@ static int __init hp_wmi_init(void)
 	}
 
 	if (bios_capable) {
-		u8 supported;
-		has_mux = (hp_wmi_get_mux_supported_modes(&supported) == 0);
+		u8 supported = 0;
+		has_mux = (hp_wmi_get_mux_supported_modes(&supported) == 0 && supported != 0);
 
 		hp_wmi_platform_dev = platform_device_register_simple(
 			"hp-wmi", PLATFORM_DEVID_NONE, NULL, 0);

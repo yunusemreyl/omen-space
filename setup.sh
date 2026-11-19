@@ -34,6 +34,48 @@ emit_step() {
     echo "::OMEN_STEP::${step_num}::${pct}::${msg}"
 }
 
+detect_init_system() {
+    if [ -d /run/systemd/system ] && command -v systemctl &>/dev/null; then
+        echo "systemd"
+    elif command -v rc-service &>/dev/null && command -v rc-update &>/dev/null; then
+        echo "openrc"
+    elif command -v sv &>/dev/null && [ -d /etc/runit ]; then
+        echo "runit"
+    else
+        echo "other"
+    fi
+}
+
+INIT_SYSTEM="$(detect_init_system)"
+
+service_stop_daemon() {
+    case "$INIT_SYSTEM" in
+        systemd)
+            systemctl stop omen-space-daemon.service 2>/dev/null || true
+            ;;
+        openrc)
+            rc-service omen-space-daemon stop 2>/dev/null || true
+            ;;
+        *)
+            pkill -x omen-space-daemon 2>/dev/null || true
+            ;;
+    esac
+}
+
+service_reload_dbus() {
+    case "$INIT_SYSTEM" in
+        systemd)
+            systemctl reload dbus 2>/dev/null || true
+            ;;
+        openrc)
+            rc-service dbus reload 2>/dev/null || pkill -HUP dbus-daemon 2>/dev/null || true
+            ;;
+        *)
+            pkill -HUP dbus-daemon 2>/dev/null || true
+            ;;
+    esac
+}
+
 install_dependencies() {
     echo "====================================="
     echo " Installing system dependencies..."
@@ -58,8 +100,11 @@ install_dependencies() {
             echo "    Continuing build without it..."
         fi
     elif command -v pacman &> /dev/null; then
-        echo "Detected Arch Linux. Installing dependencies via pacman..."
-        local ARCH_PKGS=(gcc pkgconf gtk4 libadwaita gtk4-layer-shell systemd dbus base-devel dkms hidapi)
+        echo "Detected Arch/Artix Linux (init: ${INIT_SYSTEM}). Installing dependencies via pacman..."
+        local ARCH_PKGS=(gcc pkgconf gtk4 libadwaita gtk4-layer-shell dbus base-devel dkms hidapi)
+        if [[ "$INIT_SYSTEM" == "systemd" ]]; then
+            ARCH_PKGS+=(systemd)
+        fi
 
         # Only install headers if not already available for the running kernel
         if [ ! -d "/lib/modules/$(uname -r)/build" ] && [ ! -d "/usr/lib/modules/$(uname -r)/build" ]; then
@@ -168,8 +213,10 @@ remove_legacy_omenctl() {
     echo " Cleaning up legacy omenctl / OmenCtl microservices..."
     echo "====================================="
     # Stop & disable all legacy services
-    systemctl stop omenctl.service hpm-fan.service hpm-power.service hpm-rgb.service hpm-mux.service hpm-platform.service 2>/dev/null || true
-    systemctl disable omenctl.service hpm-fan.service hpm-power.service hpm-rgb.service hpm-mux.service hpm-platform.service 2>/dev/null || true
+    if [[ "$INIT_SYSTEM" == "systemd" ]]; then
+        systemctl stop omenctl.service hpm-fan.service hpm-power.service hpm-rgb.service hpm-mux.service hpm-platform.service 2>/dev/null || true
+        systemctl disable omenctl.service hpm-fan.service hpm-power.service hpm-rgb.service hpm-mux.service hpm-platform.service 2>/dev/null || true
+    fi
     pkill -f "python3.*(hp-manager|omen-cli|omenctl)" 2>/dev/null || true
 
     # Systemd service definitions
@@ -213,8 +260,10 @@ remove_legacy_omenctl() {
     rm -f /etc/modules-load.d/hp-rgb-lighting.conf
     rm -f /etc/modprobe.d/omen-space-hpwmi-override.conf
 
-    systemctl daemon-reload
-    systemctl reload dbus 2>/dev/null || true
+    if [[ "$INIT_SYSTEM" == "systemd" ]]; then
+        systemctl daemon-reload
+    fi
+    service_reload_dbus
     echo "Legacy cleanup complete."
 }
 
@@ -311,7 +360,7 @@ do_install() {
     echo "====================================="
     echo " Stopping existing services"
     echo "====================================="
-    systemctl stop omen-space-daemon.service 2>/dev/null || true
+    service_stop_daemon
     killall omen-tray 2>/dev/null || true
     killall omen-overlay 2>/dev/null || true
     if [[ "${OMEN_UPDATER_UI:-0}" != "1" ]]; then
@@ -365,7 +414,18 @@ do_install() {
     cp "${overlay_bin:-target/release/omen-overlay}" /usr/bin/
 
     install -m 644 data/org.hp.omen.conf /etc/dbus-1/system.d/
-    install -m 644 data/omen-space-daemon.service /etc/systemd/system/
+    if [[ "$INIT_SYSTEM" == "systemd" ]]; then
+        install -m 644 data/omen-space-daemon.service /etc/systemd/system/
+    elif [[ "$INIT_SYSTEM" == "openrc" ]]; then
+        mkdir -p /etc/init.d
+        install -m 755 data/omen-space-daemon.openrc /etc/init.d/omen-space-daemon
+    else
+        # Install both definitions so manual supervision (runit/s6/dinit) has a reference
+        install -m 644 data/omen-space-daemon.service /etc/systemd/system/ 2>/dev/null || true
+        if [ -d /etc/init.d ]; then
+            install -m 755 data/omen-space-daemon.openrc /etc/init.d/omen-space-daemon 2>/dev/null || true
+        fi
+    fi
     install -m 644 data/sysusers.d/omen-space.conf /usr/lib/sysusers.d/
     install -m 644 data/99-omen-space.rules /usr/lib/udev/rules.d/
     rm -f /usr/share/applications/omen-space.desktop /usr/share/applications/org.hp.OmenSpace.desktop
@@ -408,7 +468,12 @@ Categories=Utility;
 EOF
 
     echo "Creating system users and reloading udev rules..."
-    systemd-sysusers || true
+    if command -v systemd-sysusers &>/dev/null; then
+        systemd-sysusers || true
+    fi
+    if ! getent group omen-hw &>/dev/null; then
+        groupadd -r omen-hw || true
+    fi
     udevadm control --reload-rules && udevadm trigger || true
 
     # Automatically add the invoking sudo user to the omen-hw group
@@ -428,11 +493,25 @@ EOF
 
     emit_step 5 94 "Starting omen-space-daemon service & verifying connection..."
     echo "====================================="
-    echo " Starting omen-space-daemon service"
+    echo " Starting omen-space-daemon service (${INIT_SYSTEM})"
     echo "====================================="
-    systemctl daemon-reload
-    systemctl reload dbus || true
-    systemctl enable --now omen-space-daemon.service
+    service_reload_dbus
+    case "$INIT_SYSTEM" in
+        systemd)
+            systemctl daemon-reload
+            systemctl enable --now omen-space-daemon.service
+            ;;
+        openrc)
+            rc-update add omen-space-daemon default 2>/dev/null || true
+            rc-service omen-space-daemon restart || rc-service omen-space-daemon start
+            ;;
+        *)
+            echo "Non-systemd/non-OpenRC init detected (${INIT_SYSTEM})."
+            echo "Starting omen-space-daemon in background; add /usr/libexec/omen-space/omen-space-daemon to your init supervisor."
+            mkdir -p /var/lib/omen-space-daemon /etc/omen-space
+            nohup /usr/libexec/omen-space/omen-space-daemon >/var/log/omen-space-daemon.log 2>&1 &
+            ;;
+    esac
 
     echo "====================================="
     echo " Installation Complete!"
@@ -473,17 +552,25 @@ do_uninstall() {
     echo "====================================="
     echo " Uninstalling OMENSpace..."
     echo "====================================="
-    systemctl stop omen-space-daemon.service 2>/dev/null || true
+    service_stop_daemon
     killall omen-tray 2>/dev/null || true
     killall omen-gui 2>/dev/null || true
     killall omen-overlay 2>/dev/null || true
-    systemctl disable omen-space-daemon.service 2>/dev/null || true
+    case "$INIT_SYSTEM" in
+        systemd)
+            systemctl disable omen-space-daemon.service 2>/dev/null || true
+            ;;
+        openrc)
+            rc-update del omen-space-daemon default 2>/dev/null || true
+            ;;
+    esac
 
     rm -rf /usr/libexec/omen-space
     rm -rf /etc/omen-space
     rm -rf /var/lib/omen-space /var/lib/omen-space-daemon
     rm -f /etc/dbus-1/system.d/org.hp.omen.conf
     rm -f /etc/systemd/system/omen-space-daemon.service
+    rm -f /etc/init.d/omen-space-daemon
     rm -f /usr/lib/sysusers.d/omen-space.conf
     rm -f /usr/lib/udev/rules.d/99-omen-space.rules
     rm -f /etc/modprobe.d/omen-space-hpwmi-override.conf
@@ -502,8 +589,10 @@ do_uninstall() {
     gtk-update-icon-cache -f -t /usr/share/icons/hicolor || true
     rm -f /etc/xdg/autostart/omenspace-tray.desktop
 
-    systemctl daemon-reload
-    systemctl reload dbus || true
+    if [[ "$INIT_SYSTEM" == "systemd" ]]; then
+        systemctl daemon-reload
+    fi
+    service_reload_dbus
     udevadm control --reload-rules || true
 
     echo "Uninstalling DKMS Kernel Driver..."

@@ -89,7 +89,7 @@ install_deps() {
                 yum install -y dkms kernel-devel kernel-headers gcc make
             fi
             ;;
-        arch|manjaro|endeavouros|garuda|cachyos)
+        arch|artix|manjaro|endeavouros|garuda|cachyos)
             info "Installing dependencies (pacman)..."
             local HEADERS_PKG=""
             local RUNNING_KVER
@@ -385,26 +385,95 @@ do_install() {
             chmod 600 "$MOK_DIR/MOK.priv"
         fi
 
-        # Sign installed modules
+        # Configure DKMS to use the OMEN Space MOK key on future kernel upgrades
+        mkdir -p /etc/dkms/framework.conf.d
+        cat > /etc/dkms/framework.conf.d/omen-space-mok.conf <<EOF
+mok_signing_key=$MOK_DIR/MOK.priv
+mok_certificate=$MOK_DIR/MOK.der
+EOF
+
+        # Sign installed modules (supporting uncompressed .ko as well as .ko.zst / .ko.xz / .ko.gz)
         KVER=$(uname -r)
         info "Signing custom modules for Secure Boot..."
-        SIGN_SCRIPT=$(find \
+        SIGN_SCRIPT=""
+        for SEARCH_DIR in \
             "/usr/src/linux-headers-$KVER/scripts" \
             "/usr/src/kernels/$KVER/scripts" \
             "/lib/modules/$KVER/build/scripts" \
             "/usr/lib/modules/$KVER/build/scripts" \
             "/usr/src/linux-headers-$KVER" \
-            "/usr/lib/modules/$KVER" \
-            -name "sign-file" -type f 2>/dev/null | head -n 1)
+            "/usr/lib/modules/$KVER"; do
+            if [ -d "$SEARCH_DIR" ]; then
+                SIGN_SCRIPT=$(find "$SEARCH_DIR" -name "sign-file" -type f 2>/dev/null | head -n 1 || true)
+                [ -n "$SIGN_SCRIPT" ] && break
+            fi
+        done
+
+        sign_installed_module() {
+            local mod_path="$1"
+            [ -f "$mod_path" ] || return 1
+            local tmp_ko
+            tmp_ko=$(mktemp /tmp/omen-sign.XXXXXX.ko)
+            case "$mod_path" in
+                *.ko.zst)
+                    command -v zstd &>/dev/null || { rm -f "$tmp_ko"; warn "zstd not found; cannot sign $mod_path"; return 1; }
+                    zstd -q -d -c "$mod_path" > "$tmp_ko"
+                    ;;
+                *.ko.xz)
+                    command -v xz &>/dev/null || { rm -f "$tmp_ko"; warn "xz not found; cannot sign $mod_path"; return 1; }
+                    xz -d -c "$mod_path" > "$tmp_ko"
+                    ;;
+                *.ko.gz)
+                    gzip -d -c "$mod_path" > "$tmp_ko"
+                    ;;
+                *)
+                    cp "$mod_path" "$tmp_ko"
+                    ;;
+            esac
+
+            if command -v objcopy &>/dev/null; then
+                objcopy --remove-section=.module_sig "$tmp_ko" 2>/dev/null || true
+            fi
+
+            if ! "$SIGN_SCRIPT" sha256 "$MOK_DIR/MOK.priv" "$MOK_DIR/MOK.der" "$tmp_ko"; then
+                rm -f "$tmp_ko"
+                return 1
+            fi
+
+            case "$mod_path" in
+                *.ko.zst)
+                    zstd -q -19 -f "$tmp_ko" -o "$mod_path"
+                    chmod 644 "$mod_path"
+                    ;;
+                *.ko.xz)
+                    xz -f -c "$tmp_ko" > "$mod_path"
+                    chmod 644 "$mod_path"
+                    ;;
+                *.ko.gz)
+                    gzip -f -c "$tmp_ko" > "$mod_path"
+                    chmod 644 "$mod_path"
+                    ;;
+                *)
+                    cat "$tmp_ko" > "$mod_path"
+                    chmod 644 "$mod_path"
+                    ;;
+            esac
+            rm -f "$tmp_ko"
+            ok "Signed $mod_path"
+            return 0
+        }
 
         if [ -n "$SIGN_SCRIPT" ]; then
-            for MOD_NAME in "hp-omen-extra.ko" "hp-wmi.ko"; do
-                MOD_PATH=$(find_module_paths "$MOD_NAME" "$KVER" | grep -v "backup" | head -n 1)
+            for MOD_BASE in "hp-omen-extra" "hp-wmi"; do
+                MOD_PATH=$(modinfo -n "$MOD_BASE" 2>/dev/null || true)
+                if [ -z "$MOD_PATH" ] || [ ! -f "$MOD_PATH" ]; then
+                    MOD_PATH=$(find_module_paths "${MOD_BASE}.ko*" "$KVER" | grep -v "backup" | head -n 1 || true)
+                fi
                 if [ -n "$MOD_PATH" ]; then
-                    "$SIGN_SCRIPT" sha256 "$MOK_DIR/MOK.priv" "$MOK_DIR/MOK.der" "$MOD_PATH" \
-                        || warn "Failed to sign $MOD_NAME"
+                    sign_installed_module "$MOD_PATH" || warn "Failed to sign $MOD_BASE ($MOD_PATH)"
                 fi
             done
+            depmod -a "$KVER" 2>/dev/null || depmod -a || true
         else
             warn "sign-file script not found in kernel headers!"
             warn "Modules could not be signed. Secure Boot will block them unless you sign them manually or disable Secure Boot."

@@ -9,6 +9,23 @@ pub fn build_interactive_keyboard(
     per_key_colors: Rc<RefCell<Vec<String>>>,
     state_json_opt: &Option<serde_json::Value>
 ) -> (gtk::Box, Rc<dyn Fn(&str, f64)>, gtk::Box) {
+    // Restore saved 104-key frame from daemon so undrawn placeholder slots (98..103)
+    // do not stay #0099ED blue on restart (#355).
+    if let Some(state) = state_json_opt {
+        if let Some(arr) = state.get("per_key_colors").and_then(|v| v.as_array()) {
+            let mut pk = per_key_colors.borrow_mut();
+            for (i, v) in arr.iter().enumerate().take(pk.len()) {
+                if let Some(hex) = v.as_str() {
+                    pk[i] = if hex.starts_with('#') {
+                        hex.to_string()
+                    } else {
+                        format!("#{}", hex)
+                    };
+                }
+            }
+        }
+    }
+
     let kb_card = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .css_classes(["os-card"])
@@ -752,20 +769,19 @@ pub fn build_interactive_keyboard(
     let hw_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).build();
     if is_darfon {
         hw_on.set(state_json_opt.as_ref().and_then(|j| j["hw_effects"].as_bool()).unwrap_or(false));
-        let hw_label = gtk::Label::builder().label("Hardware effects").xalign(0.0).build();
+        let hw_label = gtk::Label::builder().label("Hardware / Fn effects").xalign(0.0).build();
         label_sg.add_widget(&hw_label);
         hw_box.append(&hw_label);
         let hw_switch = gtk::Switch::builder().valign(gtk::Align::Center).active(hw_on.get()).build();
-        hw_switch.set_tooltip_text(Some("Experimental: run rainbow, cycle, breathing, starlight and raindrop on the keyboard itself (near-zero CPU, keeps running if the daemon stops). The keyboard ignores the brightness slider for these effects."));
+        hw_switch.set_tooltip_text(Some("Let keyboard firmware own lighting so Fn+1/Fn+2 hardware effects work. Rainbow, cycle, breathing, starlight and raindrop run on the MCU; brightness slider does not apply in firmware mode."));
         hw_box.append(&hw_switch);
+        bright_scale.set_sensitive(!hw_on.get());
         let hw_on_c = hw_on.clone();
         let bright_c = bright_scale.clone();
-        let anim_state_hw = anim_state.clone();
         hw_switch.connect_active_notify(move |sw| {
             hw_on_c.set(sw.is_active());
             crate::daemon_client::set_hw_effects_sync(sw.is_active());
-            let mode = anim_state_hw.borrow().0.clone();
-            bright_c.set_sensitive(!(sw.is_active() && mcu_effect_mode(&mode)));
+            bright_c.set_sensitive(!sw.is_active());
         });
     }
 
@@ -792,7 +808,7 @@ pub fn build_interactive_keyboard(
         ts.0 = mode.to_string();
         ts.1 = speed;
         drop(ts);
-        bright_scale_apply.set_sensitive(!(hw_on_apply.get() && mcu_effect_mode(mode)));
+        bright_scale_apply.set_sensitive(!hw_on_apply.get());
         
         let needs_anim = mode != "static" && mode != "per_key_custom";
         
@@ -817,12 +833,4 @@ pub fn build_interactive_keyboard(
     *apply_anim_rc.borrow_mut() = Some(apply_anim.clone());
 
     (kb_card, apply_anim, gtk::Box::new(gtk::Orientation::Horizontal, 0))
-}
-
-
-// ── OmenCore 4-Segment Lightbar Widget Builder ───────────────
-
-/// Modes the Darfon keyboard MCU can render by itself (mirrors the daemon's mapping, #322).
-fn mcu_effect_mode(mode: &str) -> bool {
-    matches!(mode, "rainbow" | "cycle" | "wave_rainbow" | "breathing" | "pulse" | "starlight" | "raindrop")
 }

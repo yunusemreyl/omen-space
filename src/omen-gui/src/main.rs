@@ -213,27 +213,22 @@ fn build_ui(app: &adw::Application) {
         let already_dismissed = std::path::Path::new(&dismissed_flag).exists();
 
         if !is_verified && !already_dismissed && !board_id.is_empty() {
-            let issue_url = format!(
-                "https://github.com/yunusemreyl/omen-space/issues/new?template=verify-laptop.yml&title=Verify+my+laptop+%28Board+{}%29",
-                board_id
-            );
-
             let banner_msg = crate::i18n::t("unverified_board_banner").replace("{}", &board_id);
             let banner = adw::Banner::builder()
                 .title(&banner_msg)
-                .button_label(crate::i18n::t("btn_create_gh_issue"))
+                .button_label(crate::i18n::t("debug_dump_btn"))
                 .revealed(true)
                 .build();
 
-            // When user clicks the action button, open the browser and dismiss
+            // Generate the unified Full System Dump before opening GitHub so verification
+            // issues always include full hardware diagnostics instead of empty bodies (#370, #371).
             let dismissed_flag_clone = dismissed_flag.clone();
-            let issue_url_clone = issue_url.clone();
+            let board_id_clone = board_id.clone();
             let banner_clone = banner.clone();
+            let win_for_banner = window.clone();
             banner.connect_button_clicked(move |_| {
-                let _ = std::process::Command::new("xdg-open")
-                    .arg(&issue_url_clone)
-                    .spawn();
-                // Mark as dismissed
+                let title = format!("Verify my laptop (Board {})", board_id_clone);
+                debug_center::open_full_dump_dialog(&win_for_banner, &title);
                 if let Some(parent) = std::path::Path::new(&dismissed_flag_clone).parent() {
                     let _ = std::fs::create_dir_all(parent);
                 }

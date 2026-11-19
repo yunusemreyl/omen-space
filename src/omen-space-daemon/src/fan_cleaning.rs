@@ -9,6 +9,7 @@ use zbus::Connection;
     default_path = "/org/hp/omen/Fan"
 )]
 trait Fan {
+    async fn get_fan_mode(&self) -> zbus::Result<String>;
     async fn set_fan_mode(&self, mode: &str) -> zbus::Result<String>;
 }
 
@@ -39,19 +40,27 @@ impl FanCleaningService {
             }
         };
 
+        // Remember user's previous mode so we restore it cleanly instead of staying in max (#364)
+        let prev_mode = proxy.get_fan_mode().await.unwrap_or_else(|_| "auto".to_string());
+        let restore_mode = if prev_mode == "max" || prev_mode.is_empty() {
+            "auto"
+        } else {
+            prev_mode.as_str()
+        };
+
         // Step 1: Max out fans
         let _ = proxy.set_fan_mode("max").await;
         sleep(Duration::from_secs(10)).await;
 
-        // Step 2: Return to auto
-        let _ = proxy.set_fan_mode("auto").await;
+        // Step 2: Explicitly leave max boost and return to previous mode (auto/ec/custom)
+        let _ = proxy.set_fan_mode(restore_mode).await;
 
         DesktopNotifier::send_notification(
             "OMEN Space Fan Maintenance",
-            "Fan Dust Cleaning completed successfully. Returned to automatic fan mode.",
+            &format!("Fan Dust Cleaning completed successfully. Restored fan mode to '{}'.", restore_mode),
             0,
         ).await;
 
-        "Fan Dust Cleaning completed successfully".to_string()
+        format!("Fan Dust Cleaning completed successfully (restored '{}' mode)", restore_mode)
     }
 }

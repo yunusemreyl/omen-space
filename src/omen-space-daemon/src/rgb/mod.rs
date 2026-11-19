@@ -27,8 +27,9 @@ use std::fs::File;
 
 // Valid modes matching Python VALID_LIGHT_MODES
 const VALID_MODES: &[&str] = &[
-    "static", "breathing", "wave", "cycle", "rainbow",
+    "static", "per_key_custom", "breathing", "wave", "cycle", "rainbow",
     "pulse", "chase", "sparkle", "candle", "aurora", "disco", "gradient",
+    "wave_rainbow", "starlight", "marquee", "reactive", "ripple", "raindrop", "blinking",
 ];
 const VALID_DIRECTIONS: &[&str] = &["ltr", "rtl"];
 
@@ -251,6 +252,36 @@ impl RgbHardware {
         }
     }
 
+    /// On per-key OMEN MAX boards (8D88 / 8D42) the WMI "zones" belong to the
+    /// 4-segment front lightbar while the keyboard is driven over USB HID LampArray (#355).
+    fn write_lightbar_zones(&self, colors: &[String]) {
+        let Some(ref base) = self.driver_path else { return; };
+        let format_color = |c: &String| {
+            if c.eq_ignore_ascii_case("FFFFFF") {
+                "FFFFFE".to_string()
+            } else {
+                c.clone()
+            }
+        };
+        let payload = colors.iter().take(4).map(format_color).collect::<Vec<_>>().join(" ");
+        for name in ["all_zones", "zones"] {
+            let p = format!("{}/{}", base, name);
+            if Path::new(&p).exists() {
+                let _ = std::fs::write(&p, &payload);
+                return;
+            }
+        }
+        for (i, c) in colors.iter().take(4).enumerate() {
+            for name in [format!("zone{:02}", i), format!("zone{}", i)] {
+                let p = format!("{}/{}", base, name);
+                if Path::new(&p).exists() {
+                    let _ = std::fs::write(&p, c);
+                    break;
+                }
+            }
+        }
+    }
+
     /// False only when the capability database has an exact entry for this board saying it
     /// has no light bar and the product name is not one of the light-bar families. Boards
     /// missing from the database keep the previous behaviour.
@@ -279,22 +310,403 @@ impl RgbHardware {
     }
 }
 
+// ── HID LampArray Per-Key Backend (Darfon 0d62:54bf / Usage Page 0x59, #355) ──
+
+const LAMPARRAY_PREFIX: &[u8] = &[0x05, 0x59, 0x09, 0x01];
+const DARFON_VENDOR_PREFIX: &[u8] = &[0x06, 0x01, 0xFF, 0x09, 0x01];
+
+/// Per-lamp GUI slot overrides for board 8D88 (OMEN MAX 16-ak0xxx, 0d62:54bf).
+const LAMP_SLOT_OVERRIDES_8D88: &[(usize, usize)] = &[
+    (1, 0),    // Esc (2nd LED)
+    (14, 13),  // Del
+    (21, 17),  // Grave
+    (42, 35),  // Tab
+    (62, 53),  // Caps Lock
+    (79, 52),  // Keypad +
+    (119, 85), // Keypad Enter
+    (16, 14),  // Omen
+    (17, 15),  // Calculator
+    (18, 98),  // Settings
+    (19, 16),  // Power
+    (101, 87), // Fn
+    (103, 88), // Win
+    (111, 92), // Menu / Copilot
+];
+
+fn is_board_8d88() -> bool {
+    static CACHE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *CACHE.get_or_init(|| {
+        std::fs::read_to_string("/sys/class/dmi/id/board_name")
+            .map(|s| s.trim().eq_ignore_ascii_case("8D88"))
+            .unwrap_or(false)
+    })
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LampInfo {
+    id: u16,
+    x: u32,
+    y: u32,
+    binding: u8,
+}
+
+#[derive(Debug, Clone)]
+struct LampArrayBackend {
+    path: String,
+    lamps: Vec<LampInfo>,
+    width_um: u32,
+    height_um: u32,
+    min_interval_us: u32,
+    acquired: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    fd: std::sync::Arc<std::sync::Mutex<Option<std::fs::File>>>,
+}
+
+impl LampArrayBackend {
+    const R_ATTRS: u8 = 1;
+    const R_LAMP_REQ: u8 = 2;
+    const R_LAMP_RESP: u8 = 3;
+    const R_MULTI: u8 = 4;
+    const R_RANGE: u8 = 5;
+    const R_CONTROL: u8 = 6;
+
+    const SZ_ATTRS: usize = 23;
+    const SZ_LAMP_RESP: usize = 29;
+    const LAMPS_PER_MULTI: usize = 8;
+    const FLAG_COMPLETE: u8 = 1;
+
+    const KEY_USAGES: [u8; 104] = [
+        // row 1: Esc F1-F12 Del Omen Calc Power
+        0x29, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x4C, 0x00, 0x00, 0x66,
+        // row 2
+        0x35, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x2D, 0x2E, 0x2A, 0x53, 0x54, 0x55, 0x56,
+        // row 3
+        0x2B, 0x14, 0x1A, 0x08, 0x15, 0x17, 0x1C, 0x18, 0x0C, 0x12, 0x13, 0x2F, 0x30, 0x31, 0x5F, 0x60, 0x61, 0x57,
+        // row 4
+        0x39, 0x04, 0x16, 0x07, 0x09, 0x0A, 0x0B, 0x0D, 0x0E, 0x0F, 0x33, 0x34, 0x28, 0x5C, 0x5D, 0x5E,
+        // row 5
+        0xE1, 0x1D, 0x1B, 0x06, 0x19, 0x05, 0x11, 0x10, 0x36, 0x37, 0x38, 0xE5, 0x52, 0x59, 0x5A, 0x5B, 0x58,
+        // row 6
+        0xE0, 0x00, 0xE3, 0xE2, 0x2C, 0xE6, 0x65, 0x50, 0x51, 0x4F, 0x62, 0x63,
+        // placeholders
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    fn hidioc(nr: u8, size: usize) -> libc::c_ulong {
+        ((3u64 << 30) | ((size as u64) << 16) | ((b'H' as u64) << 8) | (nr as u64))
+            as libc::c_ulong
+    }
+
+    fn get_feature(file: &std::fs::File, report_id: u8, size: usize) -> std::io::Result<Vec<u8>> {
+        use std::os::fd::AsRawFd;
+        if size == 0 {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty report"));
+        }
+        let mut buf = vec![0u8; size];
+        buf[0] = report_id;
+        // SAFETY: HIDIOCGFEATURE ioctl writes at most `size` bytes into `buf`.
+        let rc = unsafe {
+            libc::ioctl(file.as_raw_fd(), Self::hidioc(0x07, size), buf.as_mut_ptr())
+        };
+        if rc < 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(buf)
+        }
+    }
+
+    fn set_feature(file: &std::fs::File, data: &[u8]) -> std::io::Result<()> {
+        use std::os::fd::AsRawFd;
+        if data.is_empty() {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "empty report"));
+        }
+        let mut buf = data.to_vec();
+        // SAFETY: HIDIOCSFEATURE ioctl reads `buf.len()` bytes from `buf`.
+        let rc = unsafe {
+            libc::ioctl(file.as_raw_fd(), Self::hidioc(0x06, buf.len()), buf.as_mut_ptr())
+        };
+        if rc < 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn open(&self) -> std::io::Result<std::fs::File> {
+        std::fs::OpenOptions::new().read(true).write(true).open(&self.path)
+    }
+
+    fn with_file<T>(&self, f: impl FnOnce(&std::fs::File) -> T) -> Option<T> {
+        let mut guard = self.fd.lock().ok()?;
+        if guard.is_none() {
+            match self.open() {
+                Ok(file) => *guard = Some(file),
+                Err(e) => {
+                    warn!("LampArray {}: cannot open: {}", self.path, e);
+                    return None;
+                }
+            }
+        }
+        guard.as_ref().map(f)
+    }
+
+    fn probe(path: &str) -> Option<Self> {
+        let file = std::fs::OpenOptions::new().read(true).write(true).open(path).ok()?;
+        let attrs = Self::get_feature(&file, Self::R_ATTRS, Self::SZ_ATTRS).ok()?;
+        if attrs.len() < Self::SZ_ATTRS || attrs[0] != Self::R_ATTRS {
+            return None;
+        }
+        let count = u16::from_le_bytes([attrs[1], attrs[2]]) as usize;
+        if count == 0 || count > 1024 {
+            return None;
+        }
+        let width_um = u32::from_le_bytes([attrs[3], attrs[4], attrs[5], attrs[6]]);
+        let height_um = u32::from_le_bytes([attrs[7], attrs[8], attrs[9], attrs[10]]);
+        let min_interval_us = u32::from_le_bytes([attrs[19], attrs[20], attrs[21], attrs[22]]);
+
+        let mut lamps = Vec::with_capacity(count);
+        for id in 0..count as u16 {
+            let req = [Self::R_LAMP_REQ, (id & 0xFF) as u8, (id >> 8) as u8];
+            Self::set_feature(&file, &req).ok()?;
+            let resp = Self::get_feature(&file, Self::R_LAMP_RESP, Self::SZ_LAMP_RESP).ok()?;
+            if resp.len() < Self::SZ_LAMP_RESP {
+                continue;
+            }
+            let lid = u16::from_le_bytes([resp[1], resp[2]]);
+            let x = u32::from_le_bytes([resp[3], resp[4], resp[5], resp[6]]);
+            let y = u32::from_le_bytes([resp[7], resp[8], resp[9], resp[10]]);
+            let binding = resp[28];
+            lamps.push(LampInfo { id: lid, x, y, binding });
+        }
+        if lamps.is_empty() {
+            return None;
+        }
+        lamps.sort_by_key(|l| l.id);
+        info!(
+            "LampArray on {}: {} lamps, {}x{} mm, min_interval={}us",
+            path,
+            lamps.len(),
+            width_um / 1000,
+            height_um / 1000,
+            min_interval_us
+        );
+        Some(Self {
+            path: path.to_string(),
+            lamps,
+            width_um,
+            height_um,
+            min_interval_us,
+            acquired: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            fd: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        })
+    }
+
+    fn acquire(&self, file: &std::fs::File) {
+        let _ = Self::set_feature(file, &[Self::R_CONTROL, 0]);
+    }
+
+    fn release(&self) {
+        use std::sync::atomic::Ordering;
+        let _ = self.with_file(|file| {
+            let _ = Self::set_feature(file, &[Self::R_CONTROL, 1]);
+        });
+        self.acquired.store(false, Ordering::Relaxed);
+    }
+
+    fn range_report(start: u16, end: u16, color: (u8, u8, u8)) -> Vec<u8> {
+        vec![
+            Self::R_RANGE,
+            Self::FLAG_COMPLETE,
+            (start & 0xFF) as u8,
+            (start >> 8) as u8,
+            (end & 0xFF) as u8,
+            (end >> 8) as u8,
+            color.0,
+            color.1,
+            color.2,
+            255,
+        ]
+    }
+
+    fn multi_report(lamps: &[LampInfo], offset: usize, chunk: &[(u8, u8, u8)], complete: bool) -> Vec<u8> {
+        let mut rep = vec![0u8; 51];
+        rep[0] = Self::R_MULTI;
+        rep[1] = chunk.len() as u8;
+        rep[2] = if complete { Self::FLAG_COMPLETE } else { 0 };
+        for k in 0..Self::LAMPS_PER_MULTI {
+            let id = lamps.get(offset + k).map(|l| l.id).unwrap_or(0);
+            let p = 3 + k * 2;
+            rep[p] = (id & 0xFF) as u8;
+            rep[p + 1] = (id >> 8) as u8;
+        }
+        for (k, &(r, g, b)) in chunk.iter().enumerate() {
+            let p = 19 + k * 4;
+            rep[p] = r;
+            rep[p + 1] = g;
+            rep[p + 2] = b;
+            rep[p + 3] = 255;
+        }
+        rep
+    }
+
+    fn frame_reports(&self, colors: &[(u8, u8, u8)]) -> Vec<Vec<u8>> {
+        let n = self.lamps.len();
+        if n == 0 {
+            return Vec::new();
+        }
+        let mut cols = colors.to_vec();
+        cols.resize(n, (0, 0, 0));
+        cols.truncate(n);
+        if cols.iter().all(|c| *c == cols[0]) {
+            return vec![Self::range_report(0, (n - 1) as u16, cols[0])];
+        }
+        let mut reports = Vec::with_capacity(n.div_ceil(Self::LAMPS_PER_MULTI));
+        let mut off = 0;
+        while off < n {
+            let end = (off + Self::LAMPS_PER_MULTI).min(n);
+            reports.push(Self::multi_report(&self.lamps, off, &cols[off..end], end >= n));
+            off = end;
+        }
+        reports
+    }
+
+    fn set_frame(&self, colors: &[(u8, u8, u8)]) -> bool {
+        use std::sync::atomic::Ordering;
+        let reports = self.frame_reports(colors);
+        if reports.is_empty() {
+            return false;
+        }
+        let result = self.with_file(|file| {
+            if !self.acquired.load(Ordering::Relaxed) {
+                self.acquire(file);
+                self.acquired.store(true, Ordering::Relaxed);
+            }
+            for rep in &reports {
+                if let Err(e) = Self::set_feature(file, rep) {
+                    warn!("LampArray {}: report 0x{:02X} failed: {}", self.path, rep[0], e);
+                    self.acquired.store(false, Ordering::Relaxed);
+                    return false;
+                }
+            }
+            true
+        });
+        if result != Some(true) {
+            if let Ok(mut guard) = self.fd.lock() {
+                *guard = None;
+            }
+        }
+        result.unwrap_or(false)
+    }
+
+    fn zone_colors(&self, colors: &[(u8, u8, u8)]) -> Vec<(u8, u8, u8)> {
+        let width = self.width_um.max(1) as u64;
+        self.lamps
+            .iter()
+            .map(|l| {
+                let zone = ((l.x as u64 * 4) / width).min(3) as usize;
+                colors.get(zone).copied().unwrap_or((0, 0, 0))
+            })
+            .collect()
+    }
+
+    fn key_colors(&self, key_colors: &[(u8, u8, u8)]) -> Vec<(u8, u8, u8)> {
+        let n = self.lamps.len();
+        if key_colors.is_empty() {
+            return vec![(0, 0, 0); n];
+        }
+        if key_colors.len() == n {
+            return key_colors.to_vec();
+        }
+        if key_colors.len() == HidPerKeyBackend::TOTAL_KEY_COUNT {
+            return self.map_gui_frame(key_colors);
+        }
+        (0..n)
+            .map(|i| {
+                let k = (i * key_colors.len()) / n;
+                key_colors[k.min(key_colors.len() - 1)]
+            })
+            .collect()
+    }
+
+    fn map_gui_frame(&self, key_colors: &[(u8, u8, u8)]) -> Vec<(u8, u8, u8)> {
+        let n = self.lamps.len();
+        let mut out = vec![(0u8, 0u8, 0u8); n];
+        let mut mapped = vec![false; n];
+
+        if is_board_8d88() && n == 120 {
+            for &(lamp, slot) in LAMP_SLOT_OVERRIDES_8D88 {
+                if lamp < n && slot < key_colors.len() {
+                    out[lamp] = key_colors[slot];
+                    mapped[lamp] = true;
+                }
+            }
+        }
+
+        for (i, lamp) in self.lamps.iter().enumerate() {
+            if mapped[i] || lamp.binding == 0 {
+                continue;
+            }
+            if let Some(idx) = Self::KEY_USAGES
+                .iter()
+                .position(|&usage| usage != 0 && usage == lamp.binding)
+            {
+                if let Some(color) = key_colors.get(idx) {
+                    out[i] = *color;
+                    mapped[i] = true;
+                }
+            }
+        }
+
+        for i in 0..n {
+            if mapped[i] {
+                continue;
+            }
+            let mut best: Option<usize> = None;
+            let mut best_d = u64::MAX;
+            for (j, other) in self.lamps.iter().enumerate() {
+                if !mapped[j] {
+                    continue;
+                }
+                let dx = self.lamps[i].x as i64 - other.x as i64;
+                let dy = self.lamps[i].y as i64 - other.y as i64;
+                let d = (dx * dx + dy * dy) as u64;
+                if d < best_d {
+                    best_d = d;
+                    best = Some(j);
+                }
+            }
+            out[i] = best
+                .map(|j| out[j])
+                .unwrap_or_else(|| key_colors.first().copied().unwrap_or((0, 0, 0)));
+        }
+        out
+    }
+
+    fn lamp_count(&self) -> usize {
+        self.lamps.len()
+    }
+}
+
 // ── HID Per-Key Backend ────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 struct HidPerKeyBackend {
     hidraw_paths: Vec<String>,
     device_pid: Option<u16>,
+    lamparray: Option<LampArrayBackend>,
 }
 
 impl HidPerKeyBackend {
     const HP_VID: u16 = 0x03F0;
-    /// Darfon is HP's keyboard ODM — present on OMEN MAX 16 (board 8D87) and OMEN 16-ap0xxx (board 8D41) internal keyboard.
+    /// Darfon is HP's keyboard ODM — present on OMEN MAX 16 (8D87/8D88/8D42) and OMEN 16-ap0xxx (8D41).
     const DARFON_VID: u16 = 0x0D62;
+    /// Primax is HP's ODM for FY22 OMEN 16 KBM (8A4C, #364).
+    const PRIMAX_VID: u16 = 0x0461;
     /// Known per-key PIDs for HP VID (OpenRGB + OmenCore confirmed)
     const HP_KNOWN_PIDS: &'static [u16] = &[0x0538, 0x053A, 0x0547, 0x0549, 0x054E, 0x054F];
     /// Known per-key PIDs for Darfon VID
     const DARFON_KNOWN_PIDS: &'static [u16] = &[0x54BF];
+    /// Known Primax HP OMEN keyboard PIDs (LampArray-probed safely by report descriptor)
+    const PRIMAX_KNOWN_PIDS: &'static [u16] = &[0x4F03];
     const PACKET_SIZE: usize = 65;
     const REPORT_ID: u8 = 0x00;
     const CMD_BYTE: u8 = 0x0F;
@@ -308,10 +720,15 @@ impl HidPerKeyBackend {
     const TOTAL_KEY_COUNT: usize = 104;
 
     fn new() -> Self {
-        let (hidraw_paths, device_pid) = Self::find_devices();
-        let backend = Self { hidraw_paths, device_pid };
+        let (hidraw_paths, device_pid, lamparray_path) = Self::find_devices();
+        let lamparray = lamparray_path.as_deref().and_then(LampArrayBackend::probe);
+        let backend = Self { hidraw_paths, device_pid, lamparray };
         if backend.is_available() {
-            info!("Initialized HidPerKeyBackend on {:?}", backend.hidraw_paths);
+            info!(
+                "Initialized HidPerKeyBackend (vendor nodes {:?}, lamparray: {:?})",
+                backend.hidraw_paths,
+                backend.lamparray.as_ref().map(|l| (l.path.clone(), l.lamp_count()))
+            );
             backend.send_enter_per_key_mode(100);
         }
         backend
@@ -320,8 +737,6 @@ impl HidPerKeyBackend {
     fn has_vendor_usage_page(hidraw_sysfs: &Path) -> bool {
         let desc_path = hidraw_sysfs.join("device/report_descriptor");
         if let Ok(bytes) = std::fs::read(&desc_path) {
-            // In USB HID report descriptors, a 16-bit Usage Page item starts with 0x06
-            // followed by [low_byte, high_byte]; vendor-defined pages have high_byte == 0xFF.
             for window in bytes.windows(3) {
                 if window[0] == 0x06 && window[2] == 0xFF {
                     return true;
@@ -331,10 +746,11 @@ impl HidPerKeyBackend {
         false
     }
 
-    fn find_devices() -> (Vec<String>, Option<u16>) {
+    fn find_devices() -> (Vec<String>, Option<u16>, Option<String>) {
         let mut vendor_paths = Vec::new();
         let mut all_paths = Vec::new();
         let mut found_pid = None;
+        let mut lamparray_path = None;
 
         if let Ok(entries) = glob("/sys/class/hidraw/hidraw*") {
             for entry in entries.flatten() {
@@ -352,31 +768,46 @@ impl HidPerKeyBackend {
                                         && Self::HP_KNOWN_PIDS.contains(&pid);
                                     let is_darfon = vid == Self::DARFON_VID
                                         && Self::DARFON_KNOWN_PIDS.contains(&pid);
-                                    if is_hp || is_darfon {
+                                    let is_primax = vid == Self::PRIMAX_VID
+                                        && Self::PRIMAX_KNOWN_PIDS.contains(&pid);
+                                    if is_hp || is_darfon || is_primax {
                                         let dev_path = format!(
                                             "/dev/{}",
                                             entry.file_name().unwrap_or_default().to_string_lossy()
                                         );
-                                        found_pid = Some(pid);
 
                                         if is_darfon {
-                                            // FIX #341 B.3 & #349: Darfon 0d62:54bf interface routing.
-                                            // Interface 2 is input-only (causes EPIPE on write).
-                                            // Interface 3 (MI_03) is vendor lighting control.
-                                            // Interface 4 (MI_04) is LampArray (requires AutonomousMode=1 unlock).
-                                            let dev_dir = entry.join("device");
-                                            let canonical = std::fs::canonicalize(&dev_dir).unwrap_or(dev_dir);
-                                            let path_str = canonical.to_string_lossy();
-                                            let is_if4 = path_str.contains(":1.4") || path_str.contains(".4/");
-                                            let is_if3 = path_str.contains(":1.3") || path_str.contains(".3/");
-
-                                            if is_if4 {
-                                                Self::unlock_darfon_lamparray(&dev_path);
-                                            } else if is_if3 {
-                                                info!("Found Darfon Lighting Control node (Interface 3): {}", dev_path);
+                                            found_pid = Some(pid);
+                                            let descriptor = std::fs::read(
+                                                entry.join("device/report_descriptor"),
+                                            )
+                                            .unwrap_or_default();
+                                            if descriptor.starts_with(LAMPARRAY_PREFIX) {
+                                                info!("Found Darfon HID LampArray (per-key keyboard): {}", dev_path);
+                                                lamparray_path = Some(dev_path.clone());
+                                            } else if descriptor.starts_with(DARFON_VENDOR_PREFIX) {
+                                                info!("Found Darfon MCU vendor interface: {}", dev_path);
                                                 vendor_paths.push(dev_path.clone());
+                                            } else {
+                                                let dev_dir = entry.join("device");
+                                                let canonical = std::fs::canonicalize(&dev_dir).unwrap_or(dev_dir);
+                                                let path_str = canonical.to_string_lossy();
+                                                if path_str.contains(":1.3") {
+                                                    vendor_paths.push(dev_path.clone());
+                                                }
+                                            }
+                                        } else if is_primax {
+                                            let descriptor = std::fs::read(
+                                                entry.join("device/report_descriptor"),
+                                            )
+                                            .unwrap_or_default();
+                                            if descriptor.starts_with(LAMPARRAY_PREFIX) {
+                                                info!("Found Primax HID LampArray keyboard: {}", dev_path);
+                                                found_pid = Some(pid);
+                                                lamparray_path = Some(dev_path.clone());
                                             }
                                         } else {
+                                            found_pid = Some(pid);
                                             let is_vendor = Self::has_vendor_usage_page(&entry);
                                             info!(
                                                 "Found HP Per-Key RGB hidraw node {} (VID={:04X} PID={:04X}, vendor_page={})",
@@ -396,34 +827,29 @@ impl HidPerKeyBackend {
             }
         }
 
-        // Prefer vendor-defined HID interfaces (avoiding boot keyboard input0 on composite USB devices like 0d62:54bf).
-        // If report_descriptor wasn't readable, fall back to all matching interfaces in reverse order (highest interface first).
         if !vendor_paths.is_empty() {
-            (vendor_paths, found_pid)
+            (vendor_paths, found_pid, lamparray_path)
         } else {
             all_paths.reverse();
-            (all_paths, found_pid)
+            (all_paths, found_pid, lamparray_path)
         }
     }
 
     fn is_available(&self) -> bool {
-        !self.hidraw_paths.is_empty()
+        !self.hidraw_paths.is_empty() || self.lamparray.is_some()
     }
 
     fn is_darfon(&self) -> bool {
         self.device_pid == Some(0x54BF)
     }
 
-    fn unlock_darfon_lamparray(path: &str) {
-        use std::os::fd::AsRawFd;
-        if let Ok(file) = std::fs::OpenOptions::new().read(true).write(true).open(path) {
-            let fd = file.as_raw_fd();
-            let report: [u8; 2] = [0x06, 0x01]; // Report 6, AutonomousMode = 1
-            const HIDIOCSFEATURE_2: libc::c_ulong = 0xC0024806;
-            unsafe {
-                libc::ioctl(fd, HIDIOCSFEATURE_2, report.as_ptr());
-            }
-            info!("Sent AutonomousMode=1 unlock feature report to Darfon LampArray at {}", path);
+    fn is_lamparray(&self) -> bool {
+        self.lamparray.is_some()
+    }
+
+    fn release_lamparray(&self) {
+        if let Some(ref la) = self.lamparray {
+            la.release();
         }
     }
 
@@ -504,6 +930,9 @@ impl HidPerKeyBackend {
     }
 
     fn send_enter_per_key_mode(&self, brightness: u32) -> bool {
+        if self.lamparray.is_some() {
+            return true;
+        }
         let mut packet = self.build_packet(Self::SUB_ENTER_EFFECT);
         packet[3] = Self::STATIC_MODE_ID;
         packet[4] = brightness.clamp(0, 100) as u8;
@@ -515,6 +944,10 @@ impl HidPerKeyBackend {
     }
 
     fn write_per_key_colors(&self, key_colors: &[(u8, u8, u8)]) -> bool {
+        if let Some(ref la) = self.lamparray {
+            let mapped = la.key_colors(key_colors);
+            return la.set_frame(&mapped);
+        }
         if self.is_darfon() {
             return self.write_darfon_colors(key_colors);
         }
@@ -606,6 +1039,8 @@ impl HidPerKeyBackend {
     /// Send one effect record; the MCU keeps animating without any host repaint thread.
     /// Volatile only (never issues the flash-store opcode).
     fn send_mcu_effect(&self, record: &[u8; Self::MCU_RECORD_LEN]) -> bool {
+        // Release LampArray so the MCU firmware effect can take over (#355)
+        self.release_lamparray();
         // OGH always sends "lighting on" (0x09, BLength 1, arg 0x01) right before the effect.
         let mut on = [0u8; 64];
         on[0] = 0x09;
@@ -632,6 +1067,15 @@ impl HidPerKeyBackend {
         }
         while colors.len() < 4 {
             colors.push((0, 0, 0));
+        }
+
+        if let Some(ref la) = self.lamparray {
+            if colors.len() >= Self::TOTAL_KEY_COUNT {
+                let key_colors = la.key_colors(&colors[..Self::TOTAL_KEY_COUNT]);
+                return la.set_frame(&key_colors);
+            }
+            let lamp_colors = la.zone_colors(&colors[..4]);
+            return la.set_frame(&lamp_colors);
         }
 
         let mut key_colors = Vec::with_capacity(Self::TOTAL_KEY_COUNT);
@@ -687,8 +1131,13 @@ struct RgbConfig {
     lightbar_mode: String,
     #[serde(default = "default_50")]
     lightbar_speed: u32,
+    #[serde(default = "default_per_key_colors")]
+    per_key_colors: Vec<String>,
 }
 
+fn default_per_key_colors() -> Vec<String> {
+    vec!["0099ED".to_string(); HidPerKeyBackend::TOTAL_KEY_COUNT]
+}
 fn default_lightbar_colors() -> Vec<String> {
     vec!["E03454".to_string(), "0099EE".to_string(), "0099EE".to_string(), "E03454".to_string()]
 }
@@ -714,6 +1163,7 @@ impl Default for RgbConfig {
             lightbar_brightness: 100,
             lightbar_mode: "static".to_string(),
             lightbar_speed: 50,
+            per_key_colors: default_per_key_colors(),
         }
     }
 }
@@ -760,6 +1210,8 @@ struct RgbInner {
     per_key_map: HashMap<String, serde_json::Value>,
     color_cache: HashMap<usize, String>,
     anim_step: f64,
+    lightbar_step: f64,
+    last_lightbar_level: i32,
     /// Signature of the last effect record sent to the keyboard MCU (None = resend).
     mcu_sig: Option<Vec<u8>>,
     wizard: Arc<crate::hid_wizard::HidPerKeyWizard>,
@@ -792,7 +1244,7 @@ impl RgbService {
         }
 
         let inner = Arc::new(Mutex::new(RgbInner {
-            hw, hid_per_key, config, per_key_map, color_cache: HashMap::new(), anim_step: 0.0, mcu_sig: None, wizard, evdev_monitor, desktop_rgb,
+            hw, hid_per_key, config, per_key_map, color_cache: HashMap::new(), anim_step: 0.0, lightbar_step: 0.0, last_lightbar_level: -1, mcu_sig: None, wizard, evdev_monitor, desktop_rgb,
         }));
 
         let svc = Self { inner: inner.clone() };
@@ -814,6 +1266,12 @@ impl RgbService {
         let anim_inner = inner.clone();
         tokio::spawn(async move {
             Self::software_animation_loop(anim_inner).await;
+        });
+
+        // Spawn independent lightbar animation loop for LampArray per-key boards (#355)
+        let lb_inner = inner.clone();
+        tokio::spawn(async move {
+            Self::lightbar_animation_loop(lb_inner).await;
         });
         
         // Spawn uleds listener loop
@@ -909,6 +1367,44 @@ impl RgbService {
         }
     }
 
+    async fn lightbar_animation_loop(inner: Arc<Mutex<RgbInner>>) {
+        loop {
+            let mut g = inner.lock().await;
+            if !g.hw.available || !g.hw.has_lightbar() || !g.hid_per_key.is_lamparray() {
+                drop(g);
+                tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+                continue;
+            }
+            let power = g.config.lightbar_power && g.config.lightbar_brightness > 0;
+            let mode = g.config.lightbar_mode.clone();
+            if !power || mode == "static" {
+                drop(g);
+                tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+                continue;
+            }
+            let speed = g.config.lightbar_speed;
+            let scaler = (g.config.lightbar_brightness as f64 / 100.0).clamp(0.0, 1.0);
+            let colors = g.config.lightbar_colors.clone();
+            let (r1, g1, b1) = parse_hex_color(colors.first().map(|s| s.as_str()).unwrap_or("FF0000"));
+            let (r2, g2, b2) = parse_hex_color(colors.get(1).map(|s| s.as_str()).unwrap_or("0000FF"));
+            g.lightbar_step += (speed as f64 / 100.0) * 0.25;
+            let step = g.lightbar_step;
+            let mut frame = Vec::with_capacity(4);
+            for i in 0..4 {
+                let (r, gc, b) = compute_anim_color(&mode, step, i, 4, r1, g1, b1, r2, g2, b2);
+                frame.push(format!(
+                    "{:02X}{:02X}{:02X}",
+                    ((r as f64) * scaler) as u8,
+                    ((gc as f64) * scaler) as u8,
+                    ((b as f64) * scaler) as u8
+                ));
+            }
+            g.hw.write_lightbar_zones(&frame);
+            drop(g);
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        }
+    }
+
     async fn software_animation_loop(inner: Arc<Mutex<RgbInner>>) {
         let mut last_per_key_colors: Vec<String> = Vec::new();
         loop {
@@ -938,20 +1434,22 @@ impl RgbService {
             let colors = g.config.colors.clone();
             let mode = g.config.mode.clone();
 
-            // Hardware effects (#322): let the keyboard MCU animate by itself.
+            // Hardware effects (#322, #355): let the keyboard MCU animate by itself.
+            // If the selected mode has no MCU equivalent, release the LampArray so Fn+1/Fn+2 work.
             if has_per_key && g.config.hw_effects {
                 if let Some(rec) = g.hid_per_key.mcu_effect_for(&mode, speed, &direction, &colors) {
                     let sig = rec.to_vec();
-                    if g.mcu_sig.as_ref() != Some(&sig) {
-                        if g.hid_per_key.send_mcu_effect(&rec) {
-                            g.mcu_sig = Some(sig);
-                        }
+                    if g.mcu_sig.as_ref() != Some(&sig) && g.hid_per_key.send_mcu_effect(&rec) {
+                        g.mcu_sig = Some(sig);
                     }
-                    last_per_key_colors.clear();
-                    drop(g);
-                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                    continue;
+                } else {
+                    g.hid_per_key.release_lamparray();
+                    g.mcu_sig = None;
                 }
+                last_per_key_colors.clear();
+                drop(g);
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                continue;
             }
             g.mcu_sig = None;
 
@@ -1046,7 +1544,7 @@ impl RgbService {
                 }
             }
 
-            if has_old_sysfs {
+            if has_old_sysfs && !g.hid_per_key.is_lamparray() {
                 let zone_count = g.hw.zone_count as usize;
                 let mut current_frame = Vec::with_capacity(zone_count);
                 for i in 0..zone_count {
@@ -1067,15 +1565,49 @@ impl RgbService {
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
         }
     }
+    /// Apply only the lightbar so changing lightbar segments/mode never re-applies or resets keyboard (#355).
+    async fn apply_lightbar(inner: Arc<Mutex<RgbInner>>) {
+        let mut g = inner.lock().await;
+        if !g.hw.available || !g.hw.lightbar_write_allowed() {
+            return;
+        }
+        let effect_active = g.config.lightbar_mode != "static"
+            && g.config.lightbar_power
+            && g.config.lightbar_brightness > 0;
+        if !effect_active {
+            let lb_colors: Vec<String> = if !g.config.lightbar_power || g.config.lightbar_brightness == 0 {
+                vec!["000000".to_string(); 4]
+            } else {
+                let scaler = (g.config.lightbar_brightness as f64 / 100.0).clamp(0.0, 1.0);
+                (0..4).map(|i| {
+                    let raw = g.config.lightbar_colors.get(i).cloned().unwrap_or_else(|| "000000".to_string());
+                    scale_hex_color(&raw, scaler)
+                }).collect()
+            };
+            if g.hid_per_key.is_lamparray() && g.hw.has_lightbar() {
+                g.hw.write_lightbar_zones(&lb_colors);
+            } else {
+                g.hw.write_lightbar(&lb_colors);
+            }
+        }
+        if g.hid_per_key.is_lamparray() && g.hw.has_lightbar() {
+            let level = if g.hw.is_new_driver {
+                if g.config.lightbar_power { g.config.lightbar_brightness as i32 } else { 0 }
+            } else if g.config.lightbar_power && g.config.lightbar_brightness > 0 {
+                1
+            } else {
+                0
+            };
+            if g.last_lightbar_level != level {
+                g.hw.write_brightness(level as u32);
+                g.last_lightbar_level = level;
+            }
+        }
+    }
+
     async fn apply_state(inner: Arc<Mutex<RgbInner>>) {
         let mut g = inner.lock().await;
 
-        // detect() is only run once at startup and cached in `hw`. If the kernel
-        // module wasn't loaded (or its sysfs wasn't ready) at that moment, the
-        // daemon caches available=false forever and every RGB change silently
-        // no-ops while still returning "OK" and saving the config. Re-probe when
-        // the cached state is stale so a late/missing driver is picked up (and a
-        // disappeared driver is re-detected when it comes back).
         if !g.hw.available {
             g.hw = RgbHardware::detect();
         } else if let Some(ref path) = g.hw.driver_path {
@@ -1092,16 +1624,42 @@ impl RgbService {
         let colors    = g.config.colors.clone();
 
         // ── HID per-key backend (USB direct) ────────────────────────────────────
-        // Runs regardless of whether the sysfs driver is present, since HID and
-        // sysfs are independent hardware paths (USB vendor vs. kernel LED class).
         if g.hid_per_key.is_available() {
-            if !power || brightness == 0 {
+            if g.config.hw_effects && g.hid_per_key.is_lamparray() {
+                g.hid_per_key.release_lamparray();
+            } else if !power || brightness == 0 {
                 g.hid_per_key.send_enter_per_key_mode(0);
                 g.hid_per_key.set_zone_colors(&vec!["000000".to_string(); 8]);
             } else {
                 g.hid_per_key.send_enter_per_key_mode(brightness);
                 if mode == "static" {
-                    g.hid_per_key.set_zone_colors(&colors);
+                    let static_colors = if g.hid_per_key.is_lamparray() {
+                        let scaler = (brightness as f64 / 100.0).clamp(0.0, 1.0);
+                        colors.iter().map(|c| scale_hex_color(c, scaler)).collect()
+                    } else {
+                        colors.clone()
+                    };
+                    g.hid_per_key.set_zone_colors(&static_colors);
+                } else if mode == "per_key_custom" {
+                    let scaler = if g.hid_per_key.is_lamparray() {
+                        (brightness as f64 / 100.0).clamp(0.0, 1.0)
+                    } else {
+                        1.0
+                    };
+                    let per_key = g.config.per_key_colors.clone();
+                    let key_colors: Vec<(u8, u8, u8)> = per_key
+                        .iter()
+                        .take(HidPerKeyBackend::TOTAL_KEY_COUNT)
+                        .map(|hex| {
+                            let (r, g_c, b) = parse_hex_color(hex);
+                            (
+                                (r as f64 * scaler) as u8,
+                                (g_c as f64 * scaler) as u8,
+                                (b as f64 * scaler) as u8,
+                            )
+                        })
+                        .collect();
+                    g.hid_per_key.write_per_key_colors(&key_colors);
                 }
             }
         }
@@ -1121,25 +1679,36 @@ impl RgbService {
         }
 
         // ── Lightbar ────────────────────────────────────────────────────────────
-        // hp-omen-extra always exposes a `lightbar` node and, when the lightbar WMI queries
-        // (0x0A/0x0B) fail, falls back to the keyboard colour table. On boards the database
-        // knows have no light bar (e.g. 878A) that painted the lightbar colours onto the
-        // keyboard zones on every apply before the real keyboard colours were written.
         if g.hw.available && g.hw.lightbar_write_allowed() {
-            let lb_colors: Vec<String> = if !g.config.lightbar_power || g.config.lightbar_brightness == 0 {
-                vec!["000000".to_string(); 4]
-            } else {
-                let scaler = (g.config.lightbar_brightness as f64 / 100.0).clamp(0.0, 1.0);
-                (0..4).map(|i| {
-                    let raw = g.config.lightbar_colors.get(i).cloned().unwrap_or_else(|| "000000".to_string());
-                    scale_hex_color(&raw, scaler)
-                }).collect()
-            };
-            g.hw.write_lightbar(&lb_colors);
+            let effect_active = g.config.lightbar_mode != "static"
+                && g.config.lightbar_power
+                && g.config.lightbar_brightness > 0;
+            if !effect_active {
+                let lb_colors: Vec<String> = if !g.config.lightbar_power || g.config.lightbar_brightness == 0 {
+                    vec!["000000".to_string(); 4]
+                } else {
+                    let scaler = (g.config.lightbar_brightness as f64 / 100.0).clamp(0.0, 1.0);
+                    (0..4).map(|i| {
+                        let raw = g.config.lightbar_colors.get(i).cloned().unwrap_or_else(|| "000000".to_string());
+                        scale_hex_color(&raw, scaler)
+                    }).collect()
+                };
+                if g.hid_per_key.is_lamparray() && g.hw.has_lightbar() {
+                    g.hw.write_lightbar_zones(&lb_colors);
+                } else {
+                    g.hw.write_lightbar(&lb_colors);
+                }
+            }
         }
 
         // ── Standard sysfs driver ───────────────────────────────────────────────
         if !g.hw.available { return; }
+
+        // On LampArray per-key boards (8D88 / 8D42), WMI zone attributes belong to the
+        // front lightbar — do NOT overwrite them with keyboard zone colors (#355).
+        if g.hid_per_key.is_lamparray() {
+            return;
+        }
 
         if !power || brightness == 0 {
             g.hw.write_brightness(0);
@@ -1192,6 +1761,7 @@ impl RgbService {
             let mut g = self.inner.lock().await;
             g.config.mode = "static".to_string();
             g.config.power = true;
+            g.config.hw_effects = false;
             if g.config.colors.len() < 17 {
                 g.config.colors.resize(17, "FF0000".to_string());
             }
@@ -1262,7 +1832,7 @@ impl RgbService {
             g.config.lightbar_power = true;
             g.config.save();
         }
-        Self::apply_state(self.inner.clone()).await;
+        Self::apply_lightbar(self.inner.clone()).await;
         "OK".to_string()
     }
 
@@ -1276,7 +1846,7 @@ impl RgbService {
             g.config.lightbar_speed = (speed_val as u32).clamp(1, 100);
             g.config.save();
         }
-        Self::apply_state(self.inner.clone()).await;
+        Self::apply_lightbar(self.inner.clone()).await;
         "OK".to_string()
     }
 
@@ -1287,6 +1857,7 @@ impl RgbService {
         let mut snap = serde_json::json!({
             "mode": g.config.mode,
             "colors": g.config.colors,
+            "per_key_colors": g.config.per_key_colors,
             "speed": g.config.speed,
             "brightness": g.config.brightness,
             "direction": g.config.direction,
@@ -1299,6 +1870,7 @@ impl RgbService {
             "zone_count": g.hw.zone_count,
             "zone_count_override": g.config.zone_count_override,
             "per_key_available": g.hid_per_key.is_available(),
+            "is_lamparray": g.hid_per_key.is_lamparray(),
             "hw_effects": g.config.hw_effects,
             "hid_device_pid": g.hid_per_key.device_pid.map(|p| format!("{:04X}", p)).unwrap_or_default(),
             "has_lightbar": g.hw.has_lightbar(),
@@ -1396,17 +1968,35 @@ impl RgbService {
             return format!("FAIL: expected {} colors, got {}", HidPerKeyBackend::TOTAL_KEY_COUNT, colors.len());
         }
 
-        let g = self.inner.lock().await;
+        let mut g = self.inner.lock().await;
         if !g.hid_per_key.is_available() {
             return "FAIL: no HID per-key device".to_string();
         }
 
-        let key_colors: Vec<(u8, u8, u8)> = colors.iter().map(|hex| {
-            let h = hex.trim_start_matches('#');
-            let r = u8::from_str_radix(h.get(0..2).unwrap_or("00"), 16).unwrap_or(0);
-            let g_c = u8::from_str_radix(h.get(2..4).unwrap_or("00"), 16).unwrap_or(0);
-            let b = u8::from_str_radix(h.get(4..6).unwrap_or("00"), 16).unwrap_or(0);
-            (r, g_c, b)
+        // Persist the 104-key frame and take ownership back from firmware hw_effects (#355)
+        g.config.per_key_colors = colors
+            .iter()
+            .map(|c| c.trim_start_matches('#').to_uppercase())
+            .collect();
+        g.config.mode = "per_key_custom".to_string();
+        g.config.power = true;
+        g.config.hw_effects = false;
+        g.mcu_sig = None;
+        g.config.save();
+
+        let scaler = if g.hid_per_key.is_lamparray() {
+            (g.config.brightness as f64 / 100.0).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+
+        let key_colors: Vec<(u8, u8, u8)> = g.config.per_key_colors.iter().map(|hex| {
+            let (r, g_c, b) = parse_hex_color(hex);
+            (
+                (r as f64 * scaler) as u8,
+                (g_c as f64 * scaler) as u8,
+                (b as f64 * scaler) as u8,
+            )
         }).collect();
 
         g.hid_per_key.send_enter_per_key_mode(g.config.brightness);
@@ -1581,7 +2171,7 @@ mod mcu_effect_tests {
     use super::*;
 
     fn backend(pid: Option<u16>) -> HidPerKeyBackend {
-        HidPerKeyBackend { hidraw_paths: vec![], device_pid: pid }
+        HidPerKeyBackend { hidraw_paths: vec![], device_pid: pid, lamparray: None }
     }
 
     #[test]
@@ -1639,7 +2229,7 @@ mod regression_rgb {
     fn regression_darfon_static_pages_require_zero_blength() {
         let path=std::env::temp_dir().join(format!("omen-review-hid-{}",std::process::id()));
         std::fs::write(&path,[0u8;64]).unwrap();
-        let h=HidPerKeyBackend{hidraw_paths:vec![path.to_string_lossy().to_string()],device_pid:Some(0x54BF)};
+        let h=HidPerKeyBackend{hidraw_paths:vec![path.to_string_lossy().to_string()],device_pid:Some(0x54BF),lamparray:None};
         assert!(h.write_darfon_colors(&vec![(255,255,255);104]));
         let packet=std::fs::read(&path).unwrap();let _=std::fs::remove_file(path);
         assert_eq!(&packet[..4],&[0x07,0x02,0x00,0x00],"native static channel pages require BLength=0, despite carrying 60 data bytes");

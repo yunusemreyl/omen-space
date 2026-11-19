@@ -52,14 +52,21 @@ fn detect_active_display_gpu() -> (String, bool, String, String) {
 }
 
 fn read_firmware_mux_mode_sync() -> Option<String> {
-    let raw = fs::read_to_string("/sys/devices/platform/hp-wmi/gpu_mux_mode").ok()?;
-    match raw.trim() {
-        "0" | "hybrid" => Some("hybrid".to_string()),
-        "1" | "discrete" => Some("discrete".to_string()),
-        "2" | "advanced" | "optimus" => Some("advanced".to_string()),
-        "3" | "integrated" => Some("integrated".to_string()),
-        _ => None,
+    for path in [
+        "/sys/devices/platform/hp-wmi/gpu_mux_mode",
+        "/sys/devices/platform/hp-wmi/graphics_mode",
+    ] {
+        if let Ok(raw) = fs::read_to_string(path) {
+            match raw.trim() {
+                "0" | "hybrid" => return Some("hybrid".to_string()),
+                "1" | "discrete" => return Some("discrete".to_string()),
+                "2" | "advanced" | "optimus" => return Some("advanced".to_string()),
+                "3" | "integrated" => return Some("integrated".to_string()),
+                _ => {}
+            }
+        }
     }
+    None
 }
 
 fn format_mux_mode_label(mode: &str) -> String {
@@ -184,7 +191,11 @@ pub fn build_page() -> gtk::Box {
         .build();
     
     reboot_btn.connect_clicked(|_| {
-        let _ = std::process::Command::new("systemctl").arg("reboot").spawn();
+        if std::path::Path::new("/run/systemd/system").exists() {
+            let _ = std::process::Command::new("systemctl").arg("reboot").spawn();
+        } else if std::process::Command::new("loginctl").arg("reboot").spawn().is_err() {
+            let _ = std::process::Command::new("pkexec").arg("reboot").spawn();
+        }
     });
 
     warn_card.append(&reboot_btn);
@@ -250,60 +261,76 @@ pub fn build_page() -> gtk::Box {
     let updating_ui = std::rc::Rc::new(std::cell::Cell::new(false));
     let boot_fw_mode = std::rc::Rc::new(std::cell::RefCell::new(initial_fw_mode));
 
-    // Wire MUX toggles to daemon
-    let w_c = warn_card.clone();
-    let fw_val1 = fw_mode_val.clone();
-    let upd1 = updating_ui.clone();
-    let boot_m1 = boot_fw_mode.clone();
-    btn_discrete.connect_toggled(move |btn| {
-        if btn.is_active() && !upd1.get() {
-            crate::daemon_client::set_gpu_mode_sync("discrete".to_string());
-            let pending = *boot_m1.borrow() != "discrete";
-            w_c.set_visible(pending);
-            fw_val1.set_label(if pending {
-                "Discrete (dGPU · Pending Reboot)"
-            } else {
-                "Discrete (dGPU)"
+    // Wire MUX toggles to daemon and verify firmware write result (#369)
+    let wire_mux_toggle = |btn: &gtk::ToggleButton,
+                           mode_key: &'static str,
+                           pending_lbl: &'static str,
+                           confirmed_lbl: &'static str,
+                           css_class: &'static str| {
+        let w_c = warn_card.clone();
+        let fw_val = fw_mode_val.clone();
+        let upd = updating_ui.clone();
+        let boot_m = boot_fw_mode.clone();
+        let bh = btn_hybrid.clone();
+        let bd = btn_discrete.clone();
+        let ba = btn_advanced.clone();
+        btn.connect_toggled(move |b| {
+            if !b.is_active() || upd.get() {
+                return;
+            }
+            let w_c = w_c.clone();
+            let fw_val = fw_val.clone();
+            let upd = upd.clone();
+            let boot_m = boot_m.clone();
+            let bh = bh.clone();
+            let bd = bd.clone();
+            let ba = ba.clone();
+            glib::spawn_future_local(async move {
+                let res = crate::daemon_client::set_gpu_mode_async(mode_key.to_string()).await;
+                if matches!(res.as_deref(), Ok("OK_REBOOT_REQUIRED")) {
+                    let pending = *boot_m.borrow() != mode_key;
+                    w_c.set_visible(pending);
+                    fw_val.set_label(if pending { pending_lbl } else { confirmed_lbl });
+                    fw_val.set_css_classes(&[css_class]);
+                } else {
+                    // Firmware/WMI rejected the switch: revert toggle and show clear status (#369)
+                    let prev = boot_m.borrow().clone();
+                    upd.set(true);
+                    match prev.as_str() {
+                        "discrete" => bd.set_active(true),
+                        "advanced" => ba.set_active(true),
+                        _ => bh.set_active(true),
+                    }
+                    upd.set(false);
+                    w_c.set_visible(false);
+                    fw_val.set_label(i18n::t("mux_switch_failed"));
+                    fw_val.set_css_classes(&["badge-warn"]);
+                }
             });
-            fw_val1.set_css_classes(&["badge-warn"]);
-        }
-    });
+        });
+    };
 
-    let w_c2 = warn_card.clone();
-    let fw_val2 = fw_mode_val.clone();
-    let upd2 = updating_ui.clone();
-    let boot_m2 = boot_fw_mode.clone();
-    btn_hybrid.connect_toggled(move |btn| {
-        if btn.is_active() && !upd2.get() {
-            crate::daemon_client::set_gpu_mode_sync("hybrid".to_string());
-            let pending = *boot_m2.borrow() != "hybrid";
-            w_c2.set_visible(pending);
-            fw_val2.set_label(if pending {
-                "Hybrid (MSHybrid · Pending Reboot)"
-            } else {
-                "Hybrid (MSHybrid)"
-            });
-            fw_val2.set_css_classes(&["badge-ok"]);
-        }
-    });
-
-    let w_c3 = warn_card.clone();
-    let fw_val3 = fw_mode_val.clone();
-    let upd3 = updating_ui.clone();
-    let boot_m3 = boot_fw_mode.clone();
-    btn_advanced.connect_toggled(move |btn| {
-        if btn.is_active() && !upd3.get() {
-            crate::daemon_client::set_gpu_mode_sync("advanced".to_string());
-            let pending = *boot_m3.borrow() != "advanced";
-            w_c3.set_visible(pending);
-            fw_val3.set_label(if pending {
-                "Advanced Optimus (Pending Reboot)"
-            } else {
-                "Advanced Optimus (Dynamic)"
-            });
-            fw_val3.set_css_classes(&["badge-ok"]);
-        }
-    });
+    wire_mux_toggle(
+        &btn_discrete,
+        "discrete",
+        "Discrete (dGPU · Pending Reboot)",
+        "Discrete (dGPU)",
+        "badge-warn",
+    );
+    wire_mux_toggle(
+        &btn_hybrid,
+        "hybrid",
+        "Hybrid (MSHybrid · Pending Reboot)",
+        "Hybrid (MSHybrid)",
+        "badge-ok",
+    );
+    wire_mux_toggle(
+        &btn_advanced,
+        "advanced",
+        "Advanced Optimus (Pending Reboot)",
+        "Advanced Optimus (Dynamic)",
+        "badge-ok",
+    );
 
     let bd_load = btn_discrete.clone();
     let bh_load = btn_hybrid.clone();

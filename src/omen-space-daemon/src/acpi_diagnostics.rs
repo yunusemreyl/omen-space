@@ -144,17 +144,34 @@ impl AcpiDiagnosticRunner {
             }
         }
 
-        // Check HID Per-Key RGB device availability
-        let mut hid_device_info = "No HP HID Per-Key RGB Controller (VID 0x03F0) detected on /dev/hidraw".to_string();
+        // Check HID Per-Key RGB device availability across HP, Darfon, Primax, SteelSeries, and HID LampArray (#364)
+        let mut hid_device_info = "No HP/ODM HID Per-Key RGB Controller detected on /dev/hidraw*".to_string();
         if let Ok(entries) = glob("/sys/class/hidraw/hidraw*") {
+            let mut found_nodes = Vec::new();
             for entry in entries.filter_map(Result::ok) {
                 let uevent_path = entry.join("device/uevent");
-                if let Ok(uevent) = fs::read_to_string(&uevent_path) {
-                    if uevent.contains("03F0") {
-                        hid_device_info = format!("Active (Detected HP HID Per-Key RGB Controller at /dev/{})", entry.file_name().unwrap_or_default().to_string_lossy());
-                        break;
-                    }
+                let dev_name = entry.file_name().unwrap_or_default().to_string_lossy().to_string();
+                let uevent = fs::read_to_string(&uevent_path).unwrap_or_default();
+                let desc = fs::read(entry.join("device/report_descriptor")).unwrap_or_default();
+                let is_lamparray = desc.starts_with(&[0x05, 0x59, 0x09, 0x01]);
+                let is_known_vid = uevent.contains("03F0")
+                    || uevent.contains("0D62")
+                    || uevent.contains("0461")
+                    || uevent.contains("1038");
+                if is_known_vid || is_lamparray {
+                    let hid_id = uevent.lines().find(|l| l.starts_with("HID_ID=")).unwrap_or("");
+                    let hid_name = uevent.lines().find(|l| l.starts_with("HID_NAME=")).unwrap_or("");
+                    found_nodes.push(format!(
+                        "/dev/{} ({} {}{})",
+                        dev_name,
+                        hid_id.trim_start_matches("HID_ID="),
+                        hid_name.trim_start_matches("HID_NAME="),
+                        if is_lamparray { ", LampArray" } else { "" }
+                    ));
                 }
+            }
+            if !found_nodes.is_empty() {
+                hid_device_info = format!("Active: {}", found_nodes.join("; "));
             }
         }
 
@@ -278,14 +295,6 @@ impl AcpiDiagnosticRunner {
 
         if tar_cmd.is_ok() && Path::new(&archive_path).exists() {
             info!("Successfully generated triage bundle at {}", archive_path);
-            
-            // Auto open directory in user desktop file manager & launch GitHub issue browser
-            crate::notifier::DesktopNotifier::open_in_user_session(&bundle_dir);
-            crate::notifier::DesktopNotifier::open_github_issue(
-                &format!("[Triage Report] HP OMEN {} ({})", product_name, board_id),
-                &format!("Diagnostic bundle archive generated at `{}`.\n\nPlease attach `/tmp/omen-space-triage-{}.tar.gz` to this issue.", archive_path, timestamp),
-            );
-
             archive_path
         } else {
             bundle_dir

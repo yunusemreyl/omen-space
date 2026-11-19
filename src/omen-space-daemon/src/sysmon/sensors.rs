@@ -116,6 +116,14 @@ pub fn init_sensor_paths() -> SensorPaths {
                         if f1.exists() { fan1_path = Some(f1); }
                         if f2.exists() { fan2_path = Some(f2); }
                     }
+                } else if name == "acpi_fan" && fan1_path.is_none() {
+                    // Fallback when hp_wmi hwmon is absent (e.g. Secure Boot blocking
+                    // out-of-tree hp-wmi on 8D88 / 8D42): ACPI fan tachometer still
+                    // reports real RPM; hp_wmi remains authoritative whenever present.
+                    let f1 = entry.join("fan1_input");
+                    if f1.exists() { fan1_path = Some(f1); }
+                    let f2 = entry.join("fan2_input");
+                    if f2.exists() { fan2_path = Some(f2); }
                 } else if name.contains("nouveau") || name.contains("amdgpu") || name.contains("nvidia") {
                     let t1 = entry.join("temp1_input");
                     if t1.exists() { gpu_temp_path = Some(t1); }

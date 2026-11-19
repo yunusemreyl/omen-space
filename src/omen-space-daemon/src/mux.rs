@@ -19,6 +19,7 @@ use log::{info, warn};
 use glob::glob;
 
 const HP_WMI_GRAPHICS_MODE_PATH: &str = "/sys/devices/platform/hp-wmi/gpu_mux_mode";
+const HP_WMI_LEGACY_GRAPHICS_MODE_PATH: &str = "/sys/devices/platform/hp-wmi/graphics_mode";
 const CONFIG_PATH: &str = "/etc/omen-space/mux.json";
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -74,19 +75,25 @@ impl MuxService {
 
     fn wmi_available() -> bool {
         Path::new(HP_WMI_GRAPHICS_MODE_PATH).exists()
+            || Path::new(HP_WMI_LEGACY_GRAPHICS_MODE_PATH).exists()
     }
 
-    /// Read configured firmware MUX mode from `/sys/devices/platform/hp-wmi/gpu_mux_mode` (#313).
+    /// Read configured firmware MUX mode from `/sys/devices/platform/hp-wmi/gpu_mux_mode`
+    /// (falling back to `/sys/devices/platform/hp-wmi/graphics_mode`, #313, #369).
     /// Driver mapping: 0 = hybrid, 1 = discrete, 2 = advanced (Advanced Optimus), 3 = integrated.
     async fn read_firmware_mux_mode() -> Option<String> {
-        let raw = tokio::fs::read_to_string(HP_WMI_GRAPHICS_MODE_PATH).await.ok()?;
-        match raw.trim() {
-            "0" | "hybrid" => Some("hybrid".to_string()),
-            "1" | "discrete" => Some("discrete".to_string()),
-            "2" | "advanced" | "optimus" => Some("advanced".to_string()),
-            "3" | "integrated" => Some("integrated".to_string()),
-            _ => None,
+        for path in [HP_WMI_GRAPHICS_MODE_PATH, HP_WMI_LEGACY_GRAPHICS_MODE_PATH] {
+            if let Ok(raw) = tokio::fs::read_to_string(path).await {
+                match raw.trim() {
+                    "0" | "hybrid" => return Some("hybrid".to_string()),
+                    "1" | "discrete" => return Some("discrete".to_string()),
+                    "2" | "advanced" | "optimus" => return Some("advanced".to_string()),
+                    "3" | "integrated" => return Some("integrated".to_string()),
+                    _ => {}
+                }
+            }
         }
+        None
     }
 
     /// Infer current display routing from DRM eDP connector and PCI bus topology.
@@ -201,17 +208,31 @@ impl MuxService {
         }
 
         let val = if mode == "discrete" { "1" } else if mode == "advanced" { "2" } else { "0" };
-        if tokio::fs::write(HP_WMI_GRAPHICS_MODE_PATH, val).await.is_ok() {
-            {
-                let mut g = self.inner.lock().await;
-                g.cached_mode = Some(mode.clone());
+        let mut last_err = String::new();
+        for path in [HP_WMI_GRAPHICS_MODE_PATH, HP_WMI_LEGACY_GRAPHICS_MODE_PATH] {
+            if !Path::new(path).exists() {
+                continue;
             }
-            info!("SetGpuMode: '{}' written to WMI sysfs", mode);
-            "OK_REBOOT_REQUIRED".to_string()
-        } else {
-            warn!("SetGpuMode: Failed to write to {}", HP_WMI_GRAPHICS_MODE_PATH);
-            "Error: Failed to write to WMI sysfs".to_string()
+            match tokio::fs::write(path, val).await {
+                Ok(()) => {
+                    let readback = tokio::fs::read_to_string(path)
+                        .await
+                        .map(|s| s.trim().to_string())
+                        .unwrap_or_else(|_| "unreadable".to_string());
+                    {
+                        let mut g = self.inner.lock().await;
+                        g.cached_mode = Some(mode.clone());
+                    }
+                    info!("SetGpuMode: '{}' (val={}) written to {} (readback={})", mode, val, path, readback);
+                    return "OK_REBOOT_REQUIRED".to_string();
+                }
+                Err(e) => {
+                    warn!("SetGpuMode: Failed to write '{}' to {}: {}", val, path, e);
+                    last_err = format!("{}: {}", path, e);
+                }
+            }
         }
+        format!("Error: Failed to write to WMI sysfs ({})", last_err)
     }
 
     /// GetGpuInfo — mirrors Python MUXService.GetGpuInfo().

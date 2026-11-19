@@ -439,6 +439,7 @@ pub async fn generate_diagnostic_report_async() -> Result<String, Box<dyn std::e
     Ok(res)
 }
 
+#[allow(dead_code)]
 pub async fn generate_triage_bundle_async() -> Result<String, Box<dyn std::error::Error>> {
     let conn = get_conn().await?;
     let proxy = PlatformProxy::new(&conn).await?;
@@ -446,6 +447,7 @@ pub async fn generate_triage_bundle_async() -> Result<String, Box<dyn std::error
     Ok(res)
 }
 
+#[allow(dead_code)]
 pub async fn generate_rgb_issue_async() -> Result<String, Box<dyn std::error::Error>> {
     let conn = get_conn().await?;
     let proxy = SysMonProxy::new(&conn).await?;
@@ -549,6 +551,30 @@ pub async fn get_fan_info_async() -> Result<String, Box<dyn std::error::Error>> 
 
 // ── Mux wrappers ─────────────────────────────────────────────────────────────
 
+pub async fn set_gpu_mode_async(mode: String) -> Result<String, Box<dyn std::error::Error>> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let rt = get_runtime();
+    rt.spawn(async move {
+        let res: Result<String, String> = async {
+            let conn = get_conn().await.map_err(|e| e.to_string())?;
+            let proxy = MuxProxy::new(&conn).await.map_err(|e| e.to_string())?;
+            let r = proxy.set_gpu_mode(&mode).await.map_err(|e| e.to_string())?;
+            if r != "OK_REBOOT_REQUIRED" {
+                notify_dbus_error("GPU modu ayarlanamıyor (MUX)", &r).await;
+            }
+            Ok(r)
+        }
+        .await;
+        let _ = tx.send(res);
+    });
+    match rx.await {
+        Ok(Ok(s)) => Ok(s),
+        Ok(Err(e)) => Err(e.into()),
+        Err(e) => Err(e.into()),
+    }
+}
+
+#[allow(dead_code)]
 pub fn set_gpu_mode_sync(mode: String) {
     let rt = get_runtime();
     rt.spawn(async move {

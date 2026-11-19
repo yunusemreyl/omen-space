@@ -22,6 +22,7 @@ pub struct CurvePoint(pub f64, pub f64); // [Temp, Pct]
 pub struct FanState {
     pub hwmon_path: Option<PathBuf>,
     pub minimum_manual_pwm: u32,
+    pub zero_pct_manual_pwm: bool,
     pub found_fans: Vec<u32>,
     pub max_speeds: HashMap<u32, u32>,
     pub fallback_paths: HashMap<u32, PathBuf>,
@@ -90,9 +91,11 @@ impl FanService {
 
         let board = std::fs::read_to_string("/sys/class/dmi/id/board_name").unwrap_or_default();
         let caps = crate::capabilities::detect(board.trim(), "", "");
+        let effective_min_pwm = config.minimum_manual_pwm_override.unwrap_or(caps.minimum_manual_pwm).clamp(1, 255);
         let mut state = FanState {
             hwmon_path: None,
-            minimum_manual_pwm: caps.minimum_manual_pwm.clamp(1, 255),
+            minimum_manual_pwm: effective_min_pwm,
+            zero_pct_manual_pwm: config.zero_pct_manual_pwm,
             found_fans: Vec::new(),
             max_speeds: HashMap::new(),
             fallback_paths: HashMap::new(),
@@ -464,12 +467,19 @@ impl FanService {
             return true;
         }
 
-        // For pct == 0 in Auto/Quiet: delegate to BIOS auto mode (pwm1_enable=2) to allow 0 RPM fan stop (#347)
+        // For pct == 0: by default delegate to BIOS auto mode (pwm1_enable=2) to allow 0 RPM fan stop (#347).
+        // When zero_pct_manual_pwm is enabled (#359), write manual PWM 0 (pwm1_enable=1) to hold EC minimum.
         if pct == 0 {
             if sysfs_exists(&pwm_enable_path).await {
-                let _ = sysfs_write(&pwm_enable_path, "2").await;
+                Self::leave_max_boost(&hwmon).await;
+                if state.zero_pct_manual_pwm {
+                    let _ = sysfs_write(&pwm_enable_path, "1").await;
+                    let _ = sysfs_write(&pwm_path, "0").await;
+                } else {
+                    let _ = sysfs_write(&pwm_enable_path, "2").await;
+                }
             }
-            // AUTO owns the target now; writing pwm1 in this mode is rejected by hp-wmi.
+            // AUTO owns the target now (or manual 0 when configured).
             state.last_written_duty = Some(0);
             state.last_written_duty_time = Some(now);
             for &fan_num in &state.found_fans.clone() {
@@ -483,9 +493,7 @@ impl FanService {
             let current = sysfs_read(&pwm_enable_path, 2).await;
             if current != 1 {
                 if current == 0 {
-                    // Recovering from max boost (0) requires toggling through 2 to reset EC lock
-                    let _ = sysfs_write(&pwm_enable_path, "2").await;
-                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                    Self::leave_max_boost(&hwmon).await;
                 }
                 let _ = sysfs_write(&pwm_enable_path, "1").await;
             }
@@ -1053,6 +1061,22 @@ impl FanService {
     ///   ec   → platform_profile=balanced, pwm1_enable=2 (BIOS hardware control)
     ///   auto/custom/performance → pwm1_enable=1 (manual), duty set by monitor loop or manual target
     ///   max  → platform_profile=performance, pwm1_enable=0 (full speed)
+    /// Leave the driver's max-boost state before switching to BIOS/manual (#364).
+    /// Writing pwm1_enable=2 or 1 directly from 0 can leave the hp-wmi max flag
+    /// latched for 60–120s until EC watchdog expiry; a short manual duty write
+    /// clears max boost immediately.
+    async fn leave_max_boost(hwmon: &std::path::Path) {
+        let pwm_enable_path = hwmon.join("pwm1_enable");
+        if sysfs_read(&pwm_enable_path, 2).await == 0 {
+            let pwm_path = hwmon.join("pwm1");
+            if sysfs_exists(&pwm_path).await {
+                let _ = sysfs_write(&pwm_enable_path, "1").await;
+                let _ = sysfs_write(&pwm_path, "100").await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(120)).await;
+            }
+        }
+    }
+
     async fn set_mode_internal(state: &mut FanState, mode: &str) -> bool {
         // Determine pwm1_enable value (OmenCore mapping)
         let pwm_enable_val = match mode {
@@ -1105,14 +1129,11 @@ impl FanService {
                     ok = sysfs_write(hwmon.join("pwm1_enable"), "2").await;
                     written_enable_val = 2;
                 } else {
-                    let current = sysfs_read(hwmon.join("pwm1_enable"), 2).await;
-                    if current == 0 {
-                        let _ = sysfs_write(hwmon.join("pwm1_enable"), "2").await;
-                        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-                    }
+                    Self::leave_max_boost(hwmon).await;
                     ok = sysfs_write(hwmon.join("pwm1_enable"), "1").await;
                 }
             } else if pwm_enable_val == 2 {
+                Self::leave_max_boost(hwmon).await;
                 ok = sysfs_write(hwmon.join("pwm1_enable"), "2").await;
             }
             if ok {
@@ -1561,6 +1582,7 @@ mod regression_fan {
         FanState {
             hwmon_path: Some(hwmon),
             minimum_manual_pwm: 50,
+            zero_pct_manual_pwm: false,
             found_fans: vec![1, 2],
             max_speeds,
             fallback_paths: HashMap::new(),
@@ -1642,6 +1664,7 @@ mod regression_fan {
         let mut state = FanState {
             hwmon_path: None,
             minimum_manual_pwm: 50,
+            zero_pct_manual_pwm: false,
             found_fans: Vec::new(),
             max_speeds: HashMap::new(),
             fallback_paths: HashMap::new(),

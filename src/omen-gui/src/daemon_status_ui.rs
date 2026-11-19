@@ -36,16 +36,29 @@ pub fn bind(window: &adw::ApplicationWindow) {
                 state.borrow_mut().take();
             }
             if response == "restart" {
-                // Waiting for authentication and systemd must not block GTK.
+                // Waiting for authentication and init system must not block GTK (#361).
                 daemon_client::get_runtime().spawn(async {
-                    if tokio::process::Command::new("pkexec")
-                        .args(["systemctl", "restart", "omen-space-daemon"])
+                    let is_systemd = std::path::Path::new("/run/systemd/system").exists();
+                    if is_systemd {
+                        if tokio::process::Command::new("pkexec")
+                            .args(["systemctl", "restart", "omen-space-daemon"])
+                            .status()
+                            .await
+                            .is_err()
+                        {
+                            let _ = tokio::process::Command::new("systemctl")
+                                .args(["restart", "omen-space-daemon"])
+                                .status()
+                                .await;
+                        }
+                    } else if tokio::process::Command::new("pkexec")
+                        .args(["rc-service", "omen-space-daemon", "restart"])
                         .status()
                         .await
                         .is_err()
                     {
-                        let _ = tokio::process::Command::new("systemctl")
-                            .args(["restart", "omen-space-daemon"])
+                        let _ = tokio::process::Command::new("rc-service")
+                            .args(["omen-space-daemon", "restart"])
                             .status()
                             .await;
                     }

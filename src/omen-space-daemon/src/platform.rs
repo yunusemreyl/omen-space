@@ -358,7 +358,9 @@ fn write_hwdb_rules(prtsc: bool, f1: bool) {
         if Path::new(HWDB_PATH).exists() {
             let _ = std::fs::remove_file(HWDB_PATH);
             tokio::spawn(async {
-                let _ = tokio::process::Command::new("systemd-hwdb").arg("update").output().await;
+                if tokio::process::Command::new("systemd-hwdb").arg("update").output().await.is_err() {
+                    let _ = tokio::process::Command::new("udevadm").args(["hwdb", "--update"]).output().await;
+                }
                 let _ = tokio::process::Command::new("udevadm").args(["trigger", "-s", "input"]).output().await;
             });
         }
@@ -403,7 +405,9 @@ fn write_hwdb_rules(prtsc: bool, f1: bool) {
     }
     if std::fs::write(HWDB_PATH, &content).is_ok() {
         tokio::spawn(async {
-            let _ = tokio::process::Command::new("systemd-hwdb").arg("update").output().await;
+            if tokio::process::Command::new("systemd-hwdb").arg("update").output().await.is_err() {
+                let _ = tokio::process::Command::new("udevadm").args(["hwdb", "--update"]).output().await;
+            }
             let _ = tokio::process::Command::new("udevadm").args(["trigger", "-s", "input"]).output().await;
             info!("Keyboard fixes applied via hwdb");
         });

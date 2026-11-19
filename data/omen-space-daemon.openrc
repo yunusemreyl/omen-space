@@ -1,0 +1,19 @@
+#!/sbin/openrc-run
+# OpenRC service script for OMEN Space Daemon (Artix, Gentoo, Alpine, etc.)
+
+name="omen-space-daemon"
+description="Omen Space — Unified Hardware Control Daemon"
+command="/usr/libexec/omen-space/omen-space-daemon"
+command_background="yes"
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="/var/log/omen-space-daemon.log"
+error_log="/var/log/omen-space-daemon.log"
+
+depend() {
+    need dbus
+    after localmount udev
+}
+
+start_pre() {
+    checkpath --directory --owner root:root --mode 0755 /var/lib/omen-space-daemon /etc/omen-space
+}

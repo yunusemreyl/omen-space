@@ -478,7 +478,7 @@
         },
         {
             "product_id": "8A4C",
-            "model_name": "OMEN 16 (2022) AMD",
+            "model_name": "OMEN by HP Gaming Laptop 16-k0xxx (8A4C)",
             "model_year": 2022,
             "family": "OMEN16",
             "supports_fan_control_wmi": true,
@@ -508,7 +508,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "GitHub #243"
+            "notes": "GitHub #243, #364 — OMEN 16-k0xxx (i7-12700H + RTX 3070 Ti, BIOS F.30). Primax 0461:4F03 keyboard; no light bar (queries 0x0A/0x0B return 0x3)."
         },
         {
             "product_id": "8A44",
@@ -542,7 +542,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "GitHub #112 \u2014 OMEN 16-n0xxx. Capabilities inferred from adjacent OMEN 16 generations; needs user verification."
+            "notes": "GitHub #112 — OMEN 16-n0xxx. Capabilities inferred from adjacent OMEN 16 generations; needs user verification."
         },
         {
             "product_id": "8A43",
@@ -576,7 +576,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "GitHub #121 / Discord 2026-05-25 \u2014 Hades 8A43 exact ProductId profile added to avoid model-name-pattern inference. HP serial lookup reports OMEN Gaming Laptop 16-n0002ni / 6G103EA. Fan diagnostics show practical V1 ceiling near level 60 (GPU ~60, CPU ~58), so max fan level override is set to 60 for safer verification/normalization."
+            "notes": "GitHub #121 / Discord 2026-05-25 — Hades 8A43 exact ProductId profile added to avoid model-name-pattern inference. HP serial lookup reports OMEN Gaming Laptop 16-n0002ni / 6G103EA. Fan diagnostics show practical V1 ceiling near level 60 (GPU ~60, CPU ~58), so max fan level override is set to 60 for safer verification/normalization."
         },
         {
             "product_id": "8A42",
@@ -610,7 +610,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "GitHub #216/#242 \u2014 OMEN 16-n0xxx (Ryzen 7 6800H + RX 6650 XT), ProductId 8A42, BIOS F.27. Issue #242 dmesg confirms AE_AML_BUFFER_LIMIT on WMID WMBA/WMAA/HWMC and hp_wmi failed to set platform profile 5: -22. The WMI BIOS command path (OMEN native) is non-functional on this board; power profile changes fall back to the hp_wmi/acpi platform_profile sysfs interface. Fan telemetry (EC RPM) confirmed working. Fan mode BIOS commands (WMI V1) may also be affected; EC path preferred. AllowDecoupledWmiThermalPolicyFallback=true ensures profile changes still reach the kernel."
+            "notes": "GitHub #216/#242 — OMEN 16-n0xxx (Ryzen 7 6800H + RX 6650 XT), ProductId 8A42, BIOS F.27. Issue #242 dmesg confirms AE_AML_BUFFER_LIMIT on WMID WMBA/WMAA/HWMC and hp_wmi failed to set platform profile 5: -22. The WMI BIOS command path (OMEN native) is non-functional on this board; power profile changes fall back to the hp_wmi/acpi platform_profile sysfs interface. Fan telemetry (EC RPM) confirmed working. Fan mode BIOS commands (WMI V1) may also be affected; EC path preferred. AllowDecoupledWmiThermalPolicyFallback=true ensures profile changes still reach the kernel."
         },
         {
             "product_id": "8BCA",
@@ -678,7 +678,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "GitHub #163 \u2014 HP OMEN 16 XF0079AX (Ryzen 7 7840HS + RTX 4070), ProductId 8BCA shared with the wf0xxx Intel SKU. Disambiguated by WMI model name (16-xf0xxx). Capabilities carried over from the wf0xxx sibling (same board/chassis) except SupportsUndervolt=false (AMD, no Intel MSR path); not yet independently confirmed on this specific variant."
+            "notes": "GitHub #163 — HP OMEN 16 XF0079AX (Ryzen 7 7840HS + RTX 4070), ProductId 8BCA shared with the wf0xxx Intel SKU. Disambiguated by WMI model name (16-xf0xxx). Capabilities carried over from the wf0xxx sibling (same board/chassis) except SupportsUndervolt=false (AMD, no Intel MSR path); not yet independently confirmed on this specific variant."
         },
         {
             "product_id": "8BAB",
@@ -712,7 +712,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "OMEN 16-wf1xxx (2024 Intel) \u2014 Board 8C78. Added for Issue #68. Set UserVerified=true after community confirmation."
+            "notes": "OMEN 16-wf1xxx (2024 Intel) — Board 8C78. Added for Issue #68. Set UserVerified=true after community confirmation."
         },
         {
             "product_id": "8C76",
@@ -746,7 +746,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "Discord HUrON / HP OMEN 16-WF1015ns 9U8J3EA \u2014 ProductId 8C76, i9-14900HX + RTX 4080, BIOS F.19, WMI V1/classic 55-level fan control. Exact entry replaces low-confidence inferred sibling match."
+            "notes": "Discord HUrON / HP OMEN 16-WF1015ns 9U8J3EA — ProductId 8C76, i9-14900HX + RTX 4080, BIOS F.19, WMI V1/classic 55-level fan control. Exact entry replaces low-confidence inferred sibling match."
         },
         {
             "product_id": "8C77",
@@ -780,7 +780,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "OMEN 16-wf1xxx (2024 Intel) \u2014 ProductId 8C77, BIOS F.19. Crash report 2026-07: FileNotFoundException on Custom Fan Curve/Quiet mode (8BAB V2 mismatch). Profile mirrors confirmed 8C76 sibling; V1 WMI 55-level fan control."
+            "notes": "OMEN 16-wf1xxx (2024 Intel) — ProductId 8C77, BIOS F.19. Crash report 2026-07: FileNotFoundException on Custom Fan Curve/Quiet mode (8BAB V2 mismatch). Profile mirrors confirmed 8C76 sibling; V1 WMI 55-level fan control."
         },
         {
             "product_id": "8BA9",
@@ -814,7 +814,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "Discord GHOST 2026-09-02 \u2014 HP OMEN by HP Gaming Laptop 16-wd0xxx, ProductId 8BA9, i7-13620H + RTX 4060. Exact entry replaces low-confidence OMEN16 family fallback with a named, still-conservative identity; flags mirror what the live capability probe already confirmed each session."
+            "notes": "Discord GHOST 2026-09-02 — HP OMEN by HP Gaming Laptop 16-wd0xxx, ProductId 8BA9, i7-13620H + RTX 4060. Exact entry replaces low-confidence OMEN16 family fallback with a named, still-conservative identity; flags mirror what the live capability probe already confirmed each session."
         },
         {
             "product_id": "8B2J",
@@ -1086,7 +1086,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "Roadmap #26 \u2014 OMEN Gaming Laptop 16-am1xxx (2025 Intel, i9-14900HX + RTX 5070 Ti). ProductId pending community confirmation. Performance mode TDP = 90W PL1 / 130W PL2 per OGH reference behaviour. Set UserVerified=true once Product ID confirmed."
+            "notes": "Roadmap #26 — OMEN Gaming Laptop 16-am1xxx (2025 Intel, i9-14900HX + RTX 5070 Ti). ProductId pending community confirmation. Performance mode TDP = 90W PL1 / 130W PL2 per OGH reference behaviour. Set UserVerified=true once Product ID confirmed."
         },
         {
             "product_id": "8D40",
@@ -1120,7 +1120,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "GitHub #145 - OMEN Slim Gaming Laptop 16-an0xxx, ProductId 8D40, SKU 1H85302L6K. Exact conservative profile: WMI V1 fan/profile control retained (matches working family-fallback behavior), direct EC writes and independent curves disabled pending register-layout evidence, MUX/RGB/undervolt left unclaimed until this new thin-chassis line's hardware surface is confirmed. Reported Battery Care (Charge Limit) WMI failure and Performance-mode persistence are tracked separately \u2014 see 3.8.1-BUG-REPORTS.md."
+            "notes": "GitHub #145 - OMEN Slim Gaming Laptop 16-an0xxx, ProductId 8D40, SKU 1H85302L6K. Exact conservative profile: WMI V1 fan/profile control retained (matches working family-fallback behavior), direct EC writes and independent curves disabled pending register-layout evidence, MUX/RGB/undervolt left unclaimed until this new thin-chassis line's hardware surface is confirmed. Reported Battery Care (Charge Limit) WMI failure and Performance-mode persistence are tracked separately — see 3.8.1-BUG-REPORTS.md."
         },
         {
             "product_id": "8603",
@@ -1154,7 +1154,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "GitHub #182 \u2014 HP OMEN 17-cb0xxx (i9-9880H + RTX 2080), ProductId 8603. Was resolving via family fallback and inheriting an unrelated template board's capabilities; GPU Power Boost specifically confirmed non-functional on this hardware via an independent OmenMon BIOS probe (GetGpuPower() fails with 'Command not available'). Feature flags conservative pending field verification."
+            "notes": "GitHub #182 — HP OMEN 17-cb0xxx (i9-9880H + RTX 2080), ProductId 8603. Was resolving via family fallback and inheriting an unrelated template board's capabilities; GPU Power Boost specifically confirmed non-functional on this hardware via an independent OmenMon BIOS probe (GetGpuPower() fails with 'Command not available'). Feature flags conservative pending field verification."
         },
         {
             "product_id": "8BB1",
@@ -1222,7 +1222,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "GitHub #134/#144 \u2014 WMI V1 control with worker-backed CPU temperature; fan-level fallback is estimated telemetry, not physical RPM. Direct EC remains unverified."
+            "notes": "GitHub #134/#144 — WMI V1 control with worker-backed CPU temperature; fan-level fallback is estimated telemetry, not physical RPM. Direct EC remains unverified."
         },
         {
             "product_id": "8E10",
@@ -1290,7 +1290,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "GitHub #125 \u2014 HP Victus 15-fa1xxx (i5-12450H / RTX 2050), ProductId 8C3F. Direct entry to avoid 8BB1 ambiguous-ID path that caused fan control delays. Same conservative Victus profile as 8BB1-VICTUS15."
+            "notes": "GitHub #125 — HP Victus 15-fa1xxx (i5-12450H / RTX 2050), ProductId 8C3F. Direct entry to avoid 8BB1 ambiguous-ID path that caused fan control delays. Same conservative Victus profile as 8BB1-VICTUS15."
         },
         {
             "product_id": "8BB1-VICTUS15",
@@ -1324,7 +1324,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "Victus 15-fa1xxx \u2014 single-color backlight; shares 8BB1 product ID with OMEN 17 (2021)"
+            "notes": "Victus 15-fa1xxx — single-color backlight; shares 8BB1 product ID with OMEN 17 (2021)"
         },
         {
             "product_id": "8E5E",
@@ -1358,7 +1358,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "GitHub #178 \u2014 HP Victus 15-fa2303TX / C2JQ3PA, ProductId 8E5E. Fan-verification diagnostic showed WMI fan-level control responding but RPM readback is level-estimated, not a real tachometer, and diverged from expectations under load (3/6 tests passed). Single-zone, static-color-only keyboard backlight per reporter. Feature flags conservative pending further field verification."
+            "notes": "GitHub #178 — HP Victus 15-fa2303TX / C2JQ3PA, ProductId 8E5E. Fan-verification diagnostic showed WMI fan-level control responding but RPM readback is level-estimated, not a real tachometer, and diverged from expectations under load (3/6 tests passed). Single-zone, static-color-only keyboard backlight per reporter. Feature flags conservative pending further field verification."
         },
         {
             "product_id": "8B9D",
@@ -1426,7 +1426,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "OMEN 17-ck2 series (2023) \ufffd WMI ineffective, use OGH proxy or EC access"
+            "notes": "OMEN 17-ck2 series (2023) � WMI ineffective, use OGH proxy or EC access"
         },
         {
             "product_id": "8B9E",
@@ -1562,7 +1562,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "GitHub #149 \u2014 OMEN Transcend 14 (2024) fb0xxx/8C58. Same Transcend 14 board family as 8E41; added AllowV1AutoModeFloorClear to match 8E41 profile. Prefer hp-wmi/ACPI paths; direct legacy EC writes are unsafe on Linux and unverified on Windows."
+            "notes": "GitHub #149 — OMEN Transcend 14 (2024) fb0xxx/8C58. Same Transcend 14 board family as 8E41; added AllowV1AutoModeFloorClear to match 8E41 profile. Prefer hp-wmi/ACPI paths; direct legacy EC writes are unsafe on Linux and unverified on Windows."
         },
         {
             "product_id": "8E41",
@@ -1698,7 +1698,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "GitHub #105 \u2014 Victus 15-fb0xxx. Conservative Victus profile (single-zone backlight)."
+            "notes": "GitHub #105 — Victus 15-fb0xxx. Conservative Victus profile (single-zone backlight)."
         },
         {
             "product_id": "8DCD",
@@ -1766,7 +1766,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "GitHub #66 \u2014 Victus 16-d1xxx (8A26). Capabilities inferred from nearby Victus 16 entries; awaiting user confirmation."
+            "notes": "GitHub #66 — Victus 16-d1xxx (8A26). Capabilities inferred from nearby Victus 16 entries; awaiting user confirmation."
         },
         {
             "product_id": "8A25",
@@ -1800,7 +1800,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "Discord reports (ACe_Centrick, corroborated by OsamaBiden), v3.8.0/v4.0.0/v4.1.0 \u2014 RTX 3060 Laptop GPU boosts 85W base TGP -> 100W dynamic boost via WMI PPAB, matching OMEN Gaming Hub on the same hardware. Other flags inherited from the sibling 8A26 entry and remain otherwise unconfirmed for this exact board."
+            "notes": "Discord reports (ACe_Centrick, corroborated by OsamaBiden), v3.8.0/v4.0.0/v4.1.0 — RTX 3060 Laptop GPU boosts 85W base TGP -> 100W dynamic boost via WMI PPAB, matching OMEN Gaming Hub on the same hardware. Other flags inherited from the sibling 8A26 entry and remain otherwise unconfirmed for this exact board."
         },
         {
             "product_id": "8BD4",
@@ -1869,7 +1869,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "GitHub #110 (16-r0xxx) + #155 (15-fb2082wm) \u2014 ProductId 8C2F is shared across the 15\" and 16\" Victus Ryzen 2024+ chassis. Capabilities were inferred from the 16\" report and are not yet confirmed on the 15\" chassis. Keyboard entry 8C2F already present in KeyboardModelDatabase. RequiredCpuVendor=AMD added after GitHub #172 (board 8BBE) showed the same \"16-r0\" WMI name pattern also matches an Intel machine, which must not inherit this AMD-only capability profile via the name-pattern fallback."
+            "notes": "GitHub #110 (16-r0xxx) + #155 (15-fb2082wm) — ProductId 8C2F is shared across the 15\" and 16\" Victus Ryzen 2024+ chassis. Capabilities were inferred from the 16\" report and are not yet confirmed on the 15\" chassis. Keyboard entry 8C2F already present in KeyboardModelDatabase. RequiredCpuVendor=AMD added after GitHub #172 (board 8BBE) showed the same \"16-r0\" WMI name pattern also matches an Intel machine, which must not inherit this AMD-only capability profile via the name-pattern fallback."
         },
         {
             "product_id": "88DB",
@@ -1937,7 +1937,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "Issue #128 \u2014 explicit Victus 16-e0xxx mapping (88EC) to avoid low-confidence family fallback; feature flags intentionally conservative pending field verification. A follow-up diagnostics export confirmed 'Performance mode Balanced: nothing was applied (Direct EC writes disabled)' live in the field - this board never got the AllowDecoupledWmiThermalPolicyFallback fix already applied to 8DCD/8C30/878C/8600, so switching modes had no effect at all since Direct EC is (correctly) disabled here and no fallback path was enabled to compensate."
+            "notes": "Issue #128 — explicit Victus 16-e0xxx mapping (88EC) to avoid low-confidence family fallback; feature flags intentionally conservative pending field verification. A follow-up diagnostics export confirmed 'Performance mode Balanced: nothing was applied (Direct EC writes disabled)' live in the field - this board never got the AllowDecoupledWmiThermalPolicyFallback fix already applied to 8DCD/8C30/878C/8600, so switching modes had no effect at all since Direct EC is (correctly) disabled here and no fallback path was enabled to compensate."
         },
         {
             "product_id": "88EE",
@@ -2209,7 +2209,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "GitHub #245 \u2014 quickman1001 reports omen-space works normally. Community-verified entry. Conservative Victus profile (single-zone backlight, no MUX). RPM telemetry and WMI fan mode control confirmed functional."
+            "notes": "GitHub #245 — quickman1001 reports omen-space works normally. Community-verified entry. Conservative Victus profile (single-zone backlight, no MUX). RPM telemetry and WMI fan mode control confirmed functional."
         },
         {
             "product_id": "8A4F",
@@ -2243,7 +2243,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "GitHub #246 \u2014 TrDiTu reports app works normally except fan control on Victus 15-fa0000. Conservative Victus profile; WMI thermal-policy fallback enabled. Fan mode WMI commands may not be effective on this board; RPM readback disabled pending validation. Profile (Quiet/Balanced/Performance) changes route via hp_wmi/acpi platform_profile sysfs when WMI BIOS command path is unavailable."
+            "notes": "GitHub #246 — TrDiTu reports app works normally except fan control on Victus 15-fa0000. Conservative Victus profile; WMI thermal-policy fallback enabled. Fan mode WMI commands may not be effective on this board; RPM readback disabled pending validation. Profile (Quiet/Balanced/Performance) changes route via hp_wmi/acpi platform_profile sysfs when WMI BIOS command path is unavailable."
         },
         {
             "product_id": "88F8",
@@ -2277,7 +2277,7 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "GitHub #247 \u2014 Victus 16-d0xxx (88F8). Frequent WMBX/WMBA AE_AML_BUFFER_LIMIT errors leading to WMI unresponsiveness (Max fan mode switch fails after first use). Treated as abort-prone; RPM readback disabled to prevent WMI poll spam triggering the buffer limit. Thermal profile control routes via hp_wmi/acpi fallback."
+            "notes": "GitHub #247 — Victus 16-d0xxx (88F8). Frequent WMBX/WMBA AE_AML_BUFFER_LIMIT errors leading to WMI unresponsiveness (Max fan mode switch fails after first use). Treated as abort-prone; RPM readback disabled to prevent WMI poll spam triggering the buffer limit. Thermal profile control routes via hp_wmi/acpi fallback."
         },
         {
             "product_id": "8D41",
@@ -3127,7 +3127,8 @@
             "supports_power_limits": true,
             "supports_battery_care": true,
             "linux_assessment": null,
-            "notes": "Added for Issue #334 — OMEN by HP Laptop 17t-ck100 (i7-12700H + RTX 3070 Ti)."
+            "notes": "Added for Issue #334 / #359 — OMEN by HP Laptop 17-ck1xxx / 17t-ck100 (i7-12700H + RTX 3070 Ti). Real fan max is 4600 RPM (overridden in hp-wmi.c) and minimum_manual_pwm=50 (~1200 RPM).",
+            "minimum_manual_pwm": 50
         },
         {
             "product_id": "88D1",
@@ -3196,6 +3197,109 @@
             "supports_battery_care": true,
             "linux_assessment": null,
             "notes": "Added for Issue #326 — OMEN by HP Laptop 16-c0120nd (Ryzen 9 5900HX + RX 6600M)."
+        },
+        {
+            "product_id": "88F4",
+            "model_name": "OMEN by HP Laptop 16-b0xxx (88F4)",
+            "model_year": 2021,
+            "family": "OMEN16",
+            "supports_fan_control_wmi": true,
+            "supports_fan_control_ec": false,
+            "supports_fan_curves": true,
+            "supports_independent_fan_curves": true,
+            "supports_rpm_readback": true,
+            "fan_zone_count": 2,
+            "max_fan_speed_percent": 100,
+            "min_fan_speed_percent": 0,
+            "supports_performance_modes": true,
+            "performance_modes": [
+                "Default",
+                "Performance",
+                "Cool"
+            ],
+            "allow_decoupled_wmi_thermal_policy_fallback": false,
+            "has_mux_switch": true,
+            "supports_gpu_power_boost": true,
+            "supports_advanced_optimus": false,
+            "has_keyboard_backlight": true,
+            "has_four_zone_rgb": true,
+            "has_per_key_rgb": false,
+            "has_light_bar": false,
+            "supports_undervolt": true,
+            "supports_tcc_offset": true,
+            "supports_power_limits": true,
+            "supports_battery_care": true,
+            "linux_assessment": null,
+            "notes": "Verified in Issue #365 — OMEN by HP Laptop 16-b0xxx (i7-11800H, BIOS F.49, Pop!_OS 24.04). Keyboard RGB, daemon, and fan/performance monitoring confirmed working."
+        },
+        {
+            "product_id": "8D42",
+            "model_name": "OMEN MAX Gaming Laptop 16-ah0xxx (8D42)",
+            "model_year": 2025,
+            "family": "OMEN16",
+            "supports_fan_control_wmi": true,
+            "supports_fan_control_ec": false,
+            "supports_fan_curves": true,
+            "supports_independent_fan_curves": true,
+            "supports_rpm_readback": true,
+            "fan_zone_count": 2,
+            "max_fan_speed_percent": 100,
+            "min_fan_speed_percent": 0,
+            "supports_performance_modes": true,
+            "performance_modes": [
+                "Default",
+                "Performance",
+                "Cool"
+            ],
+            "allow_decoupled_wmi_thermal_policy_fallback": false,
+            "has_mux_switch": true,
+            "supports_gpu_power_boost": true,
+            "supports_advanced_optimus": true,
+            "has_keyboard_backlight": true,
+            "has_four_zone_rgb": false,
+            "has_per_key_rgb": true,
+            "has_light_bar": true,
+            "supports_undervolt": false,
+            "supports_tcc_offset": true,
+            "supports_power_limits": true,
+            "supports_battery_care": true,
+            "linux_assessment": null,
+            "notes": "Added for Issue #358 — OMEN MAX Gaming Laptop 16-ah0xxx (Intel Core Ultra 7 255HX + RTX 5070, BIOS F.23). Sibling of 8D87/8D88 with per-key RGB and lightbar."
+        },
+        {
+            "product_id": "8DCF",
+            "model_name": "Victus by HP Gaming Laptop 15-fa2xxx (8DCF)",
+            "model_year": 2025,
+            "family": "Victus",
+            "supports_fan_control_wmi": true,
+            "supports_fan_control_ec": false,
+            "supports_fan_curves": true,
+            "supports_independent_fan_curves": false,
+            "supports_rpm_readback": true,
+            "fan_zone_count": 2,
+            "max_fan_speed_percent": 100,
+            "min_fan_speed_percent": 0,
+            "supports_performance_modes": true,
+            "performance_modes": [
+                "Default",
+                "Performance",
+                "Cool"
+            ],
+            "allow_decoupled_wmi_thermal_policy_fallback": false,
+            "has_mux_switch": true,
+            "supports_gpu_power_boost": true,
+            "supports_advanced_optimus": false,
+            "has_keyboard_backlight": true,
+            "has_four_zone_rgb": false,
+            "has_per_key_rgb": false,
+            "has_light_bar": false,
+            "rgb_zone_count": 1,
+            "supports_undervolt": false,
+            "supports_tcc_offset": true,
+            "supports_power_limits": true,
+            "supports_battery_care": true,
+            "linux_assessment": null,
+            "notes": "Added for Issues #360 / #369 — Victus by HP Gaming Laptop 15-fa2xxx (Intel Core 7 240H + RTX 5060, BIOS F.06). Sibling of 8E0F."
         }
     ],
     "verified_boards": [
@@ -3278,7 +3382,8 @@
         "8D88",
         "8A44",
         "8E71",
-        "88FA"
+        "88FA",
+        "88F4"
     ],
     "wmaa_abort_prone_boards": [
         "8C75",

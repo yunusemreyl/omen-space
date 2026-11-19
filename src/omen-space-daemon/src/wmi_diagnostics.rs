@@ -172,10 +172,21 @@ impl WmiDiagnosticRunner {
         if let Ok(entries) = glob::glob("/sys/class/hidraw/hidraw*") {
             for entry in entries.filter_map(Result::ok) {
                 let uevent_path = entry.join("device/uevent");
+                let desc = fs::read(entry.join("device/report_descriptor")).unwrap_or_default();
+                let is_lamparray = desc.starts_with(&[0x05, 0x59, 0x09, 0x01]);
                 if let Ok(uevent) = fs::read_to_string(&uevent_path) {
-                    if uevent.contains("HID_ID=0003:000003F0:") || uevent.contains("03F0") {
+                    if is_lamparray
+                        || uevent.contains("03F0")
+                        || uevent.contains("0D62")
+                        || uevent.contains("0461")
+                        || uevent.contains("1038")
+                    {
                         hidraw_per_key_found = true;
-                        hidraw_path_info = format!("Found HP Per-Key RGB HID device at {:?}", entry.file_name().unwrap_or_default());
+                        hidraw_path_info = format!(
+                            "Found Per-Key RGB HID device at /dev/{}{}",
+                            entry.file_name().unwrap_or_default().to_string_lossy(),
+                            if is_lamparray { " (LampArray)" } else { "" }
+                        );
                         break;
                     }
                 }
