@@ -23,8 +23,12 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
           NEEDRESTART_MODE: a
         run: |
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            printf "https://mirrors.edge.kernel.org/ubuntu/\nhttp://archive.ubuntu.com/ubuntu/\n" | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
+          fi
           sudo apt-get update -qq
           sudo -E apt-get install -y --no-install-recommends \
+            -o Acquire::Retries=3 \
             -o Dpkg::Options::="--force-confdef" \
             -o Dpkg::Options::="--force-confold" \
             build-essential \
