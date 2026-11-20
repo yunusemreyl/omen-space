@@ -1407,6 +1407,7 @@ impl RgbService {
 
     async fn software_animation_loop(inner: Arc<Mutex<RgbInner>>) {
         let mut last_per_key_colors: Vec<String> = Vec::new();
+        let mut last_sysfs_frame: Vec<String> = Vec::new();
         loop {
             let mut g = inner.lock().await;
             let has_per_key = g.hid_per_key.is_available();
@@ -1422,6 +1423,7 @@ impl RgbService {
                 continue;
             }
             if !g.config.power || g.config.mode == "static" || g.config.mode == "per_key_custom" { 
+                last_sysfs_frame.clear();
                 drop(g);
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 continue; 
@@ -1453,7 +1455,8 @@ impl RgbService {
             }
             g.mcu_sig = None;
 
-            let step_inc = (speed as f64 / 100.0) * 0.25;
+            let tick_ms: u64 = if !has_per_key && has_old_sysfs { 150 } else { 50 };
+            let step_inc = (speed as f64 / 100.0) * 0.25 * (tick_ms as f64 / 50.0);
             g.anim_step += step_inc;
             let step = g.anim_step;
 
@@ -1558,11 +1561,14 @@ impl RgbService {
                     );
                     current_frame.push(scaled);
                 }
-                g.hw.write_zones_batch(&current_frame);
+                if current_frame != last_sysfs_frame {
+                    g.hw.write_zones_batch(&current_frame);
+                    last_sysfs_frame = current_frame;
+                }
             }
 
             drop(g);
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(tick_ms)).await;
         }
     }
     /// Apply only the lightbar so changing lightbar segments/mode never re-applies or resets keyboard (#355).
