@@ -205,6 +205,10 @@ static ssize_t zone_show(struct device *dev, struct device_attribute *attr,
                     tbl[COLOR_OFFSET + zone * 3 + 2]);
 }
 
+static DEFINE_MUTEX(cached_tbl_mutex);
+static u8 cached_color_tbl[COLOR_TABLE_SIZE];
+static bool cached_color_tbl_valid;
+
 static ssize_t zone_store(struct device *dev, struct device_attribute *attr,
                           const char *buf, size_t count) {
   int zone;
@@ -242,6 +246,10 @@ static ssize_t zone_store(struct device *dev, struct device_attribute *attr,
   if (ret)
     pr_warn("hp-omen-extra: zone%d color SET failed: WMI returned %d\n", zone, ret);
 
+  mutex_lock(&cached_tbl_mutex);
+  cached_color_tbl_valid = false;
+  mutex_unlock(&cached_tbl_mutex);
+
   return ret ? -EIO : count;
 }
 
@@ -275,11 +283,19 @@ static ssize_t all_zones_store(struct device *dev, struct device_attribute *attr
   const char *cur = buf;
   char token[32];
 
-  memset(tbl, 0, sizeof(tbl));
-  ret = hp_wmi_perform_query(HPWMI_COLOR_GET_QUERY, HPWMI_BACKLIGHT, tbl,
-                             sizeof(tbl), sizeof(tbl));
-  if (ret)
-    return -EIO;
+  mutex_lock(&cached_tbl_mutex);
+  if (!cached_color_tbl_valid) {
+    memset(cached_color_tbl, 0, sizeof(cached_color_tbl));
+    ret = hp_wmi_perform_query(HPWMI_COLOR_GET_QUERY, HPWMI_BACKLIGHT,
+                               cached_color_tbl, sizeof(cached_color_tbl),
+                               sizeof(cached_color_tbl));
+    if (ret) {
+      mutex_unlock(&cached_tbl_mutex);
+      return -EIO;
+    }
+    cached_color_tbl_valid = true;
+  }
+  memcpy(tbl, cached_color_tbl, sizeof(tbl));
 
   while (*cur && z < RGB_ZONE_COUNT) {
     while (*cur == ' ' || *cur == '\t' || *cur == ',' || *cur == '\n') cur++;
@@ -300,11 +316,17 @@ static ssize_t all_zones_store(struct device *dev, struct device_attribute *attr
     }
   }
 
-  if (z == 0)
+  if (z == 0) {
+    mutex_unlock(&cached_tbl_mutex);
     return -EINVAL;
+  }
 
+  memcpy(cached_color_tbl, tbl, sizeof(tbl));
   ret = hp_wmi_perform_query(HPWMI_COLOR_SET_QUERY, HPWMI_BACKLIGHT, tbl,
                              sizeof(tbl), sizeof(tbl));
+  if (ret)
+    cached_color_tbl_valid = false;
+  mutex_unlock(&cached_tbl_mutex);
   return ret ? -EIO : count;
 }
 
