@@ -1087,6 +1087,42 @@ impl HidPerKeyBackend {
         self.write_per_key_colors(&key_colors)
     }
 
+    fn lamp_array_count(&self) -> usize {
+        self.lamparray.as_ref().map(|l| l.lamp_count()).unwrap_or(0)
+    }
+
+    /// Physical lamp order, ids, positions and HID bindings (GetLampMap).
+    fn lamp_map_json(&self) -> String {
+        let Some(ref la) = self.lamparray else {
+            return serde_json::json!({"count": 0, "lamps": []}).to_string();
+        };
+        let lamps: Vec<serde_json::Value> = la
+            .lamps
+            .iter()
+            .enumerate()
+            .map(|(index, lamp)| {
+                serde_json::json!({
+                    "index": index,
+                    "id": lamp.id,
+                    "x": lamp.x,
+                    "y": lamp.y,
+                    "binding": lamp.binding,
+                })
+            })
+            .collect();
+        serde_json::json!({"count": la.lamp_count(), "lamps": lamps}).to_string()
+    }
+
+    /// Write colours in physical lamp order (the order reported by lamp_map_json).
+    /// Calibration only: this bypasses the GUI-slot mapping on purpose.
+    fn set_lamp_colors(&self, colors: &[(u8, u8, u8)]) -> bool {
+        let Some(ref la) = self.lamparray else {
+            return false;
+        };
+        let _ = self.send_enter_per_key_mode(100);
+        la.set_frame(colors)
+    }
+
     fn test_single_key(&self, key_index: usize, r: u8, g: u8, b: u8) -> bool {
         if !self.is_available() {
             return false;
@@ -1212,6 +1248,10 @@ struct RgbInner {
     anim_step: f64,
     lightbar_step: f64,
     last_lightbar_level: i32,
+    /// Lamp calibration: while true the animation loop leaves the keyboard
+    /// alone so tools/calibrate-lamps.py can light individual physical lamps.
+    calibrating: bool,
+    calibration_until: Option<std::time::Instant>,
     /// Signature of the last effect record sent to the keyboard MCU (None = resend).
     mcu_sig: Option<Vec<u8>>,
     wizard: Arc<crate::hid_wizard::HidPerKeyWizard>,
@@ -1244,7 +1284,7 @@ impl RgbService {
         }
 
         let inner = Arc::new(Mutex::new(RgbInner {
-            hw, hid_per_key, config, per_key_map, color_cache: HashMap::new(), anim_step: 0.0, lightbar_step: 0.0, last_lightbar_level: -1, mcu_sig: None, wizard, evdev_monitor, desktop_rgb,
+            hw, hid_per_key, config, per_key_map, color_cache: HashMap::new(), anim_step: 0.0, lightbar_step: 0.0, last_lightbar_level: -1, calibrating: false, calibration_until: None, mcu_sig: None, wizard, evdev_monitor, desktop_rgb,
         }));
 
         let svc = Self { inner: inner.clone() };
@@ -1410,6 +1450,18 @@ impl RgbService {
         let mut last_sysfs_frame: Vec<String> = Vec::new();
         loop {
             let mut g = inner.lock().await;
+            // Lamp calibration owns the keyboard while it runs.
+            if g.calibrating {
+                if let Some(until) = g.calibration_until {
+                    if std::time::Instant::now() < until {
+                        drop(g);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                        continue;
+                    }
+                }
+                g.calibrating = false;
+                g.calibration_until = None;
+            }
             let has_per_key = g.hid_per_key.is_available();
             let has_old_sysfs = g.hw.available && !g.hw.is_new_driver;
 
@@ -1943,6 +1995,63 @@ impl RgbService {
         g.config.save();
         info!("SetWinLock: {}", if locked { "LOCKED" } else { "UNLOCKED" });
         "OK".to_string()
+    }
+
+
+    /// StartLampCalibration — pause the animation loop so a script can light
+    /// individual physical lamps and read the key the user presses.
+    async fn start_lamp_calibration(&self) -> String {
+        let mut g = self.inner.lock().await;
+        if g.hid_per_key.lamp_array_count() == 0 {
+            return "FAIL: no HID LampArray".to_string();
+        }
+        g.calibrating = true;
+        g.calibration_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(600));
+        serde_json::json!({
+            "status": "calibrating",
+            "lamps": g.hid_per_key.lamp_array_count(),
+        }).to_string()
+    }
+
+    /// StopLampCalibration — resume normal lighting from the saved config.
+    async fn stop_lamp_calibration(&self) -> String {
+        {
+            let mut g = self.inner.lock().await;
+            g.calibrating = false;
+            g.calibration_until = None;
+        }
+        Self::apply_state(self.inner.clone()).await;
+        "OK".to_string()
+    }
+
+    /// GetLampMap — physical lamp order, ids, positions and HID bindings.
+    async fn get_lamp_map(&self) -> String {
+        let g = self.inner.lock().await;
+        g.hid_per_key.lamp_map_json()
+    }
+
+    /// SetLampColors(colors_json) — one "RRGGBB" string per physical lamp.
+    async fn set_lamp_colors(&self, colors_json: String) -> String {
+        let Ok(colors) = serde_json::from_str::<Vec<String>>(&colors_json) else {
+            return "FAIL: invalid JSON".to_string();
+        };
+        let mut g = self.inner.lock().await;
+        let count = g.hid_per_key.lamp_array_count();
+        if count == 0 {
+            return "FAIL: no HID LampArray".to_string();
+        }
+        if colors.len() != count {
+            return format!("FAIL: expected {} colours, got {}", count, colors.len());
+        }
+        let rgb: Vec<(u8, u8, u8)> = colors.iter().map(|hex| parse_hex_color(hex)).collect();
+        // Keep the animation loop out of the way while the script walks lamps.
+        g.calibrating = true;
+        g.calibration_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(600));
+        if g.hid_per_key.set_lamp_colors(&rgb) {
+            "OK".to_string()
+        } else {
+            "FAIL: LampArray write failed".to_string()
+        }
     }
 
     /// TestSingleKey(index) — mirrors Python TestSingleKey().
