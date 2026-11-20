@@ -2010,7 +2010,8 @@ impl RgbService {
         serde_json::json!({
             "status": "calibrating",
             "lamps": g.hid_per_key.lamp_array_count(),
-        }).to_string()
+        })
+        .to_string()
     }
 
     /// StopLampCalibration — resume normal lighting from the saved config.
