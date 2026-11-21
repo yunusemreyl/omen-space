@@ -3,6 +3,60 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use crate::keyboardrgb::helpers::*;
+
+fn keyboard_layout_is_de() -> bool {
+    let Ok(home) = std::env::var("HOME") else { return false };
+    let path = format!("{}/.config/omenspace/settings.json", home);
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| {
+            v.get("keyboard_layout")
+                .and_then(|x| x.as_str())
+                .map(|s| s.eq_ignore_ascii_case("de") || s.eq_ignore_ascii_case("german"))
+        })
+        .unwrap_or(false)
+}
+
+fn save_keyboard_layout(de: bool) {
+    let Ok(home) = std::env::var("HOME") else { return };
+    let path = format!("{}/.config/omenspace/settings.json", home);
+    if let Some(dir) = std::path::Path::new(&path).parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let mut value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    value["keyboard_layout"] = serde_json::json!(if de { "de" } else { "en" });
+    let _ = std::fs::write(&path, serde_json::to_string_pretty(&value).unwrap_or_default());
+}
+
+/// German keycaps for the US physical positions. Display only: the HID usage
+/// mapping is unchanged, so this never affects what a key actually lights.
+fn german_labels() -> HashMap<String, String> {
+    let pairs = [
+        ("~", "^"),
+        ("-", "ß"),
+        ("=", "´"),
+        ("[", "Ü"),
+        ("]", "+"),
+        ("\\", "#"),
+        (";", "Ö"),
+        ("'", "Ä"),
+        ("Z", "Y"),
+        ("Y", "Z"),
+        ("/", "-"),
+        ("Del", "Entf"),
+        ("Ctrl", "Strg"),
+        ("Alt_R", "AltGr"),
+    ];
+    pairs
+        .iter()
+        .map(|(us, de)| ((*us).to_string(), (*de).to_string()))
+        .collect()
+}
+
 pub fn build_interactive_keyboard(
     detected_mode: KeyboardMode,
     zone_colors: Rc<RefCell<Vec<String>>>,
@@ -81,6 +135,12 @@ pub fn build_interactive_keyboard(
     };
 
     let globals=Rc::new(RefCell::new(KeyboardGlobals::from_snapshot(state_json_opt.as_ref())));
+    // Key-label language. Saved in settings.json; display only.
+    let layout_de = Rc::new(std::cell::Cell::new(keyboard_layout_is_de()));
+    let layout_labels: Rc<RefCell<HashMap<String, String>>> = Rc::new(RefCell::new(
+        if layout_de.get() { german_labels() } else { HashMap::new() },
+    ));
+
     let top_bar = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).build();
 
     // -- Selection Tools (Left-aligned) --
@@ -273,6 +333,32 @@ pub fn build_interactive_keyboard(
         .halign(gtk::Align::Center)
         .build();
 
+    // Layout selector: same DropDown control as Effect, so new layouts are just
+    // new model entries. Left of Effect.
+    let layout_model = gtk::StringList::new(&["EN", "DE"]);
+    let layout_dropdown = gtk::DropDown::builder()
+        .model(&layout_model)
+        .selected(if layout_de.get() { 1 } else { 0 })
+        .valign(gtk::Align::Center)
+        .tooltip_text("Keyboard key labels")
+        .build();
+    top_bar.prepend(&layout_dropdown);
+    top_bar.prepend(&gtk::Label::builder().label("Layout:").css_classes(["dim-label"]).build());
+
+    let da_layout = drawing_area.clone();
+    let layout_labels_c = layout_labels.clone();
+    let layout_de_c = layout_de.clone();
+    layout_dropdown.connect_selected_notify(move |dd| {
+        let de = dd.selected() == 1;
+        layout_de_c.set(de);
+        {
+            let mut labels = layout_labels_c.borrow_mut();
+            if de { *labels = german_labels(); } else { labels.clear(); }
+        }
+        da_layout.queue_draw();
+        save_keyboard_layout(de);
+    });
+
     let keys_rc = Rc::new(keys);
     let selected_keys = Rc::new(RefCell::new(Vec::<String>::new()));
     let anim_state = Rc::new(RefCell::new(("static".to_string(), 50.0, 0.0f64)));
@@ -281,6 +367,7 @@ pub fn build_interactive_keyboard(
     let hovered_key = Rc::new(RefCell::new(None::<String>));
 
     let keys_draw = keys_rc.clone();
+    let layout_labels_draw = layout_labels.clone();
     let selected_draw = selected_keys.clone();
     let hovered_draw = hovered_key.clone();
     let colors_draw = key_colors.clone();
@@ -352,12 +439,17 @@ pub fn build_interactive_keyboard(
             if lum > 0.5 { cr.set_source_rgb(0.0, 0.0, 0.0); } else { cr.set_source_rgb(0.9, 0.9, 0.9); }
             
             cr.set_font_size(11.0);
-            if let Ok(extents) = cr.text_extents(&k.display) {
+            let labels_guard = layout_labels_draw.borrow();
+            let label = labels_guard
+                .get(&k.name)
+                .map(|s| s.as_str())
+                .unwrap_or(k.display.as_str());
+            if let Ok(extents) = cr.text_extents(label) {
                 cr.move_to(
                     k.x + (k.w - extents.width()) / 2.0 - extents.x_bearing(),
                     k.y + (k.h - extents.height()) / 2.0 - extents.y_bearing()
                 );
-                let _ = cr.show_text(&k.display);
+                let _ = cr.show_text(label);
             }
         }
     });
