@@ -2870,6 +2870,10 @@ static int victus_s_powersource_event(struct notifier_block *nb,
 	 * Observed on HP 16-s1034nf (board 8C9C) with F.11 and F.13 BIOS.
 	 */
 	if (actual_profile == PLATFORM_PROFILE_PERFORMANCE) {
+		/* On OMEN board 8D2F the reset leaves PL1/PL2 at 0 W on battery. */
+		if (dmi_match(DMI_BOARD_NAME, "8D2F"))
+			return NOTIFY_DONE;
+
 		pr_debug("Triggering CPU PL1/PL2 actualization\n");
 		err = victus_s_set_cpu_pl1_pl2(HP_POWER_LIMIT_DEFAULT,
 					       HP_POWER_LIMIT_DEFAULT);
