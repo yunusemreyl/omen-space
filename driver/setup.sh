@@ -446,7 +446,7 @@ EOF
                     chmod 644 "$mod_path"
                     ;;
                 *.ko.xz)
-                    xz -f -c "$tmp_ko" > "$mod_path"
+                    xz --check=crc32 --lzma2=dict=1MiB -f -c "$tmp_ko" > "$mod_path"
                     chmod 644 "$mod_path"
                     ;;
                 *.ko.gz)
