@@ -174,10 +174,19 @@ async fn toggle_overlay() {
 }
 
 #[derive(Debug, Clone)]
+struct TrayGpuInfo {
+    mode: String,
+    available: bool,
+    supported_modes: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
 struct Tray {
     power_profile: String,
     fan_mode: String,
     gpu_mode: String,
+    mux_available: bool,
+    mux_supported_modes: Vec<String>,
     battery_info: Option<String>,
 }
 
@@ -221,6 +230,7 @@ impl ksni::Tray for Tray {
         let g_label = match self.gpu_mode.as_str() {
             "discrete" => t("tt_gpu_discrete"),
             "advanced" => t("tt_gpu_advanced"),
+            "integrated" => t("tt_gpu_integrated"),
             _ => t("tt_gpu_hybrid"),
         };
         let mut desc = format!("{}: {}\n{}: {}\n{}: {}", t("tt_power"), p_label, t("tt_fan"), f_label, t("tt_gpu"), g_label);
@@ -244,7 +254,7 @@ impl ksni::Tray for Tray {
         let cur_fan = self.fan_mode.as_str();
         let cur_gpu = self.gpu_mode.as_str();
 
-        vec![
+        let mut items: Vec<ksni::MenuItem<Self>> = vec![
             StandardItem {
                 label: t("tray_open").into(),
                 icon_name: "omenspace".into(),
@@ -352,50 +362,44 @@ impl ksni::Tray for Tray {
                 ..Default::default()
             }
             .into(),
-            SubMenu {
-                label: t("gpu_mode").into(),
-                submenu: vec![
-                    CheckmarkItem {
-                        label: t("hybrid").into(),
-                        checked: cur_gpu == "hybrid",
-                        activate: Box::new(|tray: &mut Self| {
-                            tray.gpu_mode = "hybrid".into();
-                            spawn_task(async {
-                                set_gpu_mode("hybrid").await;
-                            });
-                        }),
-                        ..Default::default()
-                    }
-                    .into(),
-                    CheckmarkItem {
-                        label: t("discrete").into(),
-                        checked: cur_gpu == "discrete",
-                        activate: Box::new(|tray: &mut Self| {
-                            tray.gpu_mode = "discrete".into();
-                            spawn_task(async {
-                                set_gpu_mode("discrete").await;
-                            });
-                        }),
-                        ..Default::default()
-                    }
-                    .into(),
-                    CheckmarkItem {
-                        label: t("advanced").into(),
-                        checked: cur_gpu == "advanced",
-                        activate: Box::new(|tray: &mut Self| {
-                            tray.gpu_mode = "advanced".into();
-                            spawn_task(async {
-                                set_gpu_mode("advanced").await;
-                            });
-                        }),
-                        ..Default::default()
-                    }
-                    .into(),
-                ],
-                ..Default::default()
+        ];
+
+        if self.mux_available && !self.mux_supported_modes.is_empty() {
+            let mut gpu_submenu: Vec<ksni::MenuItem<Self>> = Vec::new();
+            for mode in ["hybrid", "discrete", "advanced", "integrated"] {
+                if self.mux_supported_modes.iter().any(|m| m == mode) {
+                    let mode_owned = mode.to_string();
+                    gpu_submenu.push(
+                        CheckmarkItem {
+                            label: t(mode).into(),
+                            checked: cur_gpu == mode,
+                            activate: Box::new(move |tray: &mut Self| {
+                                let selected = mode_owned.clone();
+                                tray.gpu_mode = selected.clone();
+                                spawn_task(async move {
+                                    set_gpu_mode(&selected).await;
+                                });
+                            }),
+                            ..Default::default()
+                        }
+                        .into(),
+                    );
+                }
             }
-            .into(),
-            MenuItem::Separator,
+            if !gpu_submenu.is_empty() {
+                items.push(
+                    SubMenu {
+                        label: t("gpu_mode").into(),
+                        submenu: gpu_submenu,
+                        ..Default::default()
+                    }
+                    .into(),
+                );
+            }
+        }
+
+        items.push(MenuItem::Separator);
+        items.push(
             StandardItem {
                 label: t("exit").into(),
                 icon_name: "application-exit".into(),
@@ -407,7 +411,8 @@ impl ksni::Tray for Tray {
                 ..Default::default()
             }
             .into(),
-        ]
+        );
+        items
     }
 }
 
@@ -451,14 +456,37 @@ async fn fetch_fan_mode() -> Option<String> {
     None
 }
 
-async fn fetch_gpu_mode() -> Option<String> {
+async fn fetch_gpu_info() -> Option<TrayGpuInfo> {
     if let Ok(conn) = get_conn().await {
         if let Ok(proxy) = MuxProxy::new(&conn).await {
             if let Ok(json_str) = proxy.get_gpu_info().await {
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                    if let Some(mode) = val.get("mode").and_then(|v| v.as_str()) {
-                        return Some(mode.to_string());
-                    }
+                    let available = val.get("available").and_then(|v| v.as_bool()).unwrap_or(true);
+                    let mode = val
+                        .get("mode")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("hybrid")
+                        .to_string();
+                    let supported_modes = val
+                        .get("supported_modes")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|x| x.as_str().map(str::to_string))
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_else(|| {
+                            if available {
+                                vec!["hybrid".to_string(), "discrete".to_string()]
+                            } else {
+                                Vec::new()
+                            }
+                        });
+                    return Some(TrayGpuInfo {
+                        mode,
+                        available,
+                        supported_modes,
+                    });
                 }
             }
         }
@@ -654,13 +682,19 @@ async fn main() {
 
     let initial_power = fetch_power_profile().await.unwrap_or_else(|| "balanced".into());
     let initial_fan = fetch_fan_mode().await.unwrap_or_else(|| "auto".into());
-    let initial_gpu = fetch_gpu_mode().await.unwrap_or_else(|| "hybrid".into());
+    let initial_gpu = fetch_gpu_info().await.unwrap_or_else(|| TrayGpuInfo {
+        mode: "hybrid".into(),
+        available: true,
+        supported_modes: vec!["hybrid".into(), "discrete".into()],
+    });
     let initial_bat = fetch_battery_info().await.unwrap_or(None);
 
     let tray = Tray {
         power_profile: initial_power,
         fan_mode: initial_fan,
-        gpu_mode: initial_gpu,
+        gpu_mode: initial_gpu.mode,
+        mux_available: initial_gpu.available,
+        mux_supported_modes: initial_gpu.supported_modes,
         battery_info: initial_bat,
     };
 
@@ -681,7 +715,7 @@ async fn main() {
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         let p = fetch_power_profile().await;
         let f = fetch_fan_mode().await;
-        let g = fetch_gpu_mode().await;
+        let g = fetch_gpu_info().await;
         let b = fetch_battery_info().await;
         if p.is_some() || f.is_some() || g.is_some() || b.is_some() {
             handle.update(|tray| {
@@ -692,7 +726,9 @@ async fn main() {
                     tray.fan_mode = new_f;
                 }
                 if let Some(new_g) = g {
-                    tray.gpu_mode = new_g;
+                    tray.gpu_mode = new_g.mode;
+                    tray.mux_available = new_g.available;
+                    tray.mux_supported_modes = new_g.supported_modes;
                 }
                 if let Some(new_b) = b {
                     tray.battery_info = new_b;

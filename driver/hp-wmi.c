@@ -169,6 +169,7 @@ static const struct thermal_profile_params omen_v1_unknown_ec_thermal_params = {
  */
 static struct thermal_profile_params *active_thermal_profile_params;
 static bool has_mux = false;
+static u8 mux_supported_mask;
 
 /*
  * DMI board names of devices that should use the omen specific path for
@@ -1800,6 +1801,33 @@ static ssize_t gpu_mux_mode_store(struct device *dev,
 	return count;
 }
 
+static ssize_t gpu_mux_supported_modes_show(struct device *dev,
+					    struct device_attribute *attr,
+					    char *buf)
+{
+	u8 supported = mux_supported_mask;
+	int ret, len = 0;
+
+	if (!supported) {
+		ret = hp_wmi_get_mux_supported_modes(&supported);
+		if (ret)
+			return ret;
+		mux_supported_mask = supported;
+	}
+
+	if (supported & HPWMI_MUX_MODE_HYBRID)
+		len += sysfs_emit_at(buf, len, "%shybrid", len ? " " : "");
+	if (supported & HPWMI_MUX_MODE_DISCRETE)
+		len += sysfs_emit_at(buf, len, "%sdiscrete", len ? " " : "");
+	if (supported & HPWMI_MUX_MODE_OPTIMUS)
+		len += sysfs_emit_at(buf, len, "%sadvanced", len ? " " : "");
+	if (supported & HPWMI_MUX_MODE_UMA)
+		len += sysfs_emit_at(buf, len, "%sintegrated", len ? " " : "");
+
+	len += sysfs_emit_at(buf, len, "\n");
+	return len;
+}
+
 static DEVICE_ATTR_RO(display);
 static DEVICE_ATTR_RO(hddtemp);
 static DEVICE_ATTR_RW(als);
@@ -1810,6 +1838,7 @@ static DEVICE_ATTR_RW(graphics_mode);
 static DEVICE_ATTR_RW(gpu_tgp);
 static DEVICE_ATTR_RW(gpu_ppab);
 static DEVICE_ATTR_RW(gpu_mux_mode);
+static DEVICE_ATTR_RO(gpu_mux_supported_modes);
 
 /*
  * chassis_temp — read-only sysfs attribute exposing the WMI 0x23 chassis/IR
@@ -1942,6 +1971,7 @@ static struct attribute *hp_wmi_attrs[] = {
 	&dev_attr_gpu_tgp.attr,
 	&dev_attr_gpu_ppab.attr,
 	&dev_attr_gpu_mux_mode.attr,
+	&dev_attr_gpu_mux_supported_modes.attr,
 	&dev_attr_chassis_temp.attr,
 	&dev_attr_battery_charge_mode.attr,
 	NULL,
@@ -1953,7 +1983,8 @@ static umode_t hp_wmi_attrs_is_visible(struct kobject *kobj,
 	if (attr == &dev_attr_graphics_mode.attr)
 		return hp_wmi_gpu_mode_supported() ? attr->mode : 0;
 
-	if (attr == &dev_attr_gpu_mux_mode.attr)
+	if (attr == &dev_attr_gpu_mux_mode.attr ||
+	    attr == &dev_attr_gpu_mux_supported_modes.attr)
 		return has_mux ? attr->mode : 0;
 
 	if (attr == &dev_attr_gpu_tgp.attr || attr == &dev_attr_gpu_ppab.attr)
@@ -4086,7 +4117,10 @@ static int __init hp_wmi_init(void)
 
 	if (bios_capable) {
 		u8 supported = 0;
-		has_mux = (hp_wmi_get_mux_supported_modes(&supported) == 0 && supported != 0);
+		if (hp_wmi_get_mux_supported_modes(&supported) == 0 && supported != 0) {
+			has_mux = true;
+			mux_supported_mask = supported;
+		}
 
 		hp_wmi_platform_dev = platform_device_register_simple(
 			"hp-wmi", PLATFORM_DEVID_NONE, NULL, 0);

@@ -464,7 +464,20 @@ async fn execute_input_command(input: &str, conn: &zbus::Connection) -> String {
                     let info_str = m.get_gpu_info().await.unwrap_or_default();
                     let info_json: Value = serde_json::from_str(&info_str).unwrap_or(Value::Null);
                     let mode = info_json["mode"].as_str().unwrap_or("Unknown").to_string();
-                    return format!("[{}] \x1b[36mCurrent GPU MUX Mode: {}\x1b[0m", now, mode);
+                    let supported = info_json["supported_modes"]
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| "none".to_string());
+                    return format!(
+                        "[{}] \x1b[36mCurrent GPU MUX Mode: {} (supported: {})\x1b[0m",
+                        now, mode, supported
+                    );
                 }
                 return format!("[{}] \x1b[33m{}\x1b[0m", now, crate::i18n::t("usage_mux"));
             }

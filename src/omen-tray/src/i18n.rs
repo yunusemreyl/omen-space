@@ -109,6 +109,7 @@ fn translate_tr(key: &'static str) -> &'static str {
         "hybrid" => "Hibrit (Hybrid — Yeniden Başlatma Gerekir)",
         "discrete" => "Harici (Discrete — Yeniden Başlatma Gerekir)",
         "advanced" => "Advanced Optimus (Yeniden Başlatma Gerekir)",
+        "integrated" => "Dahili iGPU (Yeniden Başlatma Gerekir)",
         "gpu_reboot_notify" => "GPU modunun etkin olması için sistemi yeniden başlatmanız gerekiyor.",
         "exit" => "Çıkış",
         
@@ -119,6 +120,7 @@ fn translate_tr(key: &'static str) -> &'static str {
         "tt_gpu_hybrid" => "Hibrit (Hybrid)",
         "tt_gpu_discrete" => "Harici (dGPU)",
         "tt_gpu_advanced" => "Advanced Optimus",
+        "tt_gpu_integrated" => "Dahili (iGPU)",
         "tt_battery" => "Pil",
         "battery_health" => "Sağlık",
         "bat_charging" => "Şarj Oluyor",
@@ -147,6 +149,7 @@ fn translate_en(key: &'static str) -> &'static str {
         "hybrid" => "Hybrid (Requires Reboot)",
         "discrete" => "Discrete dGPU (Requires Reboot)",
         "advanced" => "Advanced Optimus (Requires Reboot)",
+        "integrated" => "Integrated iGPU (Requires Reboot)",
         "gpu_reboot_notify" => "Please restart your system for the GPU mode change to take effect.",
         "exit" => "Exit",
         
@@ -157,6 +160,7 @@ fn translate_en(key: &'static str) -> &'static str {
         "tt_gpu_hybrid" => "Hybrid",
         "tt_gpu_discrete" => "Discrete (dGPU)",
         "tt_gpu_advanced" => "Advanced Optimus",
+        "tt_gpu_integrated" => "Integrated (iGPU)",
         "tt_battery" => "Battery",
         "battery_health" => "Health",
         "bat_charging" => "Charging",
