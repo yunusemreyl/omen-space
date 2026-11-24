@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 gtk = { version = "0.7", package = "gtk4", features = ["v4_12"] }
 libadwaita = { version = "0.5", features = ["v1_4"] }
-glib = "0.18"
+glib = "0.22"
 tokio = { version = "1", features = ["full"] }
 zbus = "4.4"
 serde = { version = "1.0", features = ["derive"] }
