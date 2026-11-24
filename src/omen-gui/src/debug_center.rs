@@ -78,6 +78,56 @@ fn disable_conflicts_command(conflicts: &[&str]) -> String {
     }
 }
 
+const GITHUB_NEW_ISSUE_BASE: &str = "https://github.com/yunusemreyl/omen-space/issues/new";
+const GITHUB_URL_MAX_BYTES: usize = 7000;
+const TRUNCATION_NOTICE: &str = "\n\n> _(Truncated for URL length — the complete untruncated dump was copied to your clipboard; press Ctrl+V to paste it in full.)_";
+
+/// Builds a GitHub issue URL whose total percent-encoded length stays within `max_url_bytes` (#364).
+pub(crate) fn build_github_issue_url(title: &str, report: &str, max_url_bytes: usize) -> String {
+    use urlencoding::encode;
+    let prefix = format!("{}?title={}&body=", GITHUB_NEW_ISSUE_BASE, encode(title));
+    let full = format!("{}{}", prefix, encode(report));
+    if full.len() <= max_url_bytes {
+        return full;
+    }
+
+    let encoded_notice = encode(TRUNCATION_NOTICE);
+    let budget = max_url_bytes.saturating_sub(prefix.len() + encoded_notice.len());
+
+    let mut lo = 0usize;
+    let mut hi = report.len();
+    while lo < hi {
+        let mid = lo + (hi - lo).div_ceil(2);
+        let mut cut = mid;
+        while cut > lo && !report.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        if cut == lo {
+            let next = report[lo..]
+                .chars()
+                .next()
+                .map(|c| lo + c.len_utf8())
+                .unwrap_or(lo);
+            if next > lo && encode(&report[..next]).len() <= budget {
+                lo = next;
+            } else {
+                break;
+            }
+        } else if encode(&report[..cut]).len() <= budget {
+            lo = cut;
+        } else {
+            hi = cut - 1;
+        }
+    }
+
+    let slice_end = match report[..lo].rfind('\n') {
+        Some(nl) if lo - nl <= 120 => nl,
+        _ => lo,
+    };
+
+    format!("{}{}{}", prefix, encode(&report[..slice_end]), encoded_notice)
+}
+
 /// Opens the unified Full System Dump dialog and lets the user submit it to GitHub in one click.
 /// Used by both the Debug Center button and the Unverified Board banner (#364, #370, #371, #372).
 pub fn open_full_dump_dialog(parent: &adw::ApplicationWindow, issue_title: &str) {
@@ -143,24 +193,10 @@ pub fn open_full_dump_dialog(parent: &adw::ApplicationWindow, issue_title: &str)
                         if let Some(display) = gtk::gdk::Display::default() {
                             display.clipboard().set_text(&report_copy);
                         }
-                        use urlencoding::encode;
-                        // Keep GitHub query URL well within browser/server limits (~7500 encoded bytes)
-                        let url_body = if report_copy.len() > 5500 {
-                            let mut end = 5500;
-                            while !report_copy.is_char_boundary(end) && end > 0 {
-                                end -= 1;
-                            }
-                            format!(
-                                "{}\n\n> _(Truncated for URL length — the complete untruncated dump was copied to your clipboard; press Ctrl+V to paste it in full.)_",
-                                &report_copy[..end]
-                            )
-                        } else {
-                            report_copy.clone()
-                        };
-                        let url = format!(
-                            "https://github.com/yunusemreyl/omen-space/issues/new?title={}&body={}",
-                            encode(&issue_title_s),
-                            encode(&url_body)
+                        let url = build_github_issue_url(
+                            &issue_title_s,
+                            &report_copy,
+                            GITHUB_URL_MAX_BYTES,
                         );
                         let _ = gtk::gio::AppInfo::launch_default_for_uri(&url, None::<&gtk::gio::AppLaunchContext>);
                         d.close();
@@ -880,5 +916,18 @@ mod process_tests {
         let context = glib::MainContext::new();
         let output = context.block_on(super::command_output("true", &[])).unwrap();
         assert!(output.status.success());
+    }
+
+    #[test]
+    fn github_issue_url_respects_max_bytes_and_utf8() {
+        let short = super::build_github_issue_url("Test", "short body", 7000);
+        assert!(short.contains("short%20body"));
+        assert!(!short.contains("Truncated"));
+
+        // Markdown tables and non-ASCII characters expand ~3x when percent-encoded.
+        let long_report = "| Field | Value | Türkçe İÖÜ 🚀 |\n".repeat(400);
+        let url = super::build_github_issue_url("Full Dump (8A4C)", &long_report, 7000);
+        assert!(url.len() <= 7000, "URL len {} exceeded 7000", url.len());
+        assert!(url.contains("Truncated"));
     }
 }

@@ -18,8 +18,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODVER=$(grep -oP 'PACKAGE_VERSION="\K[^"]+' "$SCRIPT_DIR/dkms.conf" 2>/dev/null || echo "1.3.5")
 
 # MOK_DIR — initialised here so it is always defined (avoids unbound variable
-# errors in the MOK_PENDING check when Secure Boot is disabled)
+# errors in the MOK_PENDING check when Secure Boot is disabled).
+# Reuse Debian/Ubuntu's shim-signed MOK when present and no OMEN Space MOK exists yet
+# so users don't have to enroll a second key (#371).
 MOK_DIR="/var/lib/omen-space/mok"
+if [ ! -f "$MOK_DIR/MOK.der" ] && [ -f /var/lib/shim-signed/mok/MOK.der ] && [ -f /var/lib/shim-signed/mok/MOK.priv ]; then
+    MOK_DIR="/var/lib/shim-signed/mok"
+fi
 
 # modprobe.d file that overrides the stock hp-wmi with our custom DKMS build.
 # Created during install, removed during uninstall.

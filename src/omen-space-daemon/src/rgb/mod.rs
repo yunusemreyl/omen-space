@@ -252,7 +252,7 @@ impl RgbHardware {
         }
     }
 
-    /// On per-key OMEN MAX boards (8D88 / 8D42) the WMI "zones" belong to the
+    /// On per-key OMEN MAX boards (8D88 / 8D42 / 8E9A) the WMI "zones" belong to the
     /// 4-segment front lightbar while the keyboard is driven over USB HID LampArray (#355).
     fn write_lightbar_zones(&self, colors: &[String]) {
         let Some(ref base) = self.driver_path else { return; };
@@ -263,7 +263,12 @@ impl RgbHardware {
                 c.clone()
             }
         };
-        let payload = colors.iter().take(4).map(format_color).collect::<Vec<_>>().join(" ");
+        let mut ordered: Vec<String> = colors.iter().take(4).map(format_color).collect();
+        // Board 8E9A wires lightbar segments 0 and 2 swapped relative to standard order (#371).
+        if self.board_id.eq_ignore_ascii_case("8E9A") && ordered.len() >= 3 {
+            ordered.swap(0, 2);
+        }
+        let payload = ordered.join(" ");
         for name in ["all_zones", "zones"] {
             let p = format!("{}/{}", base, name);
             if Path::new(&p).exists() {
@@ -703,8 +708,8 @@ impl HidPerKeyBackend {
     const PRIMAX_VID: u16 = 0x0461;
     /// Known per-key PIDs for HP VID (OpenRGB + OmenCore confirmed)
     const HP_KNOWN_PIDS: &'static [u16] = &[0x0538, 0x053A, 0x0547, 0x0549, 0x054E, 0x054F];
-    /// Known per-key PIDs for Darfon VID
-    const DARFON_KNOWN_PIDS: &'static [u16] = &[0x54BF];
+    /// Known per-key PIDs for Darfon VID (0x54BF = OMEN MAX 16-ak/ah0xxx, 0x30BF = HyperX OMEN MAX 16-ah1xxx #371)
+    const DARFON_KNOWN_PIDS: &'static [u16] = &[0x54BF, 0x30BF];
     /// Known Primax HP OMEN keyboard PIDs (LampArray-probed safely by report descriptor)
     const PRIMAX_KNOWN_PIDS: &'static [u16] = &[0x4F03];
     const PACKET_SIZE: usize = 65;
@@ -1205,22 +1210,25 @@ impl Default for RgbConfig {
 }
 
 impl RgbConfig {
+    fn parse_and_sanitize(data: &str) -> Self {
+        let mut cfg: Self = serde_json::from_str(data).unwrap_or_default();
+        if !VALID_MODES.contains(&cfg.mode.as_str()) {
+            cfg.mode = "static".to_string();
+        }
+        // Preserve up to 17 color slots (0..7 keyboard zones, 10..16 Desktop RGB zones).
+        cfg.colors = cfg.colors.into_iter()
+            .filter(|c| c.len() == 6 && c.chars().all(|ch| ch.is_ascii_hexdigit()))
+            .take(17)
+            .collect();
+        while cfg.colors.len() < 8 {
+            cfg.colors.push("FF0000".to_string());
+        }
+        cfg
+    }
+
     fn load() -> Self {
         if let Ok(data) = std::fs::read_to_string(CONFIG_PATH) {
-            let mut cfg: Self = serde_json::from_str(&data).unwrap_or_default();
-            // Validate mode
-            if !VALID_MODES.contains(&cfg.mode.as_str()) {
-                cfg.mode = "static".to_string();
-            }
-            // Ensure 8 colors, validate hex
-            cfg.colors = cfg.colors.into_iter()
-                .filter(|c| c.len() == 6 && c.chars().all(|ch| ch.is_ascii_hexdigit()))
-                .take(8)
-                .collect();
-            while cfg.colors.len() < 8 {
-                cfg.colors.push("FF0000".to_string());
-            }
-            cfg
+            Self::parse_and_sanitize(&data)
         } else {
             Self::default()
         }
@@ -1817,7 +1825,11 @@ impl RgbService {
         }
         {
             let mut g = self.inner.lock().await;
-            g.config.mode = "static".to_string();
+            // Preserve active animated effects so picking a color updates the effect palette;
+            // only leave per-key painting when applying a zone/global color (#371).
+            if g.config.mode == "per_key_custom" {
+                g.config.mode = "static".to_string();
+            }
             g.config.power = true;
             g.config.hw_effects = false;
             if g.config.colors.len() < 17 {
@@ -2359,5 +2371,45 @@ mod regression_rgb {
         h.write_zones_batch(&colors);
         let payload=std::fs::read_to_string(dir.join("all_zones")).unwrap();let _=std::fs::remove_dir_all(dir);
         assert_eq!(payload.split_whitespace().count(),8,"adding all_zones must not drop zones 4-7");
+    }
+
+    #[test]
+    fn rgb_config_preserves_desktop_rgb_slots_10_to_16() {
+        let mut colors = vec!["112233".to_string(); 17];
+        colors[10] = "AABBCC".to_string();
+        colors[16] = "DDEEFF".to_string();
+        let json = serde_json::json!({
+            "mode": "static",
+            "colors": colors,
+            "speed": 50,
+            "brightness": 100,
+            "direction": "ltr",
+            "power": true,
+            "win_lock": false
+        }).to_string();
+        let parsed = RgbConfig::parse_and_sanitize(&json);
+        assert_eq!(parsed.colors.len(), 17);
+        assert_eq!(parsed.colors[10], "AABBCC");
+        assert_eq!(parsed.colors[16], "DDEEFF");
+    }
+
+    #[test]
+    fn lightbar_zones_swap_segments_0_and_2_only_for_8e9a() {
+        let dir = std::env::temp_dir().join(format!("omen-lb-8e9a-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("all_zones"), "").unwrap();
+
+        let h_8e9a = RgbHardware { driver_path: Some(dir.to_string_lossy().to_string()), is_new_driver: false, zone_count: 4, available: true, board_id: "8E9A".into() };
+        let cols = vec!["111111".into(), "222222".into(), "333333".into(), "444444".into()];
+        h_8e9a.write_lightbar_zones(&cols);
+        let p_8e9a = std::fs::read_to_string(dir.join("all_zones")).unwrap();
+
+        let h_8d88 = RgbHardware { driver_path: Some(dir.to_string_lossy().to_string()), is_new_driver: false, zone_count: 4, available: true, board_id: "8D88".into() };
+        h_8d88.write_lightbar_zones(&cols);
+        let p_8d88 = std::fs::read_to_string(dir.join("all_zones")).unwrap();
+
+        let _ = std::fs::remove_dir_all(dir);
+        assert_eq!(p_8e9a, "333333 222222 111111 444444");
+        assert_eq!(p_8d88, "111111 222222 333333 444444");
     }
 }

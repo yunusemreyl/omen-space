@@ -410,12 +410,22 @@ impl PowerService {
                 return;
             }
             Ok(Ok(out)) => {
-                warn!(
-                    "[PPD sync] powerprofilesctl set '{}' failed (exit {}): {}",
-                    ppd_profile,
-                    out.status,
-                    String::from_utf8_lossy(&out.stderr).trim()
-                );
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                if out.status.code() == Some(2) || stderr.contains("choose from ") {
+                    log::debug!(
+                        "[PPD sync] powerprofilesctl set '{}' unavailable (exit {}): {}",
+                        ppd_profile,
+                        out.status,
+                        stderr.trim()
+                    );
+                } else {
+                    warn!(
+                        "[PPD sync] powerprofilesctl set '{}' failed (exit {}): {}",
+                        ppd_profile,
+                        out.status,
+                        stderr.trim()
+                    );
+                }
             }
             _ => {
                 // Not installed or timed out — fall through to D-Bus path.
@@ -442,8 +452,18 @@ impl PowerService {
             ).await;
             match result {
                 Ok(Ok(_)) => info!("[PPD sync] D-Bus ActiveProfile set to '{}' OK", ppd_profile),
-                Ok(Err(e)) => warn!("[PPD sync] D-Bus call failed: {}", e),
-                Err(_)     => warn!("[PPD sync] D-Bus call to net.hadess.PowerProfiles timed out"),
+                Ok(Err(e)) => {
+                    let msg = e.to_string();
+                    if msg.contains("NameHasNoOwner")
+                        || msg.contains("ServiceUnknown")
+                        || msg.contains("unit is masked")
+                    {
+                        log::debug!("[PPD sync] PPD service inactive/masked: {}", msg);
+                    } else {
+                        warn!("[PPD sync] D-Bus call failed: {}", msg);
+                    }
+                }
+                Err(_) => warn!("[PPD sync] D-Bus call to net.hadess.PowerProfiles timed out"),
             }
         }
     }
@@ -820,28 +840,39 @@ impl PowerService {
             info!("Power profile set to '{}'", normalized);
             "OK".to_string()
         } else {
-            let err_msg = format!(
-                "Güç profili '{}' uygulanamadı. BIOS OMEN komut arayüzü erişilebilir değil veya donanım desteklemiyor.",
-                profile
-            );
+            let is_tr = std::env::var("LANG").unwrap_or_default().starts_with("tr");
+            let (title, err_msg) = if is_tr {
+                (
+                    "Güç Profili Değiştirilemedi",
+                    format!(
+                        "Güç profili '{}' uygulanamadı. BIOS OMEN komut arayüzü erişilebilir değil veya donanım desteklemiyor.",
+                        profile
+                    ),
+                )
+            } else {
+                (
+                    "Failed to Change Power Profile",
+                    format!(
+                        "Power profile '{}' could not be applied. BIOS OMEN thermal profile interface is unavailable or unsupported.",
+                        profile
+                    ),
+                )
+            };
             warn!("{}", err_msg);
-            crate::notifier::DesktopNotifier::notify_error(
-                "Güç Profili Değiştirilemedi",
-                &err_msg,
-            ).await;
+            crate::notifier::DesktopNotifier::notify_error(title, &err_msg).await;
             "FAIL".to_string()
         }
     }
 
     /// SetPowerLimits — mirrors Python SetPowerLimits(enabled, pl1, pl2).
     async fn set_power_limits(&self, enabled: bool, pl1: i32, pl2: i32) -> String {
-        // Strict range validation (same as Python)
-        if enabled && !(1..=200).contains(&pl1) {
-            warn!("SetPowerLimits: pl1={} out of safe range [1, 200]", pl1);
+        // Strict range validation (allows 210W+ HX laptops such as 8E9A)
+        if enabled && !(1..=250).contains(&pl1) {
+            warn!("SetPowerLimits: pl1={} out of safe range [1, 250]", pl1);
             return "FAIL".to_string();
         }
-        if enabled && !(1..=250).contains(&pl2) {
-            warn!("SetPowerLimits: pl2={} out of safe range [1, 250]", pl2);
+        if enabled && !(1..=300).contains(&pl2) {
+            warn!("SetPowerLimits: pl2={} out of safe range [1, 300]", pl2);
             return "FAIL".to_string();
         }
         let pl2 = pl2.max(pl1); // clamp: pl2 must >= pl1

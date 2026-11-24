@@ -9,11 +9,13 @@
     let
       system = "x86_64-linux";
       lib = nixpkgs.lib;
-      pkgbuildLines = lib.strings.splitString "\n" (builtins.readFile ./PKGBUILD);
+      dkmsLines = lib.strings.splitString "\n" (builtins.readFile ./dkms.conf);
       versionDefinition = lib.lists.findFirst (
-        line: lib.strings.hasPrefix "pkgver=" line
-      ) "unknown" pkgbuildLines;
-      version = lib.strings.removePrefix "pkgver=" versionDefinition;
+        line: lib.strings.hasPrefix "PACKAGE_VERSION=\"" line
+      ) "PACKAGE_VERSION=\"unknown\"" dkmsLines;
+      version = lib.strings.removeSuffix "\"" (
+        lib.strings.removePrefix "PACKAGE_VERSION=\"" versionDefinition
+      );
       module =
         {
           stdenv,

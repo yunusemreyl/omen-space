@@ -329,24 +329,36 @@ pub fn build_page() -> gtk::Box {
     // Load custom presets into fan_box (#315)
     let presets = crate::fan_presets::load_presets();
     for preset in presets {
-        add_preset_to_box(preset, &auto_btn, &fan_box, &page, &cpu_pts, &da, &preset_btns);
+        add_preset_to_box(preset, &auto_btn, &fan_box, &page, &cpu_pts, &gpu_pts, &da, &preset_btns);
     }
 
-    // Load daemon's saved custom_curve on page init so the graph reflects active curve (#315)
+    // Load daemon's saved custom curves on page init so the graph reflects active curves (#315).
+    // Without a saved GPU curve, GPU mirrors the CPU curve until customized.
     {
         let cpu_pts_init = cpu_pts.clone();
+        let gpu_pts_init = gpu_pts.clone();
         let da_init = da.clone();
         glib::spawn_future_local(async move {
             if let Ok(fan_json) = crate::daemon_client::get_fan_info_async().await {
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(&fan_json) {
+                    let mut cpu_loaded: Option<Vec<(f64, f64)>> = None;
                     if let Some(curve_str) = val.get("custom_curve").and_then(|v| v.as_str()) {
                         if let Ok(pts) = serde_json::from_str::<Vec<(f64, f64)>>(curve_str) {
                             if !pts.is_empty() {
-                                *cpu_pts_init.borrow_mut() = pts;
-                                da_init.queue_draw();
+                                *cpu_pts_init.borrow_mut() = pts.clone();
+                                cpu_loaded = Some(pts);
                             }
                         }
                     }
+                    let gpu_loaded = val
+                        .get("custom_curve_gpu")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| serde_json::from_str::<Vec<(f64, f64)>>(s).ok())
+                        .filter(|pts| !pts.is_empty());
+                    if let Some(pts) = gpu_loaded.or(cpu_loaded) {
+                        *gpu_pts_init.borrow_mut() = pts;
+                    }
+                    da_init.queue_draw();
                 }
             }
         });
@@ -582,15 +594,21 @@ pub fn build_page() -> gtk::Box {
     custom_btn.add_controller(click_gesture);
     let rev2 = curve_revealer.clone();
     let cpu_pts_c = cpu_pts.clone();
+    let gpu_pts_c = gpu_pts.clone();
     apply_btn.connect_clicked(move |_| {
         let pts = cpu_pts_c.borrow().clone();
         if let Ok(json) = serde_json::to_string(&pts) {
             crate::daemon_client::save_custom_curve_sync(json);
         }
+        let g_pts = gpu_pts_c.borrow().clone();
+        if let Ok(json) = serde_json::to_string(&g_pts) {
+            crate::daemon_client::save_custom_gpu_curve_sync(json);
+        }
         rev2.set_reveal_child(false);
     });
 
     let cpu_pts_save = cpu_pts.clone();
+    let gpu_pts_save = gpu_pts.clone();
     let da_save = da.clone();
     let p_btns_save = preset_btns.clone();
     let fan_box_clone = fan_box.clone();
@@ -621,6 +639,7 @@ pub fn build_page() -> gtk::Box {
                 &fan_box_clone,
                 &page_save,
                 &cpu_pts_save,
+                &gpu_pts_save,
                 &da_save,
                 &p_btns_save,
             );
@@ -718,12 +737,14 @@ pub fn build_fan_chip_card(icon_path: &str, title: &str, subtitle: &str) -> (gtk
 }
 
 
+#[allow(clippy::too_many_arguments)]
 fn add_preset_to_box(
     preset: crate::fan_presets::FanPreset,
     auto_btn: &gtk::ToggleButton,
     fan_box: &gtk::FlowBox,
     page: &gtk::Box,
     cpu_pts: &Rc<RefCell<Vec<(f64, f64)>>>,
+    gpu_pts: &Rc<RefCell<Vec<(f64, f64)>>>,
     da: &gtk::DrawingArea,
     preset_btns: &Rc<RefCell<Vec<gtk::ToggleButton>>>,
 ) {
@@ -735,14 +756,17 @@ fn add_preset_to_box(
 
     let pts_toggled = pts_cell.clone();
     let cpu_pts_toggled = cpu_pts.clone();
+    let gpu_pts_toggled = gpu_pts.clone();
     let da_toggled = da.clone();
     p_btn.connect_toggled(move |btn| {
         if btn.is_active() {
             let pts = pts_toggled.borrow().clone();
             *cpu_pts_toggled.borrow_mut() = pts.clone();
+            *gpu_pts_toggled.borrow_mut() = pts.clone();
             da_toggled.queue_draw();
             if let Ok(json) = serde_json::to_string(&pts) {
-                crate::daemon_client::save_custom_curve_sync(json);
+                crate::daemon_client::save_custom_curve_sync(json.clone());
+                crate::daemon_client::save_custom_gpu_curve_sync(json);
             }
             crate::daemon_client::set_fan_mode_sync("custom".to_string());
         }
@@ -787,6 +811,7 @@ fn add_preset_to_box(
     let p_name = preset.name.clone();
     let pts_edit = pts_cell.clone();
     let cpu_pts_edit = cpu_pts.clone();
+    let gpu_pts_edit = gpu_pts.clone();
     let da_edit = da.clone();
     let p_btn_edit = p_btn.clone();
     let fan_box_c = fan_box.clone();
@@ -799,6 +824,7 @@ fn add_preset_to_box(
         let o_lay = overlay_c.clone();
         let pts_save = pts_edit.clone();
         let cpu_pts_save2 = cpu_pts_edit.clone();
+        let gpu_pts_save2 = gpu_pts_edit.clone();
         let da_save2 = da_edit.clone();
         let p_btn_save2 = p_btn_edit.clone();
         let current_pts = pts_edit.borrow().clone();
@@ -816,9 +842,11 @@ fn add_preset_to_box(
                     }
                     if p_btn_save2.is_active() {
                         *cpu_pts_save2.borrow_mut() = new_pts.clone();
+                        *gpu_pts_save2.borrow_mut() = new_pts.clone();
                         da_save2.queue_draw();
                         if let Ok(json) = serde_json::to_string(&new_pts) {
-                            crate::daemon_client::save_custom_curve_sync(json);
+                            crate::daemon_client::save_custom_curve_sync(json.clone());
+                            crate::daemon_client::save_custom_gpu_curve_sync(json);
                         }
                     }
                 },

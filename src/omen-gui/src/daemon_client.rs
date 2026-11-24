@@ -225,6 +225,19 @@ pub fn save_custom_curve_sync(curve_json: String) {
     });
 }
 
+pub fn save_custom_gpu_curve_sync(curve_json: String) {
+    let rt = get_runtime();
+    rt.spawn(async move {
+        if let Ok(conn) = get_conn().await {
+            if let Ok(proxy) = FanProxy::new(&conn).await {
+                if let Err(e) = proxy.save_custom_gpu_curve(&curve_json).await {
+                    notify_dbus_error("GPU fan eğrisi kaydedilemedi", &e).await;
+                }
+            }
+        }
+    });
+}
+
 pub fn set_mode_sync(mode_str: &str, speed_val: i32) {
     let mode = mode_str.to_string();
     let rt = get_runtime();

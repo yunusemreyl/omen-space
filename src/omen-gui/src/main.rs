@@ -1,6 +1,8 @@
 use libadwaita as adw;
 use gtk::prelude::*;
 use libadwaita::prelude::AdwApplicationWindowExt;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 mod i18n;
@@ -339,31 +341,62 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
         render_ui(&win_clone, "settings");
     });
 
-    let page_settings = settings::build_page(window, Some(on_lang_changed), lb_group_opt, lb_preview_group_opt);
-    page_settings.set_margin_top(m);
-    page_settings.set_margin_start(m);
-    page_settings.set_margin_end(m);
-    page_settings.set_margin_bottom(m);
+    // Secondary pages are built lazily on first selection to cut GUI startup latency (#384).
+    let make_lazy_container = || {
+        gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .margin_top(m)
+            .margin_start(m)
+            .margin_end(m)
+            .margin_bottom(m)
+            .build()
+    };
+    let page_app_profiles = make_lazy_container();
+    let page_updater = make_lazy_container();
+    let page_settings = make_lazy_container();
+    let page_debug = make_lazy_container();
 
-    let page_updater = updater::build_page(window);
-    page_updater.set_margin_top(m);
-    page_updater.set_margin_start(m);
-    page_updater.set_margin_end(m);
-    page_updater.set_margin_bottom(m);
-
-    let page_app_profiles = appprofiles::build_page(window);
-    page_app_profiles.set_margin_top(m);
-    page_app_profiles.set_margin_start(m);
-    page_app_profiles.set_margin_end(m);
-    page_app_profiles.set_margin_bottom(m);
-
-
-
-    let page_debug = debug_center::build_page(window);
-    page_debug.set_margin_top(m);
-    page_debug.set_margin_start(m);
-    page_debug.set_margin_end(m);
-    page_debug.set_margin_bottom(m);
+    type LazyPageEntry = (gtk::Box, Box<dyn FnOnce() -> gtk::Widget>);
+    let lazy_pages: Rc<RefCell<HashMap<&'static str, LazyPageEntry>>> =
+        Rc::new(RefCell::new(HashMap::new()));
+    {
+        let mut map = lazy_pages.borrow_mut();
+        let win_s = window.clone();
+        map.insert(
+            "settings",
+            (
+                page_settings.clone(),
+                Box::new(move || {
+                    settings::build_page(&win_s, Some(on_lang_changed), lb_group_opt, lb_preview_group_opt)
+                        .upcast()
+                }),
+            ),
+        );
+        let win_u = window.clone();
+        map.insert(
+            "updater",
+            (
+                page_updater.clone(),
+                Box::new(move || updater::build_page(&win_u).upcast()),
+            ),
+        );
+        let win_a = window.clone();
+        map.insert(
+            "appprof",
+            (
+                page_app_profiles.clone(),
+                Box::new(move || appprofiles::build_page(&win_a).upcast()),
+            ),
+        );
+        let win_d = window.clone();
+        map.insert(
+            "debug",
+            (
+                page_debug.clone(),
+                Box::new(move || debug_center::build_page(&win_d).upcast()),
+            ),
+        );
+    }
 
     stack.add_named(&gen_box, Some("performance"));
     stack.add_named(&page_undervolt, Some("undervolt"));
@@ -375,7 +408,20 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
     stack.add_named(&page_settings, Some("settings"));
     stack.add_named(&page_debug, Some("debug"));
 
-    stack.set_visible_child_name(initial_page);
+    let ensure_page: Rc<dyn Fn(&str)> = {
+        let stack_c = stack.clone();
+        let lazy_c = lazy_pages.clone();
+        Rc::new(move |page_name: &str| {
+            let entry = lazy_c.borrow_mut().remove(page_name);
+            if let Some((container, builder)) = entry {
+                let widget = builder();
+                container.append(&widget);
+            }
+            stack_c.set_visible_child_name(page_name);
+        })
+    };
+
+    ensure_page(initial_page);
 
     let toggle_sidebar_btn = gtk::ToggleButton::builder()
         .icon_name("sidebar-show-symbolic")
@@ -501,23 +547,23 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
         }
     }
 
-    let stack_clone = stack.clone();
+    let ensure_side = ensure_page.clone();
     let bottom_list_clone = bottom_list.clone();
     sidebar_list.connect_row_selected(move |_list, row_opt| {
         if let Some(row) = row_opt {
             bottom_list_clone.unselect_all(); // Mutual exclusion
             let page_name = row.widget_name().to_string();
-            stack_clone.set_visible_child_name(&page_name);
+            ensure_side(&page_name);
         }
     });
 
-    let stack_clone2 = stack.clone();
+    let ensure_bottom = ensure_page.clone();
     let sidebar_list_clone2 = sidebar_list.clone();
     bottom_list.connect_row_selected(move |_list, row_opt| {
         if let Some(row) = row_opt {
             sidebar_list_clone2.unselect_all(); // Mutual exclusion
             let page_name = row.widget_name().to_string();
-            stack_clone2.set_visible_child_name(&page_name);
+            ensure_bottom(&page_name);
         }
     });
 

@@ -8,6 +8,9 @@ pub struct FanConfig {
     pub fan_mode: String,
     pub custom_curve: String,
     pub thermal_protection_enabled: bool,
+    /// GPU fan curve for custom mode; empty = both fans follow `custom_curve`.
+    #[serde(default)]
+    pub custom_curve_gpu: String,
     /// Optional override for the board's minimum nonzero manual PWM duty (1..=255, #359).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub minimum_manual_pwm_override: Option<u32>,
@@ -23,6 +26,7 @@ impl Default for FanConfig {
             fan_mode: "auto".to_string(),
             custom_curve: "[]".to_string(),
             thermal_protection_enabled: true,
+            custom_curve_gpu: String::new(),
             minimum_manual_pwm_override: None,
             zero_pct_manual_pwm: false,
         }

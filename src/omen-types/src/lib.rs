@@ -198,6 +198,7 @@ pub trait Fan {
     async fn get_fan_mode(&self) -> zbus::Result<String>;
     async fn get_fan_info(&self) -> zbus::Result<String>;
     async fn save_custom_curve(&self, curve_json: &str) -> zbus::Result<String>;
+    async fn save_custom_gpu_curve(&self, curve_json: &str) -> zbus::Result<String>;
     async fn set_thermal_protection(&self, enabled: bool) -> zbus::Result<String>;
     
     #[zbus(signal)]

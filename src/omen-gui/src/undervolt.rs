@@ -172,7 +172,7 @@ pub fn build_page() -> gtk::Box {
         .title(i18n::t("pl1_label"))
         .subtitle(i18n::t("pl1_sub"))
         .build();
-    let pl1_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 25.0, 160.0, 1.0);
+    let pl1_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 25.0, 220.0, 1.0);
     pl1_scale.set_value(45.0);
     pl1_scale.set_hexpand(true);
     pl1_scale.set_size_request(200, -1);
@@ -197,7 +197,7 @@ pub fn build_page() -> gtk::Box {
         .title(i18n::t("pl2_label"))
         .subtitle(i18n::t("pl2_sub"))
         .build();
-    let pl2_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 45.0, 200.0, 1.0);
+    let pl2_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 45.0, 260.0, 1.0);
     pl2_scale.set_value(95.0);
     pl2_scale.set_hexpand(true);
     pl2_scale.set_size_request(200, -1);

@@ -29,6 +29,8 @@ pub struct FanState {
     pub fan_count: u32,
     pub mode: String,
     pub custom_curve_json: String,
+    /// GPU fan curve in custom mode; empty = both fans follow `custom_curve_json`.
+    pub custom_curve_gpu_json: String,
     pub last_targets: HashMap<u32, u32>,
     pub thermal_protection_active: bool,
     pub thermal_protection_enabled: bool,
@@ -102,6 +104,7 @@ impl FanService {
             fan_count: 0,
             mode: config.fan_mode.clone(),
             custom_curve_json: config.custom_curve.clone(),
+            custom_curve_gpu_json: config.custom_curve_gpu.clone(),
             last_targets: HashMap::new(),
             thermal_protection_active: false,
             thermal_protection_enabled: config.thermal_protection_enabled,
@@ -332,7 +335,9 @@ impl FanService {
         v.eq_ignore_ascii_case("0x10de") && c.starts_with("0x03")
     }
 
-    async fn get_max_temp() -> f64 {
+    /// (CPU/board temperature, dGPU temperature). The first is the hottest hwmon sensor
+    /// (at least 45°C); the second is 0.0 while the dGPU sleeps.
+    async fn get_temps() -> (f64, f64) {
         tokio::task::spawn_blocking(|| {
             let paths = SENSOR_TEMP_PATHS.get_or_init(|| {
                 let mut p = Vec::new();
@@ -368,16 +373,14 @@ impl FanService {
                 }
             }
 
-            // 2. Factor in dGPU temperature safely (returns 0.0 when sleeping or cooling down)
+            // 2. dGPU temperature, read safely (returns 0.0 when sleeping or cooling down)
             let gpu_temp = crate::sysmon::get_safe_gpu_temp();
-            if gpu_temp > max_temp && gpu_temp < 150.0 {
-                max_temp = gpu_temp;
-            }
+            let gpu_temp = if gpu_temp < 150.0 { gpu_temp } else { 0.0 };
 
-            max_temp
+            (max_temp, gpu_temp)
         })
         .await
-        .unwrap_or(45.0)
+        .unwrap_or((45.0, 0.0))
     }
 
     /// Convert a percentage (0-100) to a PWM duty cycle value (0-255)
@@ -523,10 +526,103 @@ impl FanService {
         }
     }
 
+    /// Target percentage of a custom curve at `temp`: empty/invalid falls back to default,
+    /// and fan-stop (0%) is only permitted below 50°C (#346).
+    fn curve_target_pct(curve_json: &str, temp: f64, minimum_manual_pwm: u32) -> u32 {
+        let mut curve_points: Vec<CurvePoint> = serde_json::from_str(curve_json).unwrap_or_default();
+        if curve_points.is_empty() {
+            curve_points = vec![
+                CurvePoint(40.0, 0.0),
+                CurvePoint(50.0, 30.0),
+                CurvePoint(65.0, 60.0),
+                CurvePoint(75.0, 85.0),
+                CurvePoint(85.0, 100.0),
+            ];
+        }
+        curve_points.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        let mut target_pct = (Self::evaluate_spline(&curve_points, temp).round() as u32).clamp(0, 100);
+        if target_pct <= 5 {
+            target_pct = if temp < 50.0 { 0 } else { 1 };
+        }
+        if target_pct > 0 {
+            target_pct = target_pct.max((minimum_manual_pwm * 100).div_ceil(255));
+        }
+        target_pct
+    }
+
+    /// Independent manual targets for fan 1 (CPU) and fan 2 (GPU) through `fanN_target`.
+    /// Falls back to shared `write_pwm_duty` when percentages are equal or `fan*_target` is absent.
+    async fn write_fan_targets(state: &mut FanState, cpu_pct: u32, gpu_pct: u32) -> bool {
+        if cpu_pct == gpu_pct {
+            return Self::write_pwm_duty(state, cpu_pct).await;
+        }
+        let hwmon = match state.hwmon_path {
+            Some(ref h) => h.clone(),
+            None => return false,
+        };
+        let (fan1_target, fan2_target) = (hwmon.join("fan1_target"), hwmon.join("fan2_target"));
+        if !sysfs_exists(&fan1_target).await || !sysfs_exists(&fan2_target).await {
+            return Self::write_pwm_duty(state, cpu_pct.max(gpu_pct)).await;
+        }
+
+        let pwm_enable_path = hwmon.join("pwm1_enable");
+        if sysfs_exists(&pwm_enable_path).await {
+            let current = sysfs_read(&pwm_enable_path, 2).await;
+            if current == 0 {
+                Self::leave_max_boost(&hwmon).await;
+            }
+            if current != 1 {
+                let _ = sysfs_write(&pwm_enable_path, "1").await;
+            }
+        }
+
+        let minimum_pct = (state.minimum_manual_pwm * 100).div_ceil(255);
+        let rpm_for = |fan: u32, pct: u32| -> u32 {
+            let max_rpm = state.max_speeds.get(&fan).copied().unwrap_or(6000);
+            ((max_rpm as f64 * pct.clamp(minimum_pct, 100) as f64) / 100.0).round() as u32
+        };
+        let (cpu_rpm, gpu_rpm) = (rpm_for(1, cpu_pct), rpm_for(2, gpu_pct));
+
+        let now = std::time::Instant::now();
+        let unchanged = state.last_written_duty.is_none()
+            && state.last_targets.get(&1) == Some(&cpu_rpm)
+            && state.last_targets.get(&2) == Some(&gpu_rpm)
+            && state.last_written_duty_time.is_some_and(|t| now.duration_since(t).as_secs() < 10);
+        if unchanged {
+            return true;
+        }
+
+        if sysfs_write(&fan1_target, cpu_rpm.to_string()).await && sysfs_write(&fan2_target, gpu_rpm.to_string()).await {
+            state.last_targets.insert(1, cpu_rpm);
+            state.last_targets.insert(2, gpu_rpm);
+            state.last_written_duty = None;
+            state.last_written_duty_time = Some(now);
+            true
+        } else {
+            warn!("Failed to write fan targets (CPU {} RPM, GPU {} RPM)", cpu_rpm, gpu_rpm);
+            false
+        }
+    }
+
+    /// Requires 3 consecutive 1 Hz samples above 95°C (or emergency >= 102°C) so single
+    /// boot/turbo spikes do not latch thermal protection (#371).
+    pub(crate) fn should_trigger_thermal_protection(temp: f64, overheat_ticks: &mut u32) -> bool {
+        if temp > THERMAL_PROTECTION_TRIGGER_TEMP {
+            *overheat_ticks = overheat_ticks.saturating_add(1);
+        } else {
+            *overheat_ticks = 0;
+            return false;
+        }
+        *overheat_ticks >= NOTICE_PERSIST_TICKS || temp >= 102.0
+    }
+
     async fn run_monitor_loop(&self) {
         // Run every 1 second to gather more frequent samples for the 5-second average
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
         let mut stall_ticks: u32 = 0;
+        let mut overheat_ticks: u32 = 0;
+        let mut cpu_fan_history: std::collections::VecDeque<f64> = std::collections::VecDeque::new();
+        let mut gpu_fan_history: std::collections::VecDeque<f64> = std::collections::VecDeque::new();
         let mut last_stall_alert: Option<std::time::Instant> = None;
         let mut last_unreadable_warn: Option<std::time::Instant> = None;
         let mut last_thermal_alert: Option<std::time::Instant> = None;
@@ -554,8 +650,19 @@ impl FanService {
                 }
             }
             
-            let temp = Self::get_max_temp().await;
-            
+            let (cpu_temp, gpu_temp) = Self::get_temps().await;
+            let temp = cpu_temp.max(gpu_temp);
+
+            let gpu_fan_sample = if gpu_temp > 0.0 { gpu_temp } else { cpu_temp };
+            for (history, value) in [(&mut cpu_fan_history, cpu_temp), (&mut gpu_fan_history, gpu_fan_sample)] {
+                history.push_back(value);
+                if history.len() > 5 {
+                    history.pop_front();
+                }
+            }
+            let cpu_fan_temp = cpu_fan_history.iter().sum::<f64>() / cpu_fan_history.len() as f64;
+            let gpu_fan_temp = gpu_fan_history.iter().sum::<f64>() / gpu_fan_history.len() as f64;
+
             // 5-second Simple Moving Average (SMA) as requested by user
             let smoothed_temp = {
                 let mut state = self.state.lock().await;
@@ -568,7 +675,7 @@ impl FanService {
                 sum / state.temp_history.len() as f64
             };
 
-            let (mode, curve_json, fans, thermal_active, manual_pct) = {
+            let (mode, curve_json, gpu_curve_json, fans, thermal_active, manual_pct) = {
                 let mut state = self.state.lock().await;
 
                 // Fan-Stall Detection (#301 / #311 / #346):
@@ -675,10 +782,16 @@ impl FanService {
                     });
                 }
                 
-                // Thermal Protection Logic: requires sustained high load (smoothed_temp >= 91.0 or 3s)
-                // so transient 1-second turbo spikes to 96°C do not blast fans at 100% until 82°C (#341 A.4, #349).
-                let is_sustained_overheat = temp > THERMAL_PROTECTION_TRIGGER_TEMP && (smoothed_temp >= 91.0 || temp >= 99.0);
-                if state.thermal_protection_enabled && is_sustained_overheat && !state.thermal_protection_active {
+                // Thermal Protection Logic: requires 3 consecutive 1s samples > 95°C (or >= 102°C)
+                // so transient boot/turbo spikes do not blast fans at 100% until 82°C (#341 A.4, #349, #371).
+                if !state.thermal_protection_enabled {
+                    overheat_ticks = 0;
+                }
+                if state.thermal_protection_enabled
+                    && !state.thermal_protection_active
+                    && Self::should_trigger_thermal_protection(temp, &mut overheat_ticks)
+                {
+                    overheat_ticks = 0;
                     warn!("Sustained temperature exceeded {}°C (raw: {:.1}°C, smoothed: {:.1}°C). Activating Thermal Protection Mode (Max Fan).",
                         THERMAL_PROTECTION_TRIGGER_TEMP, temp, smoothed_temp);
                     state.thermal_protection_active = true;
@@ -693,6 +806,7 @@ impl FanService {
                     max_notice_pending = true;
                     max_notice_sent = false;
                 } else if state.thermal_protection_active {
+                    overheat_ticks = 0;
                     if !state.thermal_protection_enabled || temp <= THERMAL_PROTECTION_RECOVER_TEMP {
                         let elapsed = state.thermal_protection_entered_at.elapsed().as_secs_f64();
                         
@@ -757,6 +871,7 @@ impl FanService {
                 (
                     state.mode.clone(),
                     state.custom_curve_json.clone(),
+                    state.custom_curve_gpu_json.clone(),
                     state.found_fans.clone(),
                     state.thermal_protection_active,
                     state.manual_target_pct,
@@ -949,42 +1064,17 @@ impl FanService {
                         continue;
                     }
 
-                    // Otherwise, evaluate custom curve and write duty
-                    let mut curve_points: Vec<CurvePoint> = Vec::new();
-                    
-                    if let Ok(pts) = serde_json::from_str::<Vec<CurvePoint>>(&curve_json) {
-                        curve_points = pts;
-                    }
-                    if curve_points.is_empty() {
-                        curve_points = vec![
-                            CurvePoint(40.0, 0.0),
-                            CurvePoint(50.0, 30.0),
-                            CurvePoint(65.0, 60.0),
-                            CurvePoint(75.0, 85.0),
-                            CurvePoint(85.0, 100.0),
-                        ];
-                    }
-                    
-                    if !curve_points.is_empty() {
-                        curve_points.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-                        let pct = Self::evaluate_spline(&curve_points, smoothed_temp);
-                        let mut target_pct = (pct.round() as u32).clamp(0, 100);
-                        // FIX #346: Fan-stop (0%) is only permitted when temp < 50°C.
-                        // At or above 50°C, enforce this board's minimum nonzero duty.
-                        if target_pct <= 5 {
-                            if smoothed_temp < 50.0 {
-                                target_pct = 0;
-                            } else {
-                                target_pct = 1;
-                            }
-                        }
-                        if target_pct > 0 {
-                            let minimum_pct = (state_minimum_manual_pwm(&self.state).await * 100).div_ceil(255);
-                            target_pct = target_pct.max(minimum_pct);
-                        }
-                        
-                        let mut state = self.state.lock().await;
-                        Self::write_pwm_duty(&mut state, target_pct).await;
+                    let minimum_pwm = state_minimum_manual_pwm(&self.state).await;
+                    let gpu_curve_set = serde_json::from_str::<Vec<CurvePoint>>(&gpu_curve_json)
+                        .is_ok_and(|pts| !pts.is_empty());
+                    let mut state = self.state.lock().await;
+                    if gpu_curve_set {
+                        let cpu_pct = Self::curve_target_pct(&curve_json, cpu_fan_temp, minimum_pwm);
+                        let gpu_pct = Self::curve_target_pct(&gpu_curve_json, gpu_fan_temp, minimum_pwm);
+                        Self::write_fan_targets(&mut state, cpu_pct, gpu_pct).await;
+                    } else {
+                        let pct = Self::curve_target_pct(&curve_json, smoothed_temp, minimum_pwm);
+                        Self::write_pwm_duty(&mut state, pct).await;
                     }
                 }
                 _ => {}
@@ -1263,6 +1353,13 @@ impl FanService {
         config.custom_curve = custom_curve_json;
         config_manager.save(&config).await;
     }
+
+    async fn save_gpu_curve_config(custom_curve_gpu_json: String) {
+        let config_manager = crate::config::ConfigManager::new();
+        let mut config = config_manager.load().await;
+        config.custom_curve_gpu = custom_curve_gpu_json;
+        config_manager.save(&config).await;
+    }
 }
 
 #[interface(name = "org.hp.omen.Fan")]
@@ -1307,6 +1404,7 @@ impl FanService {
             "mode": display_mode,
             "supports_custom": supports_custom,
             "custom_curve": state.custom_curve_json,
+            "custom_curve_gpu": state.custom_curve_gpu_json,
             "fans": fans_data,
             "thermal_protection": thermal_protection,
             "thermal_protection_enabled": thermal_protection_enabled
@@ -1356,6 +1454,23 @@ impl FanService {
         let mut state = self.state.lock().await;
         let res = Self::set_fan_target_internal(&mut state, fan_num, rpm).await;
         if res == "true" { "OK".to_string() } else { "FAIL".to_string() }
+    }
+
+    async fn save_custom_gpu_curve(&mut self, curve_json: &str) -> String {
+        if !curve_json.is_empty() && serde_json::from_str::<Vec<CurvePoint>>(curve_json).is_err() {
+            return "FAIL".to_string();
+        }
+        {
+            let mut state = self.state.lock().await;
+            info!("SaveCustomGpuCurve called with: {}", curve_json);
+            state.custom_curve_gpu_json = curve_json.to_string();
+            state.manual_target_pct = None;
+            state.thermal_protection_active = false;
+            state.last_written_duty = None;
+            state.last_targets.clear();
+        }
+        Self::save_gpu_curve_config(curve_json.to_string()).await;
+        "OK".to_string()
     }
 
     async fn save_custom_curve(&mut self, curve_json: &str) -> String {
@@ -1589,6 +1704,7 @@ mod regression_fan {
             fan_count: 2,
             mode: "auto".to_string(),
             custom_curve_json: "[]".to_string(),
+            custom_curve_gpu_json: String::new(),
             last_targets: HashMap::new(),
             thermal_protection_active: false,
             thermal_protection_enabled: true,
@@ -1671,6 +1787,7 @@ mod regression_fan {
             fan_count: 0,
             mode: "custom".to_string(),
             custom_curve_json: "[]".to_string(),
+            custom_curve_gpu_json: String::new(),
             last_targets: HashMap::new(),
             thermal_protection_active: false,
             thermal_protection_enabled: true,
@@ -1704,5 +1821,42 @@ mod regression_fan {
         let actual=std::fs::read_to_string(dir.join("pwm1")).unwrap();
         let _=std::fs::remove_dir_all(dir);
         assert_eq!(actual,"64","a known-working 25% target should remain 25% instead of a global board-independent 35% override");
+    }
+
+    #[test]
+    fn thermal_protection_requires_three_consecutive_samples_above_95() {
+        let mut ticks = 0;
+        assert!(!FanService::should_trigger_thermal_protection(97.0, &mut ticks));
+        assert_eq!(ticks, 1);
+        // Single normal sample resets the streak.
+        assert!(!FanService::should_trigger_thermal_protection(88.0, &mut ticks));
+        assert_eq!(ticks, 0);
+        // Two hot samples are not enough.
+        assert!(!FanService::should_trigger_thermal_protection(96.0, &mut ticks));
+        assert!(!FanService::should_trigger_thermal_protection(96.0, &mut ticks));
+        // Third consecutive hot sample triggers protection.
+        assert!(FanService::should_trigger_thermal_protection(96.0, &mut ticks));
+        // Emergency >= 102C triggers immediately.
+        ticks = 0;
+        assert!(FanService::should_trigger_thermal_protection(102.0, &mut ticks));
+    }
+
+    #[tokio::test]
+    async fn independent_fan_targets_write_fan1_and_fan2_targets() {
+        let dir = std::env::temp_dir().join(format!("omen-fan-targets-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("pwm1_enable"), "1").unwrap();
+        std::fs::write(dir.join("pwm1"), "0").unwrap();
+        std::fs::write(dir.join("fan1_target"), "0").unwrap();
+        std::fs::write(dir.join("fan2_target"), "0").unwrap();
+        let mut state = test_state(dir.clone());
+
+        assert!(FanService::write_fan_targets(&mut state, 50, 80).await);
+        let f1 = std::fs::read_to_string(dir.join("fan1_target")).unwrap();
+        let f2 = std::fs::read_to_string(dir.join("fan2_target")).unwrap();
+        let _ = std::fs::remove_dir_all(dir);
+
+        assert_eq!(f1, "3000");
+        assert_eq!(f2, "4800");
     }
 }
