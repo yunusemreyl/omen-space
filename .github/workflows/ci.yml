@@ -19,7 +19,7 @@ jobs:
     name: Rust Build, Test & Clippy
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux GUI & HID build dependencies
         env:
@@ -63,7 +63,7 @@ jobs:
     name: Kernel Driver Build (hp-wmi & hp-omen-extra)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install kernel headers
         run: |
@@ -87,7 +87,7 @@ jobs:
     name: Shell, Boards JSON & Python Tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check shell script syntax
         run: bash -n setup.sh driver/setup.sh install.sh data/omen-space-daemon.openrc
