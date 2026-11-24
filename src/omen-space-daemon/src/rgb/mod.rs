@@ -319,6 +319,7 @@ impl RgbHardware {
 
 const LAMPARRAY_PREFIX: &[u8] = &[0x05, 0x59, 0x09, 0x01];
 const DARFON_VENDOR_PREFIX: &[u8] = &[0x06, 0x01, 0xFF, 0x09, 0x01];
+const PRIMAX_VENDOR_PREFIX: &[u8] = &[0x06, 0x13, 0xFF, 0x09, 0x01];
 
 /// Per-lamp GUI slot overrides for board 8D88 (OMEN MAX 16-ak0xxx, 0d62:54bf).
 const LAMP_SLOT_OVERRIDES_8D88: &[(usize, usize)] = &[
@@ -698,20 +699,22 @@ struct HidPerKeyBackend {
     hidraw_paths: Vec<String>,
     device_pid: Option<u16>,
     lamparray: Option<LampArrayBackend>,
+    is_primax_mcu: bool,
 }
 
 impl HidPerKeyBackend {
     const HP_VID: u16 = 0x03F0;
     /// Darfon is HP's keyboard ODM — present on OMEN MAX 16 (8D87/8D88/8D42) and OMEN 16-ap0xxx (8D41).
     const DARFON_VID: u16 = 0x0D62;
-    /// Primax is HP's ODM for FY22 OMEN 16 KBM (8A4C, #364).
+    /// Primax is HP's ODM for 2021-2024 OMEN 16/17 keyboards (e.g. 8A4C FY22 OMEN 16 KBM, #364, #385).
     const PRIMAX_VID: u16 = 0x0461;
     /// Known per-key PIDs for HP VID (OpenRGB + OmenCore confirmed)
     const HP_KNOWN_PIDS: &'static [u16] = &[0x0538, 0x053A, 0x0547, 0x0549, 0x054E, 0x054F];
     /// Known per-key PIDs for Darfon VID (0x54BF = OMEN MAX 16-ak/ah0xxx, 0x30BF = HyperX OMEN MAX 16-ah1xxx #371)
     const DARFON_KNOWN_PIDS: &'static [u16] = &[0x54BF, 0x30BF];
-    /// Known Primax HP OMEN keyboard PIDs (LampArray-probed safely by report descriptor)
-    const PRIMAX_KNOWN_PIDS: &'static [u16] = &[0x4F03];
+    /// Known Primax HP OMEN keyboard PIDs (probed safely via LampArray 0x59 or McuSDK2 0xFF13 0x80 handshake)
+    const PRIMAX_KNOWN_PIDS: &'static [u16] = &[0x4E9A, 0x4E9B, 0x4F03, 0x4F11, 0x4F1E, 0x4ECB];
+    const PRIMAX_LED_COUNT: usize = 180;
     const PACKET_SIZE: usize = 65;
     const REPORT_ID: u8 = 0x00;
     const CMD_BYTE: u8 = 0x0F;
@@ -725,18 +728,88 @@ impl HidPerKeyBackend {
     const TOTAL_KEY_COUNT: usize = 104;
 
     fn new() -> Self {
-        let (hidraw_paths, device_pid, lamparray_path) = Self::find_devices();
+        let (hidraw_paths, device_pid, lamparray_path, is_primax_mcu) = Self::find_devices();
         let lamparray = lamparray_path.as_deref().and_then(LampArrayBackend::probe);
-        let backend = Self { hidraw_paths, device_pid, lamparray };
+        let backend = Self { hidraw_paths, device_pid, lamparray, is_primax_mcu };
         if backend.is_available() {
             info!(
-                "Initialized HidPerKeyBackend (vendor nodes {:?}, lamparray: {:?})",
+                "Initialized HidPerKeyBackend (vendor nodes {:?}, lamparray: {:?}, primax_mcu: {})",
                 backend.hidraw_paths,
-                backend.lamparray.as_ref().map(|l| (l.path.clone(), l.lamp_count()))
+                backend.lamparray.as_ref().map(|l| (l.path.clone(), l.lamp_count())),
+                backend.is_primax_mcu
             );
             backend.send_enter_per_key_mode(100);
         }
         backend
+    }
+
+    fn is_primax_cmd_allowed(cmd: u8) -> bool {
+        // Strict whitelist matching McuSDK2 safety boundary: never send 0x0A (flash) or 0x10 (restore/fw update).
+        matches!(cmd, 0x80 | 0x83 | 0x09 | 0x0C | 0x05 | 0x06 | 0x07 | 0x03)
+    }
+
+    fn build_primax_report(cmd: u8, param: u8, len: u8, payload: &[u8]) -> [u8; Self::PACKET_SIZE] {
+        let mut r = [0u8; Self::PACKET_SIZE];
+        r[0] = Self::REPORT_ID;
+        r[1] = cmd;
+        r[2] = param;
+        r[3] = len;
+        r[4] = 0x00;
+        let n = payload.len().min(Self::PACKET_SIZE - 5);
+        r[5..5 + n].copy_from_slice(&payload[..n]);
+        r
+    }
+
+    /// Safe read-only handshake for Primax McuSDK2 (0xFF13) interfaces (#385, #364).
+    /// Sends GetDeviceInfo (`0x80 0x01`) and verifies the MCU echoes `[0x80, 0x01]` without NAK (`EC FA`).
+    fn probe_primax_mcu(dev_path: &str) -> Option<[u8; 4]> {
+        use std::io::{Read, Write};
+        use std::os::fd::AsRawFd;
+
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(dev_path)
+            .ok()?;
+
+        let fd = file.as_raw_fd();
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFL);
+            if flags >= 0 {
+                let _ = libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+            }
+        }
+
+        // Drain any stale key/status input reports queued on this interface.
+        let mut drain = [0u8; 64];
+        while file.read(&mut drain).is_ok() {}
+
+        let probe_pkt = Self::build_primax_report(0x80, 0x01, 0, &[]);
+        file.write_all(&probe_pkt).ok()?;
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
+        while let Some(rem) = deadline.checked_duration_since(std::time::Instant::now()) {
+            let mut pfd = libc::pollfd {
+                fd,
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            let timeout_ms = rem.as_millis().min(250) as libc::c_int;
+            let ready = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
+            if ready <= 0 {
+                break;
+            }
+            let mut resp = [0u8; 64];
+            if let Ok(n) = file.read(&mut resp) {
+                if n >= 8 && resp[0] == 0x80 && resp[1] == 0x01 {
+                    if resp[4] == 0xEC && resp[5] == 0xFA {
+                        return None;
+                    }
+                    return Some([resp[4], resp[5], resp[6], resp[7]]);
+                }
+            }
+        }
+        None
     }
 
     fn has_vendor_usage_page(hidraw_sysfs: &Path) -> bool {
@@ -751,11 +824,12 @@ impl HidPerKeyBackend {
         false
     }
 
-    fn find_devices() -> (Vec<String>, Option<u16>, Option<String>) {
+    fn find_devices() -> (Vec<String>, Option<u16>, Option<String>, bool) {
         let mut vendor_paths = Vec::new();
         let mut all_paths = Vec::new();
         let mut found_pid = None;
         let mut lamparray_path = None;
+        let mut is_primax_mcu = false;
 
         if let Ok(entries) = glob("/sys/class/hidraw/hidraw*") {
             for entry in entries.flatten() {
@@ -810,6 +884,16 @@ impl HidPerKeyBackend {
                                                 info!("Found Primax HID LampArray keyboard: {}", dev_path);
                                                 found_pid = Some(pid);
                                                 lamparray_path = Some(dev_path.clone());
+                                            } else if descriptor.starts_with(PRIMAX_VENDOR_PREFIX) || Self::has_vendor_usage_page(&entry) {
+                                                if let Some(fw) = Self::probe_primax_mcu(&dev_path) {
+                                                    info!(
+                                                        "Found Primax McuSDK2 keyboard {} (VID=0461 PID={:04X}, fw={:02X}.{:02X}.{:02X}.{:02X})",
+                                                        dev_path, pid, fw[0], fw[1], fw[2], fw[3]
+                                                    );
+                                                    found_pid = Some(pid);
+                                                    is_primax_mcu = true;
+                                                    vendor_paths.push(dev_path.clone());
+                                                }
                                             }
                                         } else {
                                             found_pid = Some(pid);
@@ -833,10 +917,10 @@ impl HidPerKeyBackend {
         }
 
         if !vendor_paths.is_empty() {
-            (vendor_paths, found_pid, lamparray_path)
+            (vendor_paths, found_pid, lamparray_path, is_primax_mcu)
         } else {
             all_paths.reverse();
-            (all_paths, found_pid, lamparray_path)
+            (all_paths, found_pid, lamparray_path, is_primax_mcu)
         }
     }
 
@@ -848,6 +932,10 @@ impl HidPerKeyBackend {
         self.device_pid == Some(0x54BF)
     }
 
+    fn is_primax_mcu(&self) -> bool {
+        self.is_primax_mcu
+    }
+
     fn is_lamparray(&self) -> bool {
         self.lamparray.is_some()
     }
@@ -856,6 +944,48 @@ impl HidPerKeyBackend {
         if let Some(ref la) = self.lamparray {
             la.release();
         }
+    }
+
+    fn write_primax_report(&self, report: &[u8; Self::PACKET_SIZE]) -> bool {
+        if !Self::is_primax_cmd_allowed(report[1]) {
+            warn!("Blocked non-whitelisted Primax command 0x{:02X}", report[1]);
+            return false;
+        }
+        self.write_packet(report)
+    }
+
+    /// Primax McuSDK2 (0461:4F03/4E9A/4E9B/4F1E/4ECB) static colour write across 3x60 LED pages (180 slots).
+    fn write_primax_colors(&self, key_colors: &[(u8, u8, u8)]) -> bool {
+        let on_pkt = Self::build_primax_report(0x09, 0x00, 0x01, &[0x01]);
+        let _ = self.write_primax_report(&on_pkt);
+
+        let mut r_leds = [0u8; Self::PRIMAX_LED_COUNT];
+        let mut g_leds = [0u8; Self::PRIMAX_LED_COUNT];
+        let mut b_leds = [0u8; Self::PRIMAX_LED_COUNT];
+
+        let total_keys = key_colors.len().max(1);
+        for (i, &(r, g, b)) in key_colors.iter().enumerate().take(Self::TOTAL_KEY_COUNT) {
+            let base_led = (i * Self::PRIMAX_LED_COUNT) / total_keys;
+            let end_led = ((i + 1) * Self::PRIMAX_LED_COUNT) / total_keys;
+            for led in base_led..end_led.min(Self::PRIMAX_LED_COUNT) {
+                r_leds[led] = r;
+                g_leds[led] = g;
+                b_leds[led] = b;
+            }
+        }
+
+        let channels = [(0x05u8, &r_leds), (0x06u8, &g_leds), (0x07u8, &b_leds)];
+        for (cmd, leds) in channels {
+            for chunk_idx in 0..3 {
+                let start = chunk_idx * 60;
+                let end = (start + 60).min(Self::PRIMAX_LED_COUNT);
+                let pkt = Self::build_primax_report(cmd, chunk_idx as u8, 0x00, &leds[start..end]);
+                if !self.write_primax_report(&pkt) {
+                    return false;
+                }
+            }
+        }
+        true
     }
 
     fn write_darfon_colors(&self, key_colors: &[(u8, u8, u8)]) -> bool {
@@ -938,6 +1068,18 @@ impl HidPerKeyBackend {
         if self.lamparray.is_some() {
             return true;
         }
+        if self.is_primax_mcu {
+            if brightness == 0 {
+                let off_pkt = Self::build_primax_report(0x09, 0x00, 0x01, &[0x00]);
+                return self.write_primax_report(&off_pkt);
+            }
+            let on_pkt = Self::build_primax_report(0x09, 0x00, 0x01, &[0x01]);
+            let ok = self.write_primax_report(&on_pkt);
+            // Set hardware brightness ceiling to 100% so software RGB scaling works smoothly.
+            let br_pkt = Self::build_primax_report(0x0C, 0x00, 0x01, &[200]);
+            let _ = self.write_primax_report(&br_pkt);
+            return ok;
+        }
         let mut packet = self.build_packet(Self::SUB_ENTER_EFFECT);
         packet[3] = Self::STATIC_MODE_ID;
         packet[4] = brightness.clamp(0, 100) as u8;
@@ -952,6 +1094,9 @@ impl HidPerKeyBackend {
         if let Some(ref la) = self.lamparray {
             let mapped = la.key_colors(key_colors);
             return la.set_frame(&mapped);
+        }
+        if self.is_primax_mcu {
+            return self.write_primax_colors(key_colors);
         }
         if self.is_darfon() {
             return self.write_darfon_colors(key_colors);
@@ -985,7 +1130,7 @@ impl HidPerKeyBackend {
     /// Returns None for modes the MCU does not offer (reactive, ripple, custom, gradient...),
     /// which keep using the software streaming path.
     fn mcu_effect_for(&self, mode: &str, speed: u32, direction: &str, colors: &[String]) -> Option<[u8; Self::MCU_RECORD_LEN]> {
-        if self.device_pid != Some(0x54BF) {
+        if self.device_pid != Some(0x54BF) && !self.is_primax_mcu {
             return None;
         }
         let parse = |i: usize| parse_hex_color(colors.get(i).map(|s| s.as_str()).unwrap_or("FF0000"));
@@ -1044,6 +1189,24 @@ impl HidPerKeyBackend {
     /// Send one effect record; the MCU keeps animating without any host repaint thread.
     /// Volatile only (never issues the flash-store opcode).
     fn send_mcu_effect(&self, record: &[u8; Self::MCU_RECORD_LEN]) -> bool {
+        self.send_mcu_effect_with_brightness(record, 100)
+    }
+
+    fn send_mcu_effect_with_brightness(&self, record: &[u8; Self::MCU_RECORD_LEN], brightness: u32) -> bool {
+        if self.is_primax_mcu {
+            let on = Self::build_primax_report(0x09, 0x00, 0x01, &[0x01]);
+            let _ = self.write_primax_report(&on);
+            let br_val = 100 + brightness.clamp(1, 100) as u8;
+            let br = Self::build_primax_report(0x0C, 0x00, 0x01, &[br_val]);
+            let _ = self.write_primax_report(&br);
+            let packet = Self::build_primax_report(
+                Self::MCU_OP_SET_EFFECT,
+                0,
+                Self::MCU_RECORD_LEN as u8,
+                record,
+            );
+            return self.write_primax_report(&packet);
+        }
         // Release LampArray so the MCU firmware effect can take over (#355)
         self.release_lamparray();
         // OGH always sends "lighting on" (0x09, BLength 1, arg 0x01) right before the effect.
@@ -1500,8 +1663,11 @@ impl RgbService {
             // If the selected mode has no MCU equivalent, release the LampArray so Fn+1/Fn+2 work.
             if has_per_key && g.config.hw_effects {
                 if let Some(rec) = g.hid_per_key.mcu_effect_for(&mode, speed, &direction, &colors) {
-                    let sig = rec.to_vec();
-                    if g.mcu_sig.as_ref() != Some(&sig) && g.hid_per_key.send_mcu_effect(&rec) {
+                    let mut sig = rec.to_vec();
+                    if g.hid_per_key.is_primax_mcu() {
+                        sig.push(brightness.clamp(1, 100) as u8);
+                    }
+                    if g.mcu_sig.as_ref() != Some(&sig) && g.hid_per_key.send_mcu_effect_with_brightness(&rec, brightness) {
                         g.mcu_sig = Some(sig);
                     }
                 } else {
@@ -1607,7 +1773,7 @@ impl RgbService {
                 }
             }
 
-            if has_old_sysfs && !g.hid_per_key.is_lamparray() {
+            if has_old_sysfs && !g.hid_per_key.is_lamparray() && !g.hid_per_key.is_primax_mcu() {
                 let zone_count = g.hw.zone_count as usize;
                 let mut current_frame = Vec::with_capacity(zone_count);
                 for i in 0..zone_count {
@@ -1691,15 +1857,23 @@ impl RgbService {
 
         // ── HID per-key backend (USB direct) ────────────────────────────────────
         if g.hid_per_key.is_available() {
+            let mcu_anim_active = g.config.hw_effects
+                && power
+                && brightness > 0
+                && g.hid_per_key
+                    .mcu_effect_for(&mode, speed, &g.config.direction, &colors)
+                    .is_some();
             if g.config.hw_effects && g.hid_per_key.is_lamparray() {
                 g.hid_per_key.release_lamparray();
+            } else if mcu_anim_active && g.hid_per_key.is_primax_mcu() {
+                // Handled by software_animation_loop via send_mcu_effect_with_brightness
             } else if !power || brightness == 0 {
                 g.hid_per_key.send_enter_per_key_mode(0);
                 g.hid_per_key.set_zone_colors(&vec!["000000".to_string(); 8]);
             } else {
                 g.hid_per_key.send_enter_per_key_mode(brightness);
                 if mode == "static" {
-                    let static_colors = if g.hid_per_key.is_lamparray() {
+                    let static_colors = if g.hid_per_key.is_lamparray() || g.hid_per_key.is_primax_mcu() {
                         let scaler = (brightness as f64 / 100.0).clamp(0.0, 1.0);
                         colors.iter().map(|c| scale_hex_color(c, scaler)).collect()
                     } else {
@@ -1707,7 +1881,7 @@ impl RgbService {
                     };
                     g.hid_per_key.set_zone_colors(&static_colors);
                 } else if mode == "per_key_custom" {
-                    let scaler = if g.hid_per_key.is_lamparray() {
+                    let scaler = if g.hid_per_key.is_lamparray() || g.hid_per_key.is_primax_mcu() {
                         (brightness as f64 / 100.0).clamp(0.0, 1.0)
                     } else {
                         1.0
@@ -1770,9 +1944,9 @@ impl RgbService {
         // ── Standard sysfs driver ───────────────────────────────────────────────
         if !g.hw.available { return; }
 
-        // On LampArray per-key boards (8D88 / 8D42), WMI zone attributes belong to the
-        // front lightbar — do NOT overwrite them with keyboard zone colors (#355).
-        if g.hid_per_key.is_lamparray() {
+        // On LampArray and Primax MCU per-key boards, WMI zone attributes either belong
+        // to the front lightbar or are unused/ignored — avoid noisy WMI writes (#355, #385).
+        if g.hid_per_key.is_lamparray() || g.hid_per_key.is_primax_mcu() {
             return;
         }
 
@@ -2112,7 +2286,7 @@ impl RgbService {
         g.mcu_sig = None;
         g.config.save();
 
-        let scaler = if g.hid_per_key.is_lamparray() {
+        let scaler = if g.hid_per_key.is_lamparray() || g.hid_per_key.is_primax_mcu() {
             (g.config.brightness as f64 / 100.0).clamp(0.0, 1.0)
         } else {
             1.0
@@ -2299,13 +2473,20 @@ mod mcu_effect_tests {
     use super::*;
 
     fn backend(pid: Option<u16>) -> HidPerKeyBackend {
-        HidPerKeyBackend { hidraw_paths: vec![], device_pid: pid, lamparray: None }
+        HidPerKeyBackend { hidraw_paths: vec![], device_pid: pid, lamparray: None, is_primax_mcu: false }
     }
 
     #[test]
-    fn mcu_effects_only_on_darfon() {
+    fn mcu_effects_only_on_darfon_or_primax_mcu() {
         let c = vec!["00FF00".to_string()];
         assert!(backend(Some(0x54BF)).mcu_effect_for("breathing", 50, "ltr", &c).is_some());
+        let primax = HidPerKeyBackend {
+            hidraw_paths: vec![],
+            device_pid: Some(0x4F03),
+            lamparray: None,
+            is_primax_mcu: true,
+        };
+        assert!(primax.mcu_effect_for("breathing", 50, "ltr", &c).is_some());
         assert!(backend(None).mcu_effect_for("breathing", 50, "ltr", &c).is_none());
     }
 
@@ -2357,10 +2538,41 @@ mod regression_rgb {
     fn regression_darfon_static_pages_require_zero_blength() {
         let path=std::env::temp_dir().join(format!("omen-review-hid-{}",std::process::id()));
         std::fs::write(&path,[0u8;64]).unwrap();
-        let h=HidPerKeyBackend{hidraw_paths:vec![path.to_string_lossy().to_string()],device_pid:Some(0x54BF),lamparray:None};
+        let h=HidPerKeyBackend{hidraw_paths:vec![path.to_string_lossy().to_string()],device_pid:Some(0x54BF),lamparray:None,is_primax_mcu:false};
         assert!(h.write_darfon_colors(&vec![(255,255,255);104]));
         let packet=std::fs::read(&path).unwrap();let _=std::fs::remove_file(path);
         assert_eq!(&packet[..4],&[0x07,0x02,0x00,0x00],"native static channel pages require BLength=0, despite carrying 60 data bytes");
+    }
+
+    #[test]
+    fn primax_report_framing_and_whitelist() {
+        let pkt = HidPerKeyBackend::build_primax_report(0x80, 0x01, 0x00, &[0x12, 0x34]);
+        assert_eq!(pkt.len(), 65);
+        assert_eq!(&pkt[..7], &[0x00, 0x80, 0x01, 0x00, 0x00, 0x12, 0x34]);
+        assert!(HidPerKeyBackend::is_primax_cmd_allowed(0x80));
+        assert!(HidPerKeyBackend::is_primax_cmd_allowed(0x05));
+        assert!(HidPerKeyBackend::is_primax_cmd_allowed(0x03));
+        assert!(!HidPerKeyBackend::is_primax_cmd_allowed(0x0A));
+        assert!(!HidPerKeyBackend::is_primax_cmd_allowed(0x10));
+    }
+
+    #[test]
+    fn primax_static_pages_cover_180_leds_with_zero_blength() {
+        let path = std::env::temp_dir().join(format!("omen-primax-hid-{}", std::process::id()));
+        std::fs::write(&path, [0u8; 65]).unwrap();
+        let h = HidPerKeyBackend {
+            hidraw_paths: vec![path.to_string_lossy().to_string()],
+            device_pid: Some(0x4F03),
+            lamparray: None,
+            is_primax_mcu: true,
+        };
+        assert!(h.write_primax_colors(&vec![(255, 128, 64); 104]));
+        let packet = std::fs::read(&path).unwrap();
+        let _ = std::fs::remove_file(path);
+        assert_eq!(packet.len(), 65);
+        assert_eq!(&packet[..5], &[0x00, 0x07, 0x02, 0x00, 0x00]);
+        assert_eq!(packet[5], 64);
+        assert_eq!(packet[64], 64);
     }
     #[test]
     fn regression_batch_preserves_eight_zone_payload() {

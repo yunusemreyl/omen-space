@@ -851,15 +851,18 @@ pub fn build_interactive_keyboard(
     });
     bright_box.append(&bright_scale);
     
-    // Experimental (#322): run supported effects on the keyboard MCU (Darfon 0d62:54bf only).
-    // The MCU ignores brightness, so the slider is disabled while such an effect is active.
+    // Experimental (#322): run supported effects on the keyboard MCU (Darfon 0d62:54bf & Primax 0461:*).
+    // The MCU ignores brightness on Darfon (and accepts it via 0x0C on Primax).
     let hw_on = Rc::new(std::cell::Cell::new(false));
-    let is_darfon = detected_mode == KeyboardMode::PerKey && state_json_opt.as_ref()
+    let supports_hw_effects = detected_mode == KeyboardMode::PerKey && state_json_opt.as_ref()
         .and_then(|j| j["hid_device_pid"].as_str())
-        .map(|p| p.eq_ignore_ascii_case("54BF"))
+        .map(|p| matches!(
+            p.to_ascii_uppercase().as_str(),
+            "54BF" | "4E9A" | "4E9B" | "4F03" | "4F11" | "4F1E" | "4ECB"
+        ))
         .unwrap_or(false);
     let hw_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).build();
-    if is_darfon {
+    if supports_hw_effects {
         hw_on.set(state_json_opt.as_ref().and_then(|j| j["hw_effects"].as_bool()).unwrap_or(false));
         let hw_label = gtk::Label::builder().label(crate::i18n::t("kb_hw_effects")).xalign(0.0).build();
         label_sg.add_widget(&hw_label);
@@ -880,7 +883,7 @@ pub fn build_interactive_keyboard(
     let sliders_container = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).build();
     sliders_container.append(&speed_box);
     sliders_container.append(&bright_box);
-    if is_darfon {
+    if supports_hw_effects {
         sliders_container.append(&hw_box);
     }
     controls_row.append(&sliders_container);
