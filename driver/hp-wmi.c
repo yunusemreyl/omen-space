@@ -374,12 +374,22 @@ static const struct dmi_system_id victus_s_thermal_profile_boards[] __initconst 
 		.driver_data = (void *)&omen_v1_unknown_ec_thermal_params,
 	},
 	{
-		/* 8D87 / 8D88: HP OMEN MAX Gaming Laptop 16-ah0xxx */
+		/* 8D87 / 8D88 / 8E9F: HP OMEN MAX Gaming Laptop 16-ak0xxx / 16-ah0xxx */
 		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8D87")},
 		.driver_data = (void *)&omen_v1_unknown_ec_thermal_params,
 	},
 	{
 		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8D88")},
+		.driver_data = (void *)&omen_v1_unknown_ec_thermal_params,
+	},
+	{
+		/* 8E9F: OMEN MAX Gaming Laptop 16-ak0xxx (#374) */
+		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8E9F")},
+		.driver_data = (void *)&omen_v1_unknown_ec_thermal_params,
+	},
+	{
+		/* 8E9A: HyperX OMEN MAX Gaming Laptop 16-ah1xxx (#371) */
+		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8E9A")},
 		.driver_data = (void *)&omen_v1_unknown_ec_thermal_params,
 	},
 	{
@@ -3863,11 +3873,19 @@ static const struct dmi_system_id broken_omen_hpc_guid_boards[] __initconst = {
 		.matches = { DMI_MATCH(DMI_BOARD_NAME, "8D42") },
 	},
 	{
-		/* 8D87 / 8D88: HP OMEN MAX Gaming Laptop 16-ah0xxx */
+		/* 8D87 / 8D88 / 8E9F: HP OMEN MAX Gaming Laptop 16-ah0xxx / 16-ak0xxx */
 		.matches = { DMI_MATCH(DMI_BOARD_NAME, "8D87") },
 	},
 	{
 		.matches = { DMI_MATCH(DMI_BOARD_NAME, "8D88") },
+	},
+	{
+		/* 8E9F: OMEN MAX Gaming Laptop 16-ak0xxx (#374) */
+		.matches = { DMI_MATCH(DMI_BOARD_NAME, "8E9F") },
+	},
+	{
+		/* 8E9A: HyperX OMEN MAX Gaming Laptop 16-ah1xxx (#371) */
+		.matches = { DMI_MATCH(DMI_BOARD_NAME, "8E9A") },
 	},
 	{
 		/* 8A4C: OMEN by HP Laptop 16-k0xxx */
