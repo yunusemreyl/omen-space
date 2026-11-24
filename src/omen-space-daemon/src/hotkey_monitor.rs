@@ -1,16 +1,68 @@
 use evdev::{Device, Key};
 use log::{info, warn};
-use zbus::Connection;
-use std::os::unix::fs::OpenOptionsExt;
+use omen_types::hotkey::HotkeySpec;
 use std::os::fd::AsRawFd;
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::io::unix::AsyncFd;
+use zbus::Connection;
+
+/// Modifier keys currently held on one keyboard device.
+#[derive(Default, Clone, Copy)]
+pub(crate) struct ModState {
+    left_ctrl: bool,
+    right_ctrl: bool,
+    left_alt: bool,
+    right_alt: bool,
+    left_shift: bool,
+    right_shift: bool,
+    left_meta: bool,
+    right_meta: bool,
+}
+
+impl ModState {
+    /// Update the state for a modifier key. Returns `true` when `code` is a
+    /// modifier (so the caller does not treat it as a hotkey).
+    pub(crate) fn update(&mut self, code: u16, pressed: bool) -> bool {
+        match code {
+            29 => self.left_ctrl = pressed,
+            97 => self.right_ctrl = pressed,
+            56 => self.left_alt = pressed,
+            100 => self.right_alt = pressed,
+            42 => self.left_shift = pressed,
+            54 => self.right_shift = pressed,
+            125 => self.left_meta = pressed,
+            126 => self.right_meta = pressed,
+            _ => return false,
+        }
+        true
+    }
+
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    /// Exact modifier match: `Shift+F2` must not fire on `Ctrl+Shift+F2`.
+    fn matches(&self, spec: &HotkeySpec) -> bool {
+        (self.left_ctrl || self.right_ctrl) == spec.modifiers.ctrl
+            && (self.left_alt || self.right_alt) == spec.modifiers.alt
+            && (self.left_shift || self.right_shift) == spec.modifiers.shift
+            && (self.left_meta || self.right_meta) == spec.modifiers.meta
+    }
+}
 
 /// Map a pressed key to the name broadcast in the `MacroKeyPressed` D-Bus signal.
 ///
-/// `shift_held` is true while either Shift key is down.
-pub(crate) fn resolve_hotkey(key_code: u16, shift_held: bool) -> Option<&'static str> {
-    // Shift+F2 opens/closes the quick HUD overlay (handled by omen-tray).
-    if (key_code == Key::KEY_F2.code() || key_code == 60) && shift_held {
+/// The configured overlay binding is checked first, then the fixed OMEN/macro
+/// keys. `mods` is the modifier state at the time of the press.
+pub(crate) fn resolve_hotkey(
+    key_code: u16,
+    mods: &ModState,
+    binding: &HotkeySpec,
+) -> Option<&'static str> {
+    if key_code == binding.key_code && mods.matches(binding) {
         return Some("overlay");
     }
     // 148 = KEY_PROG1 (Omen Key mapped by hwdb / hp-omen-extra)
@@ -34,16 +86,94 @@ pub(crate) fn resolve_hotkey(key_code: u16, shift_held: bool) -> Option<&'static
     }
 }
 
+/// `~/.config/omenspace/settings.json` of the active graphical user.
+fn settings_path() -> Option<PathBuf> {
+    crate::notifier::DesktopNotifier::active_user_home()
+        .map(|home| PathBuf::from(home).join(".config/omenspace/settings.json"))
+}
+
+fn read_hotkey(path: &Path) -> Option<HotkeySpec> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+    Some(HotkeySpec::from_settings(&json))
+}
+
+fn apply_binding(binding: &Arc<RwLock<HotkeySpec>>, spec: HotkeySpec) {
+    if let Ok(mut current) = binding.write() {
+        if *current != spec {
+            info!("HotkeyMonitor: overlay hotkey is now {}", spec.display());
+            *current = spec;
+        }
+    }
+}
+
+/// Watch the user's settings file and publish the overlay binding. Polling a
+/// single `stat` per second is cheaper (and more portable) than inotify here.
+async fn watch_settings(binding: Arc<RwLock<HotkeySpec>>) {
+    let mut path: Option<PathBuf> = None;
+    let mut mtime: Option<SystemTime> = None;
+    let mut last_path_check = Instant::now() - Duration::from_secs(3600);
+
+    loop {
+        let path_age = last_path_check.elapsed();
+        if path.is_none() {
+            // The daemon may start before anyone logs in; retry periodically.
+            if path_age >= Duration::from_secs(10) {
+                path = settings_path();
+                last_path_check = Instant::now();
+                mtime = None;
+            }
+        } else if path_age >= Duration::from_secs(60) {
+            // Pick up a different active user after logout/login.
+            let new_path = settings_path();
+            last_path_check = Instant::now();
+            if new_path != path {
+                path = new_path;
+                mtime = None;
+            }
+        }
+
+        if let Some(p) = &path {
+            let current = std::fs::metadata(p).and_then(|m| m.modified()).ok();
+            if current != mtime {
+                match current {
+                    Some(_) => {
+                        // Retry when the file is caught mid-write instead of
+                        // resetting the hotkey to the default.
+                        if let Some(spec) = read_hotkey(p) {
+                            mtime = current;
+                            apply_binding(&binding, spec);
+                        }
+                    }
+                    None => {
+                        mtime = None;
+                        apply_binding(&binding, HotkeySpec::default());
+                    }
+                }
+            }
+        }
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
 pub struct HotkeyMonitor;
 
 impl HotkeyMonitor {
     pub fn start(connection: Connection) {
+        let binding = Arc::new(RwLock::new(HotkeySpec::default()));
+
+        let watcher_binding = binding.clone();
         tokio::spawn(async move {
-            Self::monitor_loop(connection).await;
+            watch_settings(watcher_binding).await;
+        });
+
+        tokio::spawn(async move {
+            Self::monitor_loop(connection, binding).await;
         });
     }
 
-    async fn monitor_loop(connection: Connection) {
+    async fn monitor_loop(connection: Connection, binding: Arc<RwLock<HotkeySpec>>) {
         loop {
             let mut matching_devices: Vec<std::path::PathBuf> = Vec::new();
             let mut omen_device_found = false;
@@ -95,6 +225,7 @@ impl HotkeyMonitor {
             let mut join_set = tokio::task::JoinSet::new();
             for path in matching_devices {
                 let conn = connection.clone();
+                let binding = binding.clone();
                 join_set.spawn(async move {
                     let Ok(file) = std::fs::OpenOptions::new()
                         .read(true)
@@ -102,8 +233,7 @@ impl HotkeyMonitor {
                         .open(&path) else { return; };
                     let Ok(async_fd) = AsyncFd::new(file) else { return; };
                     info!("HotkeyMonitor: listening to raw events on {:?}", path);
-                    let mut left_shift = false;
-                    let mut right_shift = false;
+                    let mut mods = ModState::default();
                     let event_size = std::mem::size_of::<libc::input_event>();
                     let mut read_buf = vec![0u8; event_size * 32];
 
@@ -131,16 +261,17 @@ impl HotkeyMonitor {
                                     // EV_KEY = 1
                                     if ev.type_ == 1 {
                                         let key_code = ev.code;
-                                        if key_code == Key::KEY_LEFTSHIFT.code() || key_code == 42 {
-                                            left_shift = ev.value != 0;
-                                        } else if key_code == Key::KEY_RIGHTSHIFT.code() || key_code == 54 {
-                                            right_shift = ev.value != 0;
+                                        if mods.update(key_code, ev.value != 0) {
+                                            continue;
                                         }
-                                        let shift_held = left_shift || right_shift;
 
                                         if ev.value == 1 {
                                             // Key pressed
-                                            if let Some(name) = resolve_hotkey(key_code, shift_held) {
+                                            let spec = binding
+                                                .read()
+                                                .map(|b| b.clone())
+                                                .unwrap_or_default();
+                                            if let Some(name) = resolve_hotkey(key_code, &mods, &spec) {
                                                 info!("HotkeyMonitor: Detected Hotkey / Macro Key: {}", name);
                                                 let _ = conn.emit_signal(
                                                     None::<&str>,
@@ -152,9 +283,8 @@ impl HotkeyMonitor {
                                             }
                                         }
                                     } else if ev.type_ == 0 && ev.code == 3 {
-                                        // SYN_DROPPED: reset shift state
-                                        left_shift = false;
-                                        right_shift = false;
+                                        // SYN_DROPPED: reset modifier state
+                                        mods.reset();
                                     }
                                 }
                             }

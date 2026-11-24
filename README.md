@@ -37,7 +37,7 @@
 | **Advanced Power** | Real-time Intel RAPL `PL1` / `PL2` power limits (with boot-default tracking), `TCC Offset` temperature ceiling, MSR voltage offsets (with hardware `UV_LOCK` detection), GPU Dynamic Boost (`cTGP` / `PPAB`), and AMD Ryzen SMU tuning. |
 | **Graphics Switcher (MUX)** | Switch between **Hybrid (MSHybrid)**, **Discrete (dGPU)**, and **Advanced Optimus** modes with live `eDP` display routing and NVIDIA driver telemetry. |
 | **RGB Studio** | 4-Zone OMEN, Single-Zone Victus, chassis Lightbar, and Darfon Per-Key (`0d62:54bf`) RGB lighting with static, breathing, wave, and hardware MCU animations. |
-| **Quick HUD (`Shift+F2`)** | In-game floating overlay and system tray applet for switching power and fan profiles on the fly without leaving your workflow. |
+| **Quick HUD (`Shift+F2`, configurable)** | In-game floating overlay and system tray applet for switching power and fan profiles on the fly without leaving your workflow. |
 | **Profile Manager & Updater** | Automatic per-application performance rules (Wayland & X11) and an integrated **Update Center** with commit-level changelog tracking, live build progress, and `fwupd` (LVFS) firmware scanning. |
 
 ---
@@ -119,7 +119,7 @@ sudo ./setup.sh uninstall   # Remove daemon, UI, and DKMS modules cleanly
 | :--- | :--- |
 | **`omen-space-daemon`** | Root `systemd` service managing WMI, ACPI, sysfs, EC, MSR/RAPL, and HID devices over D-Bus (`org.hp.omen.*`). |
 | **`omen-gui`** | Native GTK4 + Libadwaita desktop application with scalable UI (`Ctrl+Shift+Plus` / `Minus`) and instant localization (**English**, **Türkçe**, **Español**). |
-| **`omen-overlay`** | Lightweight Quick Access HUD (`Shift+F2`) synchronized in real time with the daemon and main GUI. |
+| **`omen-overlay`** | Lightweight Quick Access HUD (default `Shift+F2`, configurable in Settings) synchronized in real time with the daemon and main GUI. |
 | **`omen-tray`** | StatusNotifierItem system tray applet for quick profile switching and background hotkey handling. |
 | **`omen-cli`** | Scriptable command-line interface and interactive TUI (`omen-cli system info`, `omen-cli overlay toggle`, `omen-cli system check-update`). |
 | **`hp-omen-extra`** | Custom DKMS kernel driver package (`hp-wmi` + `hp-omen-extra`) exposing fan PWM, thermal profiles, GPU TGP/PPAB, and RGB zones. |

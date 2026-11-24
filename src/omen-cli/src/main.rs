@@ -40,7 +40,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: commands::system::SystemCommand,
     },
-    /// Quick HUD Overlay controls (Shift+F2)
+    /// Quick HUD Overlay controls (global hotkey, Shift+F2 by default)
     Overlay {
         #[command(subcommand)]
         cmd: commands::overlay::OverlayCommand,

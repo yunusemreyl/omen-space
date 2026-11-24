@@ -37,7 +37,7 @@
 | **Energía Avanzada** | Límites de potencia Intel RAPL `PL1` / `PL2`, límite térmico `TCC Offset`, undervolt por MSR (con detección de `UV_LOCK`), Dynamic Boost de GPU y ajustes para AMD Ryzen SMU. |
 | **Selector de Gráficos (MUX)** | Cambio entre **Hybrid (MSHybrid)**, **Discrete (dGPU)** y **Advanced Optimus** con estado de enrutamiento `eDP` y versión del controlador NVIDIA. |
 | **RGB Studio** | Iluminación RGB de 4 zonas, zona única (Victus), barra de luz frontal y teclado por tecla Darfon (`0d62:54bf`). |
-| **Superposición Rápida (`Shift+F2`)** | Panel flotante dentro del juego y applet de bandeja del sistema sincronizados en tiempo real. |
+| **Superposición Rápida (`Shift+F2`, configurable)** | Panel flotante dentro del juego y applet de bandeja del sistema sincronizados en tiempo real. |
 | **Gestor de Perfiles y Actualizador** | Reglas automáticas por aplicación (Wayland y X11) y **Centro de Actualizaciones** integrado con seguimiento de commits, progreso en vivo y soporte para `fwupd` (LVFS). |
 
 ---
