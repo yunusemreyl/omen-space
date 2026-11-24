@@ -152,39 +152,86 @@ mod tests {
     fn hotkey_raw_scancode_200_maps_to_omen() {
         // Calls the REAL mapping used by the hotkey monitor (this test used to
         // re-implement it locally, so it kept passing even if the real code broke).
-        use crate::hotkey_monitor::resolve_hotkey;
-        assert_eq!(resolve_hotkey(148, false), Some("omen"));
-        assert_eq!(resolve_hotkey(200, false), Some("omen"), "raw XF86Launch2 scancode must work (fix #266)");
-        assert_eq!(resolve_hotkey(149, false), Some("prog2"));
-        assert_eq!(resolve_hotkey(140, false), Some("calc"));
-        assert_eq!(resolve_hotkey(256, false), Some("prog3"));
-        assert_eq!(resolve_hotkey(1, false), None);
-        assert_eq!(resolve_hotkey(60, true), Some("overlay"));
+        use crate::hotkey_monitor::{resolve_hotkey, ModState};
+        use omen_types::hotkey::HotkeySpec;
+        let mods = ModState::default();
+        let binding = HotkeySpec::default();
+        assert_eq!(resolve_hotkey(148, &mods, &binding), Some("omen"));
+        assert_eq!(resolve_hotkey(200, &mods, &binding), Some("omen"), "raw XF86Launch2 scancode must work (fix #266)");
+        assert_eq!(resolve_hotkey(149, &mods, &binding), Some("prog2"));
+        assert_eq!(resolve_hotkey(140, &mods, &binding), Some("calc"));
+        assert_eq!(resolve_hotkey(256, &mods, &binding), Some("prog3"));
+        assert_eq!(resolve_hotkey(1, &mods, &binding), None);
+
+        let mut shift = ModState::default();
+        shift.update(42, true);
+        assert_eq!(resolve_hotkey(60, &shift, &binding), Some("overlay"));
     }
 
     #[test]
     fn shift_f2_opens_the_overlay_but_plain_f2_does_not() {
-        use crate::hotkey_monitor::resolve_hotkey;
+        use crate::hotkey_monitor::{resolve_hotkey, ModState};
+        use omen_types::hotkey::HotkeySpec;
         use evdev::Key;
+        let binding = HotkeySpec::default();
+        let mut shift = ModState::default();
+        shift.update(42, true);
         assert_eq!(Key::KEY_F2.code(), 60, "evdev KEY_F2 must stay code 60");
-        assert_eq!(resolve_hotkey(Key::KEY_F2.code(), true), Some("overlay"));
-        assert_eq!(resolve_hotkey(60, true), Some("overlay"));
-        assert_eq!(resolve_hotkey(60, false), None, "F2 without Shift must not toggle the HUD");
+        assert_eq!(resolve_hotkey(Key::KEY_F2.code(), &shift, &binding), Some("overlay"));
+        assert_eq!(resolve_hotkey(60, &shift, &binding), Some("overlay"));
+        assert_eq!(
+            resolve_hotkey(60, &ModState::default(), &binding),
+            None,
+            "F2 without Shift must not toggle the HUD"
+        );
+    }
+
+    #[test]
+    fn configured_hotkey_replaces_the_default_binding() {
+        use crate::hotkey_monitor::{resolve_hotkey, ModState};
+        use omen_types::hotkey::{HotkeyModifiers, HotkeySpec};
+
+        let binding = HotkeySpec::with_label(
+            64, // KEY_F6
+            HotkeyModifiers { ctrl: true, alt: true, ..Default::default() },
+            "F6",
+        );
+
+        let mut mods = ModState::default();
+        mods.update(29, true); // left Ctrl
+        mods.update(56, true); // left Alt
+        assert_eq!(resolve_hotkey(64, &mods, &binding), Some("overlay"));
+
+        // Exact modifier match: adding Shift must not trigger the binding.
+        let mut with_shift = mods;
+        with_shift.update(42, true);
+        assert_eq!(resolve_hotkey(64, &with_shift, &binding), None);
+
+        // The old default no longer fires once a custom hotkey is configured.
+        let mut shift = ModState::default();
+        shift.update(42, true);
+        assert_eq!(resolve_hotkey(60, &shift, &binding), None);
     }
 
     #[test]
     fn shift_does_not_change_the_other_macro_keys() {
-        use crate::hotkey_monitor::resolve_hotkey;
+        use crate::hotkey_monitor::{resolve_hotkey, ModState};
+        use omen_types::hotkey::HotkeySpec;
+        let binding = HotkeySpec::default();
         for shift in [false, true] {
-            assert_eq!(resolve_hotkey(148, shift), Some("omen"));
-            assert_eq!(resolve_hotkey(200, shift), Some("omen"));
-            assert_eq!(resolve_hotkey(149, shift), Some("prog2"));
-            assert_eq!(resolve_hotkey(140, shift), Some("calc"));
-            assert_eq!(resolve_hotkey(256, shift), Some("prog3"));
+            let mut mods = ModState::default();
+            mods.update(42, shift);
+            assert_eq!(resolve_hotkey(148, &mods, &binding), Some("omen"));
+            assert_eq!(resolve_hotkey(200, &mods, &binding), Some("omen"));
+            assert_eq!(resolve_hotkey(149, &mods, &binding), Some("prog2"));
+            assert_eq!(resolve_hotkey(140, &mods, &binding), Some("calc"));
+            assert_eq!(resolve_hotkey(256, &mods, &binding), Some("prog3"));
         }
         // Ordinary keys (letters, brightness, the Shift keys themselves) map to nothing.
+        let mut mods = ModState::default();
+        mods.update(42, true);
         for code in [30u16, 42, 54, 224, 225] {
-            assert_eq!(resolve_hotkey(code, true), None, "code {code} must not trigger anything");
+            assert_eq!(resolve_hotkey(code, &mods, &binding), None, "code {code} must not trigger anything");
         }
     }
 

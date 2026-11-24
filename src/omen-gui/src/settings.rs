@@ -1,7 +1,10 @@
 use gtk::prelude::*;
 use libadwaita as adw;
 use adw::prelude::*;
+use std::cell::RefCell;
 use std::rc::Rc;
+use gtk::gdk;
+use omen_types::hotkey::{HotkeyModifiers, HotkeySpec};
 use crate::i18n::{self, Language};
 
 /* ─────────────────────────────────────────────────────────────
@@ -10,7 +13,7 @@ use crate::i18n::{self, Language};
    ───────────────────────────────────────────────────────────── */
 
 pub fn build_page(
-    _window: &adw::ApplicationWindow,
+    window: &adw::ApplicationWindow,
     on_lang_changed: Option<Rc<dyn Fn()>>,
     lb_group_opt: Option<adw::PreferencesGroup>,
     lb_preview_group_opt: Option<adw::PreferencesGroup>,
@@ -24,6 +27,7 @@ pub fn build_page(
     let mut init_zone_override = 0u32;
     let mut init_appearance_mode = 0u32;
     let mut init_lightbar = true;
+    let mut init_hotkey = HotkeySpec::default();
 
     let specs = crate::daemon_client::get_hardware_specs_sync();
 
@@ -40,6 +44,7 @@ pub fn build_page(
                 if let Some(zo) = json.get("zone_override").and_then(|v| v.as_u64()) { init_zone_override = zo as u32; }
                 if let Some(am) = json.get("appearance_mode").and_then(|v| v.as_u64()) { init_appearance_mode = am as u32; }
                 if let Some(lb) = json.get("lightbar_enabled").and_then(|v| v.as_bool()) { init_lightbar = lb; }
+                init_hotkey = HotkeySpec::from_settings(&json);
             }
         }
     }
@@ -231,7 +236,43 @@ pub fn build_page(
 
     page.append(&perf_group);
 
-    // ── 4. Daemon & Service ───────────────────────────────────
+    // ── 4. Quick HUD Hotkey ───────────────────────────────────
+    let hotkey_spec = Rc::new(RefCell::new(init_hotkey));
+
+    let hotkey_group = adw::PreferencesGroup::builder()
+        .title(i18n::t("overlay_hotkey_group"))
+        .build();
+
+    let hotkey_row = adw::ActionRow::builder()
+        .title(i18n::t("overlay_hotkey_title"))
+        .subtitle(i18n::t("overlay_hotkey_sub"))
+        .build();
+    let hotkey_value = gtk::Label::builder()
+        .label(hotkey_spec.borrow().display())
+        .css_classes(["os-section-desc"])
+        .valign(gtk::Align::Center)
+        .build();
+    hotkey_row.add_suffix(&hotkey_value);
+    let record_btn = gtk::Button::builder()
+        .label(i18n::t("overlay_hotkey_record_btn"))
+        .valign(gtk::Align::Center)
+        .build();
+    hotkey_row.add_suffix(&record_btn);
+    hotkey_group.add(&hotkey_row);
+
+    let reset_row = adw::ActionRow::builder()
+        .title(i18n::t("overlay_hotkey_reset"))
+        .build();
+    let reset_btn = gtk::Button::builder()
+        .icon_name("edit-undo-symbolic")
+        .tooltip_text(i18n::t("overlay_hotkey_reset"))
+        .valign(gtk::Align::Center)
+        .build();
+    reset_row.add_suffix(&reset_btn);
+    hotkey_group.add(&reset_row);
+    page.append(&hotkey_group);
+
+    // ── 5. Daemon & Service ───────────────────────────────────
     let daemon_alive = crate::daemon_client::ping_daemon_sync();
 
     let daemon_group = adw::PreferencesGroup::builder()
@@ -306,6 +347,7 @@ pub fn build_page(
     let thm_prot_clone = thermal_prot_row.clone();
     let zone_row_clone = zone_override_row.clone();
     let lb_row_clone = lightbar_row.clone();
+    let hk_spec_clone = hotkey_spec.clone();
 
     let save_settings = move || {
         let hb = hb_spin_clone.value();
@@ -332,11 +374,43 @@ pub fn build_page(
             json["thermal_protection"] = serde_json::json!(tp);
             json["zone_override"] = serde_json::json!(zo);
             json["lightbar_enabled"] = serde_json::json!(lb);
+            hk_spec_clone.borrow().write_settings(&mut json);
             let _ = std::fs::write(path, serde_json::to_string_pretty(&json).unwrap_or_default());
         }
     };
 
     let save_settings_rc = Rc::new(save_settings);
+
+    // Hotkey recording / reset. The daemon picks the new value up from
+    // settings.json within about a second (no restart needed).
+    {
+        let spec = hotkey_spec.clone();
+        let value_label = hotkey_value.clone();
+        let save = save_settings_rc.clone();
+        let parent = window.clone();
+        record_btn.connect_clicked(move |_| {
+            let current = spec.borrow().display();
+            let spec_cb = spec.clone();
+            let value_cb = value_label.clone();
+            let save_cb = save.clone();
+            open_hotkey_dialog(&parent, &current, Rc::new(move |new_spec| {
+                *spec_cb.borrow_mut() = new_spec;
+                value_cb.set_label(&spec_cb.borrow().display());
+                save_cb();
+            }));
+        });
+    }
+    {
+        let spec = hotkey_spec.clone();
+        let value_label = hotkey_value.clone();
+        let save = save_settings_rc.clone();
+        reset_btn.connect_clicked(move |_| {
+            *spec.borrow_mut() = HotkeySpec::default();
+            value_label.set_label(&spec.borrow().display());
+            save();
+        });
+    }
+
     let s1 = save_settings_rc.clone();
     hb_spin.connect_value_changed(move |_| s1());
     let s2 = save_settings_rc.clone();
@@ -429,4 +503,202 @@ pub fn build_page(
     page.append(&about_group);
 
     page
+}
+
+/// Modal recorder: the next non-modifier key press becomes the new hotkey.
+fn open_hotkey_dialog(
+    parent: &adw::ApplicationWindow,
+    current: &str,
+    on_save: Rc<dyn Fn(HotkeySpec)>,
+) {
+    let dialog = adw::Window::builder()
+        .title(i18n::t("overlay_hotkey_record_btn"))
+        .transient_for(parent)
+        .modal(true)
+        .default_width(420)
+        .build();
+
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .margin_top(24)
+        .margin_bottom(24)
+        .margin_start(24)
+        .margin_end(24)
+        .build();
+
+    content.append(&gtk::Label::builder()
+        .label(i18n::t("overlay_hotkey_recording"))
+        .css_classes(["title-3"])
+        .build());
+
+    let combo = gtk::Label::builder()
+        .label(current)
+        .css_classes(["title-1"])
+        .build();
+    content.append(&combo);
+
+    let unsupported = gtk::Label::builder()
+        .label(i18n::t("overlay_hotkey_unsupported"))
+        .css_classes(["error"])
+        .wrap(true)
+        .visible(false)
+        .build();
+    content.append(&unsupported);
+
+    let buttons = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(8)
+        .halign(gtk::Align::Center)
+        .build();
+    let reset_btn = gtk::Button::with_label(i18n::t("overlay_hotkey_reset"));
+    let cancel_btn = gtk::Button::with_label(i18n::t("cancel"));
+    buttons.append(&reset_btn);
+    buttons.append(&cancel_btn);
+    content.append(&buttons);
+
+    dialog.set_content(Some(&content));
+    content.set_focusable(true);
+
+    let controller = gtk::EventControllerKey::new();
+    controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+    {
+        let dialog_c = dialog.clone();
+        let combo_c = combo.clone();
+        let unsupported_c = unsupported.clone();
+        let on_save_c = on_save.clone();
+        controller.connect_key_pressed(move |_, keyval, keycode, state| {
+            if keyval == gdk::Key::Escape {
+                dialog_c.close();
+                return glib::Propagation::Stop;
+            }
+
+            unsupported_c.set_visible(false);
+
+            // Ignore bare modifier presses but show what is being held.
+            if is_modifier_key(keyval) {
+                combo_c.set_label(&modifier_preview(state));
+                return glib::Propagation::Stop;
+            }
+
+            // GDK reports X11/xkb key codes; evdev codes are offset by 8.
+            let Some(code) = keycode.checked_sub(8).and_then(|c| u16::try_from(c).ok()) else {
+                unsupported_c.set_label(i18n::t("overlay_hotkey_unsupported"));
+                unsupported_c.set_visible(true);
+                return glib::Propagation::Stop;
+            };
+            if code == 0 || omen_types::hotkey::is_modifier_code(code) {
+                unsupported_c.set_label(i18n::t("overlay_hotkey_unsupported"));
+                unsupported_c.set_visible(true);
+                return glib::Propagation::Stop;
+            }
+
+            let modifiers = HotkeyModifiers {
+                ctrl: state.contains(gdk::ModifierType::CONTROL_MASK),
+                alt: state.contains(gdk::ModifierType::ALT_MASK),
+                shift: state.contains(gdk::ModifierType::SHIFT_MASK),
+                // Not META_MASK: GTK often reports it alongside ALT_MASK for
+                // plain Alt, which would record Alt+X as Alt+Super+X.
+                meta: state.contains(gdk::ModifierType::SUPER_MASK),
+            };
+            // Prefer the unshifted physical key name ("1", not "exclam").
+            let label = omen_types::hotkey::evdev_key_name(code)
+                .map(str::to_string)
+                .unwrap_or_else(|| prettify_key_label(keyval));
+            if modifiers.to_bits() == 0 && !omen_types::hotkey::allows_no_modifier(code) {
+                unsupported_c.set_label(i18n::t("overlay_hotkey_needs_modifier"));
+                unsupported_c.set_visible(true);
+                return glib::Propagation::Stop;
+            }
+            on_save_c(HotkeySpec::with_label(code, modifiers, label));
+            dialog_c.close();
+            glib::Propagation::Stop
+        });
+    }
+    dialog.add_controller(controller);
+
+    {
+        let dialog_c = dialog.clone();
+        let on_save_c = on_save.clone();
+        reset_btn.connect_clicked(move |_| {
+            on_save_c(HotkeySpec::default());
+            dialog_c.close();
+        });
+    }
+    {
+        let dialog_c = dialog.clone();
+        cancel_btn.connect_clicked(move |_| dialog_c.close());
+    }
+
+    dialog.present();
+    content.grab_focus();
+}
+
+fn is_modifier_key(key: gdk::Key) -> bool {
+    matches!(
+        key,
+        gdk::Key::Shift_L
+            | gdk::Key::Shift_R
+            | gdk::Key::Control_L
+            | gdk::Key::Control_R
+            | gdk::Key::Alt_L
+            | gdk::Key::Alt_R
+            | gdk::Key::Super_L
+            | gdk::Key::Super_R
+            | gdk::Key::Meta_L
+            | gdk::Key::Meta_R
+            | gdk::Key::Hyper_L
+            | gdk::Key::Hyper_R
+            | gdk::Key::Caps_Lock
+            | gdk::Key::Num_Lock
+            | gdk::Key::ISO_Level3_Shift
+            | gdk::Key::ISO_Level5_Shift
+            | gdk::Key::Mode_switch
+    )
+}
+
+fn modifier_preview(state: gdk::ModifierType) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    if state.contains(gdk::ModifierType::CONTROL_MASK) {
+        parts.push("Ctrl");
+    }
+    if state.contains(gdk::ModifierType::ALT_MASK) {
+        parts.push("Alt");
+    }
+    if state.contains(gdk::ModifierType::SHIFT_MASK) {
+        parts.push("Shift");
+    }
+    if state.contains(gdk::ModifierType::SUPER_MASK) {
+        parts.push("Super");
+    }
+    if parts.is_empty() {
+        "...".to_string()
+    } else {
+        format!("{}+...", parts.join("+"))
+    }
+}
+
+/// Turn a GTK keysym into the label shown in the overlay/settings.
+fn prettify_key_label(keyval: gdk::Key) -> String {
+    let name = keyval.name().map(|s| s.to_string()).unwrap_or_default();
+    match name.as_str() {
+        "space" => "Space".to_string(),
+        "Return" | "KP_Enter" => "Enter".to_string(),
+        "BackSpace" => "Backspace".to_string(),
+        "Escape" => "Esc".to_string(),
+        "Page_Up" => "PageUp".to_string(),
+        "Page_Down" => "PageDown".to_string(),
+        "Caps_Lock" => "CapsLock".to_string(),
+        "Num_Lock" => "NumLock".to_string(),
+        "Scroll_Lock" => "ScrollLock".to_string(),
+        "Print" => "PrintScreen".to_string(),
+        "XF86AudioMute" => "Mute".to_string(),
+        "XF86AudioLowerVolume" => "VolumeDown".to_string(),
+        "XF86AudioRaiseVolume" => "VolumeUp".to_string(),
+        "XF86MonBrightnessDown" => "BrightnessDown".to_string(),
+        "XF86MonBrightnessUp" => "BrightnessUp".to_string(),
+        _ if name.len() == 1 => name.to_uppercase(),
+        _ if name.starts_with("XF86") => name.trim_start_matches("XF86").to_string(),
+        _ => name,
+    }
 }

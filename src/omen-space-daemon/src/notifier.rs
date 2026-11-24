@@ -97,6 +97,46 @@ impl DesktopNotifier {
         true
     }
 
+    /// Home directory of the active graphical user. Used by the hotkey monitor
+    /// to locate `~/.config/omenspace/settings.json` (which the unprivileged
+    /// GUI writes).
+    pub(crate) fn active_user_home() -> Option<String> {
+        // When the daemon runs as the user (session-bus fallback / dev mode),
+        // `$HOME` is already the right answer.
+        if unsafe { libc::getuid() } != 0 {
+            if let Some(home) = std::env::var_os("HOME") {
+                let path = std::path::PathBuf::from(home);
+                if path.is_dir() {
+                    return Some(path.to_string_lossy().into_owned());
+                }
+            }
+        }
+
+        let (user, _, _, _, fallback) = Self::find_user_session_env()?;
+        Some(Self::home_for_user(&user).unwrap_or(fallback))
+    }
+
+    /// Resolve a username to its real home via `/etc/passwd` (handles distros
+    /// that do not use `/home/<user>`, e.g. Fedora Silverblue).
+    fn home_for_user(user: &str) -> Option<String> {
+        let content = std::fs::read_to_string("/etc/passwd").ok()?;
+        for line in content.lines() {
+            let mut fields = line.split(':');
+            if fields.next() != Some(user) {
+                continue;
+            }
+            let _password = fields.next();
+            let _uid = fields.next();
+            let _gid = fields.next();
+            let _gecos = fields.next();
+            let home = fields.next().unwrap_or("");
+            if !home.is_empty() {
+                return Some(home.to_string());
+            }
+        }
+        None
+    }
+
     fn has_direct_session_bus() -> bool {
         // When running as a root systemd service without DBUS_SESSION_BUS_ADDRESS,
         // Connection::session() always fails before falling back to the user session (#338).

@@ -232,6 +232,8 @@ fn translate_tr(key: &'static str) -> &'static str {
         "overlay_hotkey_record_btn" => "Yeni Kısayol Ata",
         "overlay_hotkey_recording" => "Tuşa basın... (ESC ile iptal)",
         "overlay_hotkey_reset" => "Sıfırla (Shift+F2)",
+        "overlay_hotkey_unsupported" => "Bu tuş desteklenmiyor. Başka bir kombinasyon deneyin.",
+        "overlay_hotkey_needs_modifier" => "Bu tuş için Ctrl, Alt, Shift veya Super ile birlikte basın.",
         "overlay_margin_title" => "Ekran Kenar Boşluğu",
         "overlay_margin_sub" => "Hızlı Menü ile ekran kenarı arasındaki boşluk (piksel)",
 
@@ -685,6 +687,8 @@ fn translate_en(key: &'static str) -> &'static str {
         "overlay_hotkey_record_btn" => "Set New Hotkey",
         "overlay_hotkey_recording" => "Press keys now... (ESC to cancel)",
         "overlay_hotkey_reset" => "Reset to Shift+F2",
+        "overlay_hotkey_unsupported" => "That key is not supported. Try another combination.",
+        "overlay_hotkey_needs_modifier" => "This key needs a modifier: hold Ctrl, Alt, Shift or Super.",
         "overlay_margin_title" => "Screen Edge Margin",
         "overlay_margin_sub" => "Distance between overlay and screen edge (pixels)",
 
@@ -1121,6 +1125,14 @@ fn translate_es(key: &'static str) -> &'static str {
         "overlay_status_inactive" => "Inactivo",
         "overlay_preview_title" => "Vista previa y funciones de la superposición",
         "overlay_preview_desc" => "Al pulsar Shift+F2 aparece un HUD flotante con efecto de vidrio sobre juegos y aplicaciones, para cambiar la energía y los ventiladores sin distracciones.",
+        "overlay_hotkey_group" => "ATAJO GLOBAL",
+        "overlay_hotkey_title" => "Atajo para mostrar/ocultar",
+        "overlay_hotkey_sub" => "Combinación de teclas para abrir o cerrar la superposición en cualquier lugar, incluso en juegos",
+        "overlay_hotkey_record_btn" => "Asignar nuevo atajo",
+        "overlay_hotkey_recording" => "Pulsa las teclas ahora... (ESC para cancelar)",
+        "overlay_hotkey_reset" => "Restablecer a Shift+F2",
+        "overlay_hotkey_unsupported" => "Esa tecla no es compatible. Prueba otra combinación.",
+        "overlay_hotkey_needs_modifier" => "Esta tecla necesita un modificador: mantén Ctrl, Alt, Shift o Super.",
 
         // Performance Page
         "system_profiles" => "Perfiles del sistema",

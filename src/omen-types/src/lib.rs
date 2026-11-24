@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use zbus::proxy;
 
+pub mod hotkey;
+
 /// Sampling availability is distinct from PCI runtime power state.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
