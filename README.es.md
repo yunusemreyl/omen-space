@@ -8,7 +8,7 @@
 
   <p>
     <a href="https://github.com/yunusemreyl/omen-space/releases/latest">
-      <img src="https://img.shields.io/badge/Versi%C3%B3n-v2.2.0-e11d48?style=flat-square" alt="Versión v2.2.0" />
+      <img src="https://img.shields.io/badge/Versi%C3%B3n-v2.4.0-e11d48?style=flat-square" alt="Versión v2.4.0" />
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/Licencia-GPL--3.0-10b981?style=flat-square" alt="Licencia" />
@@ -33,12 +33,12 @@
 
 | Módulo | Funciones principales |
 | :--- | :--- |
-| **Rendimiento y Refrigeración** | Perfiles térmicos `Eco`, `Balanced` y `Performance`; modos de ventilador `Auto`, `Max`, curvas personalizadas con preajustes guardados, delegación directa al **EC**, limpieza de polvo y protección térmica inteligente (`>= 90 °C` / `95 °C`). |
-| **Energía Avanzada** | Límites de potencia Intel RAPL `PL1` / `PL2`, límite térmico `TCC Offset`, undervolt por MSR (con detección de `UV_LOCK`), Dynamic Boost de GPU y ajustes para AMD Ryzen SMU. |
-| **Selector de Gráficos (MUX)** | Cambio entre **Hybrid (MSHybrid)**, **Discrete (dGPU)** y **Advanced Optimus** con estado de enrutamiento `eDP` y versión del controlador NVIDIA. |
-| **RGB Studio** | Iluminación RGB de 4 zonas, zona única (Victus), barra de luz frontal y teclado por tecla Darfon (`0d62:54bf`). |
-| **Superposición Rápida (`Shift+F2`, configurable)** | Panel flotante dentro del juego y applet de bandeja del sistema sincronizados en tiempo real. |
-| **Gestor de Perfiles y Actualizador** | Reglas automáticas por aplicación (Wayland y X11) y **Centro de Actualizaciones** integrado con seguimiento de commits, progreso en vivo y soporte para `fwupd` (LVFS). |
+| **Rendimiento y Refrigeración** | Perfiles térmicos `Eco`, `Balanced` y `Performance`; modos de ventilador `Auto`, `Max`, curvas independientes para CPU y GPU con preajustes guardados, delegación directa al **EC**, limpieza de polvo y protección térmica con rebote de 3 s (`>= 90 °C` / `95 °C`). |
+| **Energía Avanzada** | Límites de potencia Intel RAPL `PL1` / `PL2` (hasta 250 W / 300 W), límite térmico `TCC Offset`, undervolt por MSR (con detección de `UV_LOCK`), Dynamic Boost de GPU y ajustes para AMD Ryzen SMU. |
+| **Selector de Gráficos (MUX)** | Cambio entre **Hybrid (MSHybrid)**, **Discrete (dGPU)** y **Advanced Optimus** con estado de enrutamiento `eDP`, verificación de lectura y versión del controlador NVIDIA. |
+| **RGB Studio** | Iluminación RGB de 4 zonas, zona única (Victus), barra de luz frontal, Desktop RGB y teclado por tecla HID LampArray Darfon (`0d62:54bf` / `0d62:30bf`) con calibración física, selector de distribución EN/DE y animaciones de bajo consumo. |
+| **Superposición Rápida (`Shift+F2`, configurable)** | Panel flotante personalizable dentro del juego y applet de bandeja del sistema sincronizados en tiempo real. |
+| **Centro de Depuración y Actualizador** | Volcado completo del sistema con un clic para GitHub, reglas por aplicación (Wayland y X11) y **Centro de Actualizaciones** con soporte `systemd` / **OpenRC** y firma automática Secure Boot MOK. |
 
 ---
 
@@ -70,6 +70,15 @@ curl -sSL https://raw.githubusercontent.com/yunusemreyl/omen-space/main/install.
   <img src="images/updater.png" width="49%" alt="Centro de Actualizaciones" />
   <img src="images/diagnostic.png" width="49%" alt="Monitor del Sistema" />
 </p>
+
+---
+
+## Novedades en v2.4.0
+
+- **Atajo configurable para Quick HUD e inicio ~33% más rápido:** Cambia el atajo global en **Ajustes → Atajo Global** (por defecto `Shift+F2`, recarga en vivo) y carga diferida de pestañas secundarias para acelerar la apertura de la GUI.
+- **Curvas de ventilación independientes para CPU/GPU y protección térmica de 3 s:** Control separado mediante `fan1_target` / `fan2_target` y filtro de 3 muestras consecutivas por encima de 95 °C para evitar disparos por picos breves al arrancar.
+- **Mejoras en RGB Studio y LampArray:** Soporte HID LampArray para Darfon `0d62:30bf` (`8E9A` y corrección de segmentos de la barra de luz), calibración de lámparas físicas, selector EN/DE, animaciones sysfs eficientes y persistencia de colores Desktop RGB.
+- **Depuración, energía, OpenRC y Secure Boot:** URL de reporte en GitHub siempre dentro del límite, límites RAPL ampliados, soporte nativo **OpenRC**, firma Secure Boot MOK compatible con `.ko.xz`/`.ko.zst` y nuevas placas verificadas (**8E9A**, **8E9F**, **8D2D**, **8912**, **8DCF**).
 
 ---
 

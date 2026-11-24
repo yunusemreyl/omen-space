@@ -2,7 +2,7 @@
 
 pkgname=omen-space-git
 _pkgname=Omen-Space
-pkgver=2.2.0
+pkgver=2.4.0
 pkgrel=1
 pkgdesc="Advanced HP Omen/Victus laptop manager for Linux with RGB, Fan, and MUX control"
 arch=('x86_64')

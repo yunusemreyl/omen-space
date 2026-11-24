@@ -8,7 +8,7 @@
 
   <p>
     <a href="https://github.com/yunusemreyl/omen-space/releases/latest">
-      <img src="https://img.shields.io/badge/Release-v2.2.0-e11d48?style=flat-square" alt="Release v2.2.0" />
+      <img src="https://img.shields.io/badge/Release-v2.4.0-e11d48?style=flat-square" alt="Release v2.4.0" />
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/License-GPL--3.0-10b981?style=flat-square" alt="License" />
@@ -33,12 +33,12 @@
 
 | Module | Capabilities |
 | :--- | :--- |
-| **Performance & Cooling** | `Eco`, `Balanced`, and `Performance` BIOS thermal profiles; software-smart `Auto` cooling, `Max` fan mode, custom multi-point fan curves with saved presets, one-click **Delegate to EC**, fan dust-cleaning mode, and continuous `>= 90°C` / `95°C` thermal protection. |
-| **Advanced Power** | Real-time Intel RAPL `PL1` / `PL2` power limits (with boot-default tracking), `TCC Offset` temperature ceiling, MSR voltage offsets (with hardware `UV_LOCK` detection), GPU Dynamic Boost (`cTGP` / `PPAB`), and AMD Ryzen SMU tuning. |
-| **Graphics Switcher (MUX)** | Switch between **Hybrid (MSHybrid)**, **Discrete (dGPU)**, and **Advanced Optimus** modes with live `eDP` display routing and NVIDIA driver telemetry. |
-| **RGB Studio** | 4-Zone OMEN, Single-Zone Victus, chassis Lightbar, and Darfon Per-Key (`0d62:54bf`) RGB lighting with static, breathing, wave, and hardware MCU animations. |
-| **Quick HUD (`Shift+F2`, configurable)** | In-game floating overlay and system tray applet for switching power and fan profiles on the fly without leaving your workflow. |
-| **Profile Manager & Updater** | Automatic per-application performance rules (Wayland & X11) and an integrated **Update Center** with commit-level changelog tracking, live build progress, and `fwupd` (LVFS) firmware scanning. |
+| **Performance & Cooling** | `Eco`, `Balanced`, and `Performance` BIOS thermal profiles; software-smart `Auto` cooling, `Max` fan mode, independent CPU & GPU custom multi-point fan curves with saved presets, one-click **Delegate to EC**, fan dust-cleaning mode, and 3s-debounced `>= 90°C` / `95°C` thermal protection. |
+| **Advanced Power** | Real-time Intel RAPL `PL1` / `PL2` power limits (with boot-default tracking up to 250 W / 300 W), `TCC Offset` temperature ceiling, MSR voltage offsets (with hardware `UV_LOCK` detection), GPU Dynamic Boost (`cTGP` / `PPAB`), and AMD Ryzen SMU tuning. |
+| **Graphics Switcher (MUX)** | Switch between **Hybrid (MSHybrid)**, **Discrete (dGPU)**, and **Advanced Optimus** modes with live `eDP` display routing, readback verification, and NVIDIA driver telemetry. |
+| **RGB Studio** | 4-Zone OMEN, Single-Zone Victus, chassis Lightbar, Desktop RGB, and HID LampArray Per-Key RGB (Darfon `0d62:54bf` / `0d62:30bf`) with physical lamp calibration, EN/DE keyboard layout toggle, low-CPU sysfs animations, and hardware MCU effects. |
+| **Quick HUD (`Shift+F2`, configurable)** | Customizable in-game floating overlay and system tray applet for switching power and fan profiles on the fly without leaving your workflow. |
+| **Debug Center & Updater** | One-click **Full System Dump** for GitHub diagnostics, automatic per-application rules (Wayland & X11), and an integrated **Update Center** with commit tracking, live build progress, and `fwupd` (LVFS) scanning. |
 
 ---
 
@@ -117,21 +117,22 @@ sudo ./setup.sh uninstall   # Remove daemon, UI, and DKMS modules cleanly
 
 | Component | Role |
 | :--- | :--- |
-| **`omen-space-daemon`** | Root `systemd` service managing WMI, ACPI, sysfs, EC, MSR/RAPL, and HID devices over D-Bus (`org.hp.omen.*`). |
-| **`omen-gui`** | Native GTK4 + Libadwaita desktop application with scalable UI (`Ctrl+Shift+Plus` / `Minus`) and instant localization (**English**, **Türkçe**, **Español**). |
+| **`omen-space-daemon`** | Root service (`systemd` & native `OpenRC`) managing WMI, ACPI, sysfs, EC, MSR/RAPL, and HID devices over D-Bus (`org.hp.omen.*`). |
+| **`omen-gui`** | Native GTK4 + Libadwaita desktop application with lazy page startup, scalable UI (`Ctrl+Shift+Plus` / `Minus`), and instant localization (**English**, **Türkçe**, **Español**). |
 | **`omen-overlay`** | Lightweight Quick Access HUD (default `Shift+F2`, configurable in Settings) synchronized in real time with the daemon and main GUI. |
 | **`omen-tray`** | StatusNotifierItem system tray applet for quick profile switching and background hotkey handling. |
 | **`omen-cli`** | Scriptable command-line interface and interactive TUI (`omen-cli system info`, `omen-cli overlay toggle`, `omen-cli system check-update`). |
-| **`hp-omen-extra`** | Custom DKMS kernel driver package (`hp-wmi` + `hp-omen-extra`) exposing fan PWM, thermal profiles, GPU TGP/PPAB, and RGB zones. |
+| **`hp-omen-extra`** | Custom DKMS kernel driver package (`hp-wmi` + `hp-omen-extra`) with Secure Boot MOK auto-signing (`.ko.xz`/`.ko.zst`) exposing fan PWM, thermal profiles, GPU TGP/PPAB, and RGB zones. |
 
 ---
 
-## What's New in v2.2.0
+## What's New in v2.4.0
 
-- **Overhauled Update Center:** Commit-aware version tracking (`v2.2.0 • #sha`), automatic GitHub `main` & release comparison, inline step-by-step build progress with live log streaming, safe `pkexec` user toolchain resolution, and one-click app restart.
-- **Expanded Hardware & Board Support:** Verified and added thermal/WMI quirks for **8EEC** (HyperX OMEN 15-gb0xxx + `WMBA` 512-byte ACPI buffer fix), **8EDD** (HyperX OMEN 16-ap0xxx), **8C2D** (Victus 15-fa1xxx), **8D26** (OMEN 16-xd0xxx), **8A17** (OMEN 17t-ck100), **8BCD** (OMEN 16-wf0xxx), **8A43**, **88D1**, **8902**, and **8EEF**.
-- **Smarter Thermal Alerts & Notifications:** Continuous 3-second `>= 90°C` debounce filter eliminates false positives from brief boost spikes; user-session notifications replace in-place via `notify-send -p/-r` without stacking in GNOME Shell history.
-- **UI & Telemetry Refinements:** Fixed custom fan curve preset selection and live graph preview, added **Reset Default** button and theme-proof color swatches in RGB Studio, added live sync to the `Shift+F2` Quick Overlay, and improved `UV_LOCK` / Core Ultra HX detection in Advanced Power.
+- **Configurable Quick HUD Hotkey & Faster GUI Startup:** Rebind the global Quick HUD shortcut directly in **Settings → Global Hotkey** (default `Shift+F2`, physical evdev keycodes, live reload without daemon restart), and build secondary pages lazily on first click for **~33% faster GUI startup** (#384, #386).
+- **Independent CPU & GPU Custom Fan Curves + Thermal Protection Debounce:** Separate CPU and GPU fan curves are now persisted and applied independently via `fan1_target` / `fan2_target`; `>95°C` thermal protection requires 3 consecutive 1-second samples to eliminate false triggers on boot/turbo spikes (#371).
+- **RGB Studio & LampArray Upgrades:** Added HID LampArray support for Darfon `0d62:30bf` (`8E9A` + lightbar segment ordering fix), physical lamp calibration API, EN/DE keyboard layout toggle, low-CPU sysfs `cycle` animations, preserved Desktop RGB color slots across restarts, and kept active effects running when changing colors (#371, #376, #378, #379).
+- **Diagnostics, Power, OpenRC & Secure Boot Reliability:** Fixed Debug Center GitHub issue URL truncation (`414 URI Too Long`) while copying full dumps to clipboard, raised RAPL `PL1`/`PL2` ceilings for HX laptops, silenced masked `power-profiles-daemon` log spam, preserved kernel-compatible `.ko.xz` options and reused distro `shim-signed` MOK during Secure Boot signing, fixed `8D2F` AC power limit resets, and added native **OpenRC** support (#361, #364, #371, #380, #382).
+- **Expanded Verified Board Database:** Verified and added support for **8E9A** (HyperX OMEN MAX 16-ah1xxx), **8E9F** (OMEN MAX 16-ak0xxx), **8D2D** (OMEN 16-am0xxx), **8912** (OMEN 16-c0xxx), **8DCF** (Victus 15-fa2xxx), **8D42** (OMEN MAX 16-ah0xxx), and **88F4**.
 
 ---
 
@@ -141,6 +142,6 @@ Licensed under the **GPL-3.0 License**.
 
 - **[yunusemreyl](https://github.com/yunusemreyl)** — Lead Developer
 - **[tuxov](https://github.com/tuxov)** — Kernel Module Lead
-- Community contributors: [@aloshy0](https://github.com/aloshy0), [@henfiber](https://github.com/henfiber), [@adrianatencia](https://github.com/adrianatencia), [@CodesRahul96](https://github.com/CodesRahul96), [@xcellsior](https://github.com/xcellsior), [@TitoTFP](https://github.com/TitoTFP), [@SafSaf0999](https://github.com/SafSaf0999), [@yijean34-source](https://github.com/yijean34-source), [@ManOfDiamond](https://github.com/ManOfDiamond), [@ASPRNG-PRGMR](https://github.com/ASPRNG-PRGMR), [@WoofahRayetCode](https://github.com/WoofahRayetCode), and [@ktarxhun](https://github.com/ktarxhun).
+- Community contributors: [@aloshy0](https://github.com/aloshy0), [@henfiber](https://github.com/henfiber), [@adrianatencia](https://github.com/adrianatencia), [@CodesRahul96](https://github.com/CodesRahul96), [@xcellsior](https://github.com/xcellsior), [@TitoTFP](https://github.com/TitoTFP), [@SafSaf0999](https://github.com/SafSaf0999), [@yijean34-source](https://github.com/yijean34-source), [@ManOfDiamond](https://github.com/ManOfDiamond), [@ASPRNG-PRGMR](https://github.com/ASPRNG-PRGMR), [@WoofahRayetCode](https://github.com/WoofahRayetCode), [@ktarxhun](https://github.com/ktarxhun), [@Dmitriy-Romanov](https://github.com/Dmitriy-Romanov), [@Megh-Rana](https://github.com/Megh-Rana), [@GarsGeekGM](https://github.com/GarsGeekGM), [@ShyVortex](https://github.com/ShyVortex), [@CrosserGamer](https://github.com/CrosserGamer), [@rayyanekaputra](https://github.com/rayyanekaputra), [@darmovys](https://github.com/darmovys), and [@elsinoro](https://github.com/elsinoro).
 
 *Disclaimer: OMEN Space is an independent open-source project and is not affiliated with or endorsed by HP Inc.*
