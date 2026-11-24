@@ -17,6 +17,139 @@ pub fn build_page(
     on_lang_changed: Option<Rc<dyn Fn()>>,
     lb_group_opt: Option<adw::PreferencesGroup>,
     lb_preview_group_opt: Option<adw::PreferencesGroup>,
+    initial_tab: &str,
+) -> gtk::Box {
+    let root = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(16)
+        .build();
+
+    // ── Header + Segmented Pill Tabs ─────────────────────────
+    let hdr_row = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(12)
+        .margin_bottom(4)
+        .build();
+
+    let hdr_txt = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(4)
+        .hexpand(true)
+        .build();
+    hdr_txt.append(&gtk::Label::builder()
+        .label(i18n::t("title_settings"))
+        .css_classes(["page-title"])
+        .halign(gtk::Align::Start)
+        .build());
+    hdr_txt.append(&gtk::Label::builder()
+        .label(i18n::t("settings_desc"))
+        .css_classes(["os-section-desc"])
+        .halign(gtk::Align::Start)
+        .build());
+    hdr_row.append(&hdr_txt);
+
+    let pill = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(2)
+        .css_classes(["curve-pill"])
+        .valign(gtk::Align::Center)
+        .build();
+
+    let btn_general = gtk::ToggleButton::builder()
+        .label(i18n::t("settings_tab_general"))
+        .css_classes(["curve-pill-btn"])
+        .build();
+    let btn_updates = gtk::ToggleButton::builder()
+        .label(i18n::t("settings_tab_updates"))
+        .css_classes(["curve-pill-btn"])
+        .group(&btn_general)
+        .build();
+    let btn_debug = gtk::ToggleButton::builder()
+        .label(i18n::t("settings_tab_debug"))
+        .css_classes(["curve-pill-btn"])
+        .group(&btn_general)
+        .build();
+
+    pill.append(&btn_general);
+    pill.append(&btn_updates);
+    pill.append(&btn_debug);
+    hdr_row.append(&pill);
+    root.append(&hdr_row);
+
+    let sub_stack = gtk::Stack::builder()
+        .transition_type(gtk::StackTransitionType::Crossfade)
+        .hhomogeneous(false)
+        .vhomogeneous(false)
+        .build();
+
+    let general_page = build_general_page(window, on_lang_changed, lb_group_opt, lb_preview_group_opt);
+    let updates_container = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+    let debug_container = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+
+    sub_stack.add_named(&general_page, Some("general"));
+    sub_stack.add_named(&updates_container, Some("updates"));
+    sub_stack.add_named(&debug_container, Some("debug"));
+    root.append(&sub_stack);
+
+    let updates_built = Rc::new(std::cell::Cell::new(false));
+    let debug_built = Rc::new(std::cell::Cell::new(false));
+
+    {
+        let st = sub_stack.clone();
+        btn_general.connect_toggled(move |b| {
+            if b.is_active() {
+                st.set_visible_child_name("general");
+            }
+        });
+    }
+    {
+        let st = sub_stack.clone();
+        let cont = updates_container.clone();
+        let built = updates_built.clone();
+        let win_u = window.clone();
+        btn_updates.connect_toggled(move |b| {
+            if b.is_active() {
+                if !built.get() {
+                    cont.append(&crate::updater::build_embedded(&win_u));
+                    built.set(true);
+                }
+                st.set_visible_child_name("updates");
+            }
+        });
+    }
+    {
+        let st = sub_stack.clone();
+        let cont = debug_container.clone();
+        let built = debug_built.clone();
+        let win_d = window.clone();
+        btn_debug.connect_toggled(move |b| {
+            if b.is_active() {
+                if !built.get() {
+                    cont.append(&crate::debug_center::build_embedded(&win_d));
+                    built.set(true);
+                }
+                st.set_visible_child_name("debug");
+            }
+        });
+    }
+
+    match initial_tab {
+        "updates" => btn_updates.set_active(true),
+        "debug" => btn_debug.set_active(true),
+        _ => {
+            btn_general.set_active(true);
+            sub_stack.set_visible_child_name("general");
+        }
+    }
+
+    root
+}
+
+fn build_general_page(
+    window: &adw::ApplicationWindow,
+    on_lang_changed: Option<Rc<dyn Fn()>>,
+    lb_group_opt: Option<adw::PreferencesGroup>,
+    lb_preview_group_opt: Option<adw::PreferencesGroup>,
 ) -> gtk::Box {
     let mut init_hb = 30.0;
     let mut init_auto = true;
@@ -51,24 +184,6 @@ pub fn build_page(
         .orientation(gtk::Orientation::Vertical)
         .spacing(16)
         .build();
-
-    // ── Header ────────────────────────────────────────────────
-    let hdr = gtk::Box::builder()
-        .orientation(gtk::Orientation::Vertical)
-        .spacing(4)
-        .margin_bottom(4)
-        .build();
-    hdr.append(&gtk::Label::builder()
-        .label(i18n::t("title_settings"))
-        .css_classes(["page-title"])
-        .halign(gtk::Align::Start)
-        .build());
-    hdr.append(&gtk::Label::builder()
-        .label(i18n::t("settings_desc"))
-        .css_classes(["os-section-desc"])
-        .halign(gtk::Align::Start)
-        .build());
-    page.append(&hdr);
 
     // ── 1. Appearance & Language ──────────────────────────────
     let app_lang_group = adw::PreferencesGroup::builder()

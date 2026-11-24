@@ -216,7 +216,17 @@ pub fn open_full_dump_dialog(parent: &adw::ApplicationWindow, issue_title: &str)
 }
 
 /// Builds the comprehensive, unified Debug Center page.
+#[allow(dead_code)]
 pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
+    build_page_inner(window, false)
+}
+
+/// Builds Debug Center without duplicating the outer page title when embedded inside Settings.
+pub fn build_embedded(window: &adw::ApplicationWindow) -> gtk::Box {
+    build_page_inner(window, true)
+}
+
+fn build_page_inner(window: &adw::ApplicationWindow, embedded: bool) -> gtk::Box {
     let root_box = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(16)
@@ -234,13 +244,24 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
         .spacing(12)
         .build();
 
-    let title_label = gtk::Label::builder()
-        .label(i18n::t("title_debug"))
-        .css_classes(["page-title"])
-        .halign(gtk::Align::Start)
-        .hexpand(true)
-        .build();
-    header_row.append(&title_label);
+    if !embedded {
+        let title_label = gtk::Label::builder()
+            .label(i18n::t("title_debug"))
+            .css_classes(["page-title"])
+            .halign(gtk::Align::Start)
+            .hexpand(true)
+            .build();
+        header_row.append(&title_label);
+    } else {
+        let desc_inline = gtk::Label::builder()
+            .label(i18n::t("debug_desc"))
+            .css_classes(["os-section-desc"])
+            .halign(gtk::Align::Start)
+            .hexpand(true)
+            .wrap(true)
+            .build();
+        header_row.append(&desc_inline);
+    }
 
     // Daemon status pill matching Performance page
     let status_pill = gtk::Box::builder()
@@ -296,12 +317,14 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     header_row.append(&restart_btn);
     title_box.append(&header_row);
 
-    let desc_label = gtk::Label::builder()
-        .label(i18n::t("debug_desc"))
-        .css_classes(["os-section-desc"])
-        .halign(gtk::Align::Start)
-        .build();
-    title_box.append(&desc_label);
+    if !embedded {
+        let desc_label = gtk::Label::builder()
+            .label(i18n::t("debug_desc"))
+            .css_classes(["os-section-desc"])
+            .halign(gtk::Align::Start)
+            .build();
+        title_box.append(&desc_label);
+    }
     root_box.append(&title_box);
 
     // Listen to daemon status transitions to update badge

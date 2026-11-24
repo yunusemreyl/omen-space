@@ -342,6 +342,13 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
         render_ui(&win_clone, "settings");
     });
 
+    // Normalize legacy updater/debug target routes into Settings hub sub-tabs
+    let (target_page, initial_settings_tab): (&str, &'static str) = match initial_page {
+        "updater" => ("settings", "updates"),
+        "debug" => ("settings", "debug"),
+        other => (other, "general"),
+    };
+
     // Secondary pages are built lazily on first selection to cut GUI startup latency (#384).
     let make_lazy_container = || {
         gtk::Box::builder()
@@ -353,9 +360,7 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
             .build()
     };
     let page_app_profiles = make_lazy_container();
-    let page_updater = make_lazy_container();
     let page_settings = make_lazy_container();
-    let page_debug = make_lazy_container();
 
     type LazyPageEntry = (gtk::Box, Box<dyn FnOnce() -> gtk::Widget>);
     let lazy_pages: Rc<RefCell<HashMap<&'static str, LazyPageEntry>>> =
@@ -368,17 +373,15 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
             (
                 page_settings.clone(),
                 Box::new(move || {
-                    settings::build_page(&win_s, Some(on_lang_changed), lb_group_opt, lb_preview_group_opt)
-                        .upcast()
+                    settings::build_page(
+                        &win_s,
+                        Some(on_lang_changed),
+                        lb_group_opt,
+                        lb_preview_group_opt,
+                        initial_settings_tab,
+                    )
+                    .upcast()
                 }),
-            ),
-        );
-        let win_u = window.clone();
-        map.insert(
-            "updater",
-            (
-                page_updater.clone(),
-                Box::new(move || updater::build_page(&win_u).upcast()),
             ),
         );
         let win_a = window.clone();
@@ -389,14 +392,6 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
                 Box::new(move || appprofiles::build_page(&win_a).upcast()),
             ),
         );
-        let win_d = window.clone();
-        map.insert(
-            "debug",
-            (
-                page_debug.clone(),
-                Box::new(move || debug_center::build_page(&win_d).upcast()),
-            ),
-        );
     }
 
     stack.add_named(&gen_box, Some("performance"));
@@ -405,9 +400,7 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
     stack.add_named(&mon_content, Some("monitoring"));
     stack.add_named(&page_rgb, Some("rgb"));
     stack.add_named(&page_app_profiles, Some("appprof"));
-    stack.add_named(&page_updater, Some("updater"));
     stack.add_named(&page_settings, Some("settings"));
-    stack.add_named(&page_debug, Some("debug"));
 
     let ensure_page: Rc<dyn Fn(&str)> = {
         let stack_c = stack.clone();
@@ -422,7 +415,7 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
         })
     };
 
-    ensure_page(initial_page);
+    ensure_page(target_page);
 
     let toggle_sidebar_btn = gtk::ToggleButton::builder()
         .icon_name("sidebar-show-symbolic")
@@ -451,7 +444,6 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
         ("omen-monitor-symbolic", i18n::t("nav_monitoring"), "monitoring"),
         ("omen-lighting-symbolic", i18n::t("nav_lighting"), "rgb"),
         ("omen-profiles-symbolic", i18n::t("nav_app_profiles"), "appprof"),
-        ("omen-updater-symbolic", i18n::t("nav_updater"), "updater"),
     ];
 
     let mut sidebar_labels = Vec::new();
@@ -509,38 +501,13 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
     settings_row.set_widget_name("settings");
     bottom_list.append(&settings_row);
 
-    let debug_row = gtk::ListBoxRow::builder().name("debug").build();
-    let d_box = gtk::Box::builder()
-        .orientation(gtk::Orientation::Horizontal)
-        .spacing(0)
-        .margin_start(12)
-        .margin_end(12)
-        .margin_top(11)
-        .margin_bottom(11)
-        .build();
-    d_box.append(&gtk::Image::builder().icon_name("applications-engineering-symbolic").pixel_size(18).build());
-    let debug_label = gtk::Label::builder().label(i18n::t("nav_debug")).margin_start(12).build();
-    let d_revealer = gtk::Revealer::builder()
-        .transition_type(gtk::RevealerTransitionType::SlideRight)
-        .reveal_child(true)
-        .transition_duration(250)
-        .child(&debug_label)
-        .build();
-    sidebar_labels.push(d_revealer.clone());
-    d_box.append(&d_revealer);
-    debug_row.set_child(Some(&d_box));
-    debug_row.set_widget_name("debug");
-    bottom_list.append(&debug_row);
-
-    if initial_page == "settings" {
+    if target_page == "settings" {
         bottom_list.select_row(Some(&settings_row));
-    } else if initial_page == "debug" {
-        bottom_list.select_row(Some(&debug_row));
     } else {
         let mut selected = false;
         let mut idx = 0;
         while let Some(row) = sidebar_list.row_at_index(idx) {
-            if row.widget_name().as_str() == initial_page {
+            if row.widget_name().as_str() == target_page {
                 sidebar_list.select_row(Some(&row));
                 selected = true;
                 break;

@@ -290,29 +290,47 @@ async fn check_github_updates_async() -> RemoteUpdateCheck {
     }
 }
 
+#[allow(dead_code)]
 pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
+    build_page_inner(window, false)
+}
+
+pub fn build_embedded(window: &adw::ApplicationWindow) -> gtk::Box {
+    build_page_inner(window, true)
+}
+
+fn build_page_inner(window: &adw::ApplicationWindow, embedded: bool) -> gtk::Box {
     let page = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(16)
         .build();
 
-    let hdr = gtk::Box::builder()
-        .orientation(gtk::Orientation::Vertical)
-        .spacing(4)
-        .margin_bottom(4)
-        .build();
-    hdr.append(&gtk::Label::builder()
-        .label(i18n::t("title_updater"))
-        .css_classes(["page-title"])
-        .halign(gtk::Align::Start)
-        .build());
-    hdr.append(&gtk::Label::builder()
-        .label(i18n::t("updater_desc"))
-        .css_classes(["os-section-desc"])
-        .halign(gtk::Align::Start)
-        .wrap(true)
-        .build());
-    page.append(&hdr);
+    if !embedded {
+        let hdr = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(4)
+            .margin_bottom(4)
+            .build();
+        hdr.append(&gtk::Label::builder()
+            .label(i18n::t("title_updater"))
+            .css_classes(["page-title"])
+            .halign(gtk::Align::Start)
+            .build());
+        hdr.append(&gtk::Label::builder()
+            .label(i18n::t("updater_desc"))
+            .css_classes(["os-section-desc"])
+            .halign(gtk::Align::Start)
+            .wrap(true)
+            .build());
+        page.append(&hdr);
+    } else {
+        page.append(&gtk::Label::builder()
+            .label(i18n::t("updater_desc"))
+            .css_classes(["os-section-desc"])
+            .halign(gtk::Align::Start)
+            .wrap(true)
+            .build());
+    }
 
     let content_box = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
