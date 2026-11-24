@@ -93,6 +93,7 @@ fn spawn_gui() {
 /// Serialises overlay toggles so a tray-menu click and a hotkey signal that arrive
 /// together cannot both decide "not running" and start two HUDs.
 static OVERLAY_TOGGLE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static LAST_OVERLAY_TOGGLE: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
 
 /// Toggle the quick HUD: close it if a live one exists, otherwise start it.
 ///
@@ -102,6 +103,14 @@ static OVERLAY_TOGGLE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// the HUD.
 fn spawn_overlay() {
     let _guard = OVERLAY_TOGGLE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    {
+        let mut last = LAST_OVERLAY_TOGGLE.lock().unwrap_or_else(|e| e.into_inner());
+        let now = std::time::Instant::now();
+        if last.is_some_and(|prev| now.duration_since(prev) < std::time::Duration::from_millis(250)) {
+            return;
+        }
+        *last = Some(now);
+    }
     omen_types::repair_graphical_session_env();
 
     // SAFETY: getuid() has no preconditions and cannot fail.

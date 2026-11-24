@@ -298,8 +298,69 @@ pub trait AppProfiles {
 // ── Graphical Session Environment Auto-Repair ─────────────────────────────────
 
 #[cfg(unix)]
+fn connect_unix_nonblocking(path: &std::path::Path) -> std::result::Result<libc::c_int, libc::c_int> {
+    use std::os::unix::ffi::OsStrExt;
+    let bytes = path.as_os_str().as_bytes();
+    if bytes.is_empty() || bytes.contains(&0) {
+        return Err(libc::EINVAL);
+    }
+
+    // SAFETY: sockaddr_un is POD and zero-initialized below.
+    let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    if bytes.len() >= addr.sun_path.len() {
+        return Err(libc::ENAMETOOLONG);
+    }
+    addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
+    for (dst, &b) in addr.sun_path.iter_mut().zip(bytes.iter()) {
+        *dst = b as libc::c_char;
+    }
+
+    // SAFETY: AF_UNIX non-blocking stream socket closed on every error path.
+    let fd = unsafe {
+        libc::socket(
+            libc::AF_UNIX,
+            libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
+            0,
+        )
+    };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error().raw_os_error().unwrap_or(libc::EINVAL));
+    }
+
+    let addr_len = (std::mem::offset_of!(libc::sockaddr_un, sun_path) + bytes.len() + 1) as libc::socklen_t;
+    let rc = unsafe {
+        libc::connect(
+            fd,
+            (&addr as *const libc::sockaddr_un).cast::<libc::sockaddr>(),
+            addr_len,
+        )
+    };
+    if rc == 0 {
+        Ok(fd)
+    } else {
+        let err = std::io::Error::last_os_error().raw_os_error().unwrap_or(libc::ECONNREFUSED);
+        unsafe {
+            libc::close(fd);
+        }
+        Err(err)
+    }
+}
+
+/// Non-blocking AF_UNIX liveness probe.
+/// Must NEVER use blocking `UnixStream::connect`: when a compositor socket (e.g. KWin's
+/// `/tmp/.X11-unix/X1` opened with `listen(backlog = 1)`) has a full accept queue,
+/// a blocking connect sleeps forever in kernel `unix_wait_for_peer`.
+#[cfg(unix)]
 fn is_unix_socket_alive(path: &std::path::Path) -> bool {
-    std::os::unix::net::UnixStream::connect(path).is_ok()
+    match connect_unix_nonblocking(path) {
+        Ok(fd) => {
+            unsafe {
+                libc::close(fd);
+            }
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 /// Repairs `XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS`, `WAYLAND_DISPLAY`,
@@ -451,30 +512,34 @@ pub fn repair_graphical_session_env() {
         });
 
         if !current_display_ok {
-            let mut x_candidates: Vec<(std::time::SystemTime, String, PathBuf)> = Vec::new();
+            let mut x_candidates: Vec<(u32, String, PathBuf)> = Vec::new();
             if let Ok(entries) = std::fs::read_dir("/tmp/.X11-unix") {
                 for entry in entries.flatten() {
                     let name = entry.file_name().to_string_lossy().to_string();
                     if let Some(num) = name.strip_prefix('X')
                         && !num.is_empty()
                         && num.chars().all(|c| c.is_ascii_digit())
+                        && let Ok(num_val) = num.parse::<u32>()
                     {
-                        let path = entry.path();
-                        let mtime = entry
-                            .metadata()
-                            .and_then(|m| m.modified())
-                            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                        x_candidates.push((mtime, format!(":{}", num), path));
+                        x_candidates.push((num_val, format!(":{}", num), entry.path()));
                     }
                 }
             }
-            x_candidates.sort_by_key(|a| std::cmp::Reverse(a.0));
-            for (_mtime, disp, path) in x_candidates {
+            // Prefer the primary lowest-numbered X display (:0) over secondary displays (:1).
+            x_candidates.sort_by_key(|a| a.0);
+            let mut found_x11 = false;
+            for (_num, disp, path) in x_candidates {
                 if is_unix_socket_alive(&path) {
                     unsafe {
                         std::env::set_var("DISPLAY", disp);
                     }
+                    found_x11 = true;
                     break;
+                }
+            }
+            if !found_x11 {
+                unsafe {
+                    std::env::remove_var("DISPLAY");
                 }
             }
         }
@@ -520,5 +585,73 @@ mod github_response_tests {
         assert!(parse_commit_metadata(r#"{"sha":"6a5adaed55a6f74b14a489ec31d355727ac45c22"}"#).is_ok());
         assert_eq!(parse_comparison_ahead(r#"{"status":"identical","ahead_by":0}"#).unwrap(),0);
         assert_eq!(parse_comparison_ahead(r#"{"status":"ahead","ahead_by":2}"#).unwrap(),2);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod unix_socket_probe_tests {
+    use super::*;
+    use std::os::unix::ffi::OsStrExt;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn nonblocking_socket_probe_never_hangs_on_full_backlog() {
+        let sock_path = std::env::temp_dir().join(format!(
+            "omen-types-sock-probe-{}-{}.sock",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_file(&sock_path);
+
+        let srv_fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) };
+        assert!(srv_fd >= 0);
+
+        let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+        let bytes = sock_path.as_os_str().as_bytes();
+        assert!(bytes.len() < addr.sun_path.len());
+        addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
+        for (dst, &b) in addr.sun_path.iter_mut().zip(bytes.iter()) {
+            *dst = b as libc::c_char;
+        }
+        let addr_len = (std::mem::offset_of!(libc::sockaddr_un, sun_path) + bytes.len() + 1) as libc::socklen_t;
+
+        let bound = unsafe { libc::bind(srv_fd, (&addr as *const libc::sockaddr_un).cast(), addr_len) };
+        assert_eq!(bound, 0, "bind failed: {}", std::io::Error::last_os_error());
+        assert_eq!(unsafe { libc::listen(srv_fd, 1) }, 0);
+
+        // Fresh socket with room in accept queue reports alive quickly.
+        assert!(is_unix_socket_alive(&sock_path));
+
+        // Fill listen(1) backlog without calling accept(), reproducing KWin's stuck X1 socket.
+        let mut clients = Vec::new();
+        for _ in 0..16 {
+            match connect_unix_nonblocking(&sock_path) {
+                Ok(fd) => clients.push(fd),
+                Err(_) => break,
+            }
+        }
+        assert!(!clients.is_empty(), "expected at least one client in backlog");
+
+        // Probe on full backlog must return false immediately instead of hanging in unix_wait_for_peer.
+        let t0 = Instant::now();
+        let alive = is_unix_socket_alive(&sock_path);
+        let elapsed = t0.elapsed();
+        assert!(elapsed < Duration::from_millis(200), "probe took too long: {elapsed:?}");
+        assert!(!alive, "full backlog should return false immediately");
+
+        for fd in clients {
+            unsafe {
+                libc::close(fd);
+            }
+        }
+        unsafe {
+            libc::close(srv_fd);
+        }
+        let _ = std::fs::remove_file(&sock_path);
+
+        assert!(!is_unix_socket_alive(std::path::Path::new("/tmp/omen-nonexistent-sock-99999")));
     }
 }

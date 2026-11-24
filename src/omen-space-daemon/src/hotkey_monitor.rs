@@ -223,9 +223,12 @@ impl HotkeyMonitor {
             }
 
             let mut join_set = tokio::task::JoinSet::new();
+            let last_overlay_emit: Arc<std::sync::Mutex<Option<Instant>>> =
+                Arc::new(std::sync::Mutex::new(None));
             for path in matching_devices {
                 let conn = connection.clone();
                 let binding = binding.clone();
+                let last_overlay_emit = last_overlay_emit.clone();
                 join_set.spawn(async move {
                     let Ok(file) = std::fs::OpenOptions::new()
                         .read(true)
@@ -272,6 +275,22 @@ impl HotkeyMonitor {
                                                 .map(|b| b.clone())
                                                 .unwrap_or_default();
                                             if let Some(name) = resolve_hotkey(key_code, &mods, &spec) {
+                                                if name == "overlay" {
+                                                    let now = Instant::now();
+                                                    let debounced = if let Ok(mut guard) = last_overlay_emit.lock() {
+                                                        if guard.is_some_and(|prev| now.duration_since(prev) < Duration::from_millis(250)) {
+                                                            true
+                                                        } else {
+                                                            *guard = Some(now);
+                                                            false
+                                                        }
+                                                    } else {
+                                                        false
+                                                    };
+                                                    if debounced {
+                                                        continue;
+                                                    }
+                                                }
                                                 info!("HotkeyMonitor: Detected Hotkey / Macro Key: {}", name);
                                                 let _ = conn.emit_signal(
                                                     None::<&str>,
@@ -303,8 +322,6 @@ impl HotkeyMonitor {
 
             let _ = join_set.join_next().await;
             join_set.abort_all();
-            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-
             tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
         }
     }
