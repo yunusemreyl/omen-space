@@ -175,7 +175,7 @@ fn translate_tr(key: &'static str) -> &'static str {
         "app_title" => "OmenSpace",
         "menu" => "Menü",
         "nav_performance" => "Performans",
-        "nav_undervolt" => "Gelişmiş Güç",
+        "nav_undervolt" => "Güç ve Pil",
         "nav_mux" => "Grafik Denetimi",
         "nav_monitoring" => "Sistem İzleyici",
         "nav_lighting" => "RGB Studio",
@@ -187,7 +187,7 @@ fn translate_tr(key: &'static str) -> &'static str {
 
         // Titles
         "title_performance" => "Performans",
-        "title_undervolt" => "Gelişmiş Güç",
+        "title_undervolt" => "Güç ve Pil",
         "title_mux" => "Grafik Denetimi",
         "title_monitoring" => "Sistem İzleyici",
         "title_lighting" => "RGB Studio",
@@ -304,7 +304,7 @@ fn translate_tr(key: &'static str) -> &'static str {
         "throttle_warning" => "TERMAL KISITLAMA",
 
         // Undervolt Page
-        "uv_desc" => "Gelişmiş termal yönetim için çekirdek voltajlarını ve güç sınırlarını ayarlayın. Lütfen dikkatli kullanın.",
+        "uv_desc" => "Pil şarj sınırını yönetin, işlemci voltaj ofsetlerini ve güç limitlerini yapılandırın.",
         "uv_lock_title" => "Intel Undervolt Koruması (UV_LOCK)",
         "uv_lock_desc" => "Sisteminiz yetkisiz MSR yazmalarını engelleyen Intel Undervolt koruması altında olabilir. \
                            Undervolt ofsetlerinin geçerli olabilmesi için BIOS üzerinden (gelişmiş menü varsa) veya OMEN Gaming Hub yüklüyse OGH üzerinden UV korumasının kaldırılması/undervolt izninin açık olması gerekebilir.",
@@ -731,7 +731,7 @@ fn translate_en(key: &'static str) -> &'static str {
         "app_title" => "OmenSpace",
         "menu" => "Menu",
         "nav_performance" => "Performance",
-        "nav_undervolt" => "Advanced Power",
+        "nav_undervolt" => "Power & Battery",
         "nav_mux" => "Graphics Switcher",
         "nav_monitoring" => "System Monitor",
         "nav_lighting" => "RGB Studio",
@@ -743,7 +743,7 @@ fn translate_en(key: &'static str) -> &'static str {
 
         // Titles
         "title_performance" => "Performance",
-        "title_undervolt" => "Advanced Power",
+        "title_undervolt" => "Power & Battery",
         "title_mux" => "Graphics Switcher",
         "title_monitoring" => "System Monitor",
         "title_lighting" => "RGB Studio",
@@ -860,7 +860,7 @@ fn translate_en(key: &'static str) -> &'static str {
         "throttle_warning" => "THROTTLE",
 
         // Undervolt Page
-        "uv_desc" => "Adjust core voltages and power limits for advanced thermal management. Please use with caution.",
+        "uv_desc" => "Manage battery charge limits alongside CPU voltage offsets and power limits.",
         "uv_lock_title" => "Intel Undervolt Protection (UV_LOCK)",
         "uv_lock_desc" => "Your system may be under Intel Undervolt Protection blocking unauthorized MSR writes. \
                            For undervolt offsets to apply, UV protection must be disabled or undervolting must be enabled via BIOS (if advanced menus are available) or OMEN Gaming Hub.",
@@ -1290,7 +1290,7 @@ fn translate_es(key: &'static str) -> &'static str {
         "app_title" => "OmenSpace",
         "menu" => "Menú",
         "nav_performance" => "Rendimiento",
-        "nav_undervolt" => "Energía avanzada",
+        "nav_undervolt" => "Energía y Batería",
         "nav_mux" => "Selector de gráficos",
         "nav_monitoring" => "Monitor del sistema",
         "nav_lighting" => "RGB Studio",
@@ -1302,7 +1302,7 @@ fn translate_es(key: &'static str) -> &'static str {
 
         // Titles
         "title_performance" => "Rendimiento",
-        "title_undervolt" => "Energía avanzada",
+        "title_undervolt" => "Energía y Batería",
         "title_mux" => "Selector de gráficos",
         "title_monitoring" => "Monitor del sistema",
         "title_lighting" => "RGB Studio",
@@ -1404,7 +1404,7 @@ fn translate_es(key: &'static str) -> &'static str {
         "throttle_warning" => "LIMITADO",
 
         // Undervolt Page
-        "uv_desc" => "Ajusta los voltajes del núcleo y los límites de potencia para una gestión térmica avanzada. Úsalo con precaución.",
+        "uv_desc" => "Gestiona los límites de carga de la batería junto con los voltajes y límites de potencia de la CPU.",
         "uv_lock_title" => "Protección contra undervolt de Intel (UV_LOCK)",
         "uv_lock_desc" => "Es posible que tu sistema tenga activa la protección contra undervolt de Intel, que bloquea las escrituras MSR no autorizadas. \
                            Para que se apliquen los desfases de undervolt, debes desactivar la protección UV o habilitar el undervolt desde la BIOS (si hay menús avanzados) o desde OMEN Gaming Hub.",

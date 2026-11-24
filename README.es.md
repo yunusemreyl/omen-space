@@ -8,7 +8,7 @@
 
   <p>
     <a href="https://github.com/yunusemreyl/omen-space/releases/latest">
-      <img src="https://img.shields.io/badge/Versi%C3%B3n-v2.4.1-e11d48?style=flat-square" alt="Versión v2.4.1" />
+      <img src="https://img.shields.io/badge/Versi%C3%B3n-v2.4.2-e11d48?style=flat-square" alt="Versión v2.4.2" />
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/Licencia-GPL--3.0-10b981?style=flat-square" alt="Licencia" />
@@ -73,13 +73,13 @@ curl -sSL https://raw.githubusercontent.com/yunusemreyl/omen-space/main/install.
 
 ---
 
-## Novedades en v2.4.1
+## Novedades en v2.4.2
 
-- **Consistencia visual, localización completa y ajuste de Quick HUD:** Tokens CSS y estilos de insignias unificados con cifras tabulares para telemetría, márgenes `adw::Clamp` y encabezados coherentes en las 9 páginas (incluidos Actualizador y Centro de Depuración), traducción completa ES/EN/TR y estilo oscuro unificado para Quick HUD.
-- **Atajo configurable para Quick HUD e inicio ~33% más rápido (v2.4.0):** Cambia el atajo global en **Ajustes → Atajo Global** (por defecto `Shift+F2`, recarga en vivo) y carga diferida de pestañas secundarias para acelerar la apertura de la GUI.
-- **Curvas de ventilación independientes para CPU/GPU y protección térmica de 3 s:** Control separado mediante `fan1_target` / `fan2_target` y filtro de 3 muestras consecutivas por encima de 95 °C para evitar disparos por picos breves al arrancar.
-- **Mejoras en RGB Studio y LampArray:** Soporte HID LampArray para Darfon `0d62:30bf` (`8E9A` y corrección de segmentos de la barra de luz), calibración de lámparas físicas, selector EN/DE, animaciones sysfs eficientes y persistencia de colores Desktop RGB.
-- **Depuración, energía, OpenRC y Secure Boot:** URL de reporte en GitHub siempre dentro del límite, límites RAPL ampliados, soporte nativo **OpenRC**, firma Secure Boot MOK compatible con `.ko.xz`/`.ko.zst` y nuevas placas verificadas (**8E9A**, **8E9F**, **8D2D**, **8912**, **8DCF**).
+- **Selector GPU MUX según hardware y Advanced Optimus en Linux:** Expone las capacidades reales de MUX de la BIOS en `/sys/devices/platform/hp-wmi/gpu_mux_supported_modes`, oculta Advanced Optimus en equipos no compatibles tanto en la GUI como en la bandeja del sistema, muestra el estado pasivo D3cold de la dGPU y las salidas conectadas, y añade una guía con botón de copia rápida para **Steam / PRIME Offload**.
+- **Limitador de carga de batería (`0x2B` GBCC/SBCC) en Energía y Batería:** Añade control por kernel `hp-wmi` (`battery_charge_mode`) y daemon con histéresis (`stop`/`start`, modo `hold` al apagar y carga completa puntual) ubicado en la parte superior de la página **Energía y Batería**.
+- **Corrección de Shift+F2 / Quick Overlay en Wayland/X11:** Convierte la comprobación de sockets Unix a `SOCK_NONBLOCK | SOCK_CLOEXEC` para eliminar bloqueos en `/tmp/.X11-unix/X1` bajo KDE Wayland, prioriza `:0` y añade antirrebote de 250 ms al atajo.
+- **Controlador RGB por tecla Primax `0xFF13`:** Soporte HID McuSDK2 para teclados Primax por tecla (`0461:4F03`, `4E9A`, `4E9B`, `4F11`, `4F1E`, `4ECB`, #385).
+- **Resumen v2.4.1 / v2.4.0:** Consistencia visual GTK4/Libadwaita, localización ES/EN/TR completa, atajo configurable e inicio ~33% más rápido (#384, #386), curvas de ventilación independientes (#371), LampArray `0d62:30bf` y soporte nativo OpenRC (#364).
 
 ---
 
