@@ -8,7 +8,7 @@
 
   <p>
     <a href="https://github.com/yunusemreyl/omen-space/releases/latest">
-      <img src="https://img.shields.io/badge/Release-v2.4.0-e11d48?style=flat-square" alt="Release v2.4.0" />
+      <img src="https://img.shields.io/badge/Release-v2.4.1-e11d48?style=flat-square" alt="Release v2.4.1" />
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/License-GPL--3.0-10b981?style=flat-square" alt="License" />
@@ -126,9 +126,10 @@ sudo ./setup.sh uninstall   # Remove daemon, UI, and DKMS modules cleanly
 
 ---
 
-## What's New in v2.4.0
+## What's New in v2.4.1
 
-- **Configurable Quick HUD Hotkey & Faster GUI Startup:** Rebind the global Quick HUD shortcut directly in **Settings → Global Hotkey** (default `Shift+F2`, physical evdev keycodes, live reload without daemon restart), and build secondary pages lazily on first click for **~33% faster GUI startup** (#384, #386).
+- **UI Consistency, Localization & Quick HUD Polish:** Unified CSS design tokens, card/badge styles, and tabular telemetry numerals across the GUI, standardized `adw::Clamp` layouts and headers across all 9 pages (including Updater and Debug Center), completed TR/EN/ES localization for Debug Center and Keyboard RGB controls, and aligned the Quick HUD overlay with the clean dark slate theme.
+- **Configurable Quick HUD Hotkey & Faster GUI Startup (v2.4.0):** Rebind the global Quick HUD shortcut directly in **Settings → Global Hotkey** (default `Shift+F2`, physical evdev keycodes, live reload without daemon restart), and build secondary pages lazily on first click for **~33% faster GUI startup** (#384, #386).
 - **Independent CPU & GPU Custom Fan Curves + Thermal Protection Debounce:** Separate CPU and GPU fan curves are now persisted and applied independently via `fan1_target` / `fan2_target`; `>95°C` thermal protection requires 3 consecutive 1-second samples to eliminate false triggers on boot/turbo spikes (#371).
 - **RGB Studio & LampArray Upgrades:** Added HID LampArray support for Darfon `0d62:30bf` (`8E9A` + lightbar segment ordering fix), physical lamp calibration API, EN/DE keyboard layout toggle, low-CPU sysfs `cycle` animations, preserved Desktop RGB color slots across restarts, and kept active effects running when changing colors (#371, #376, #378, #379).
 - **Diagnostics, Power, OpenRC & Secure Boot Reliability:** Fixed Debug Center GitHub issue URL truncation (`414 URI Too Long`) while copying full dumps to clipboard, raised RAPL `PL1`/`PL2` ceilings for HX laptops, silenced masked `power-profiles-daemon` log spam, preserved kernel-compatible `.ko.xz` options and reused distro `shim-signed` MOK during Secure Boot signing, fixed `8D2F` AC power limit resets, and added native **OpenRC** support (#361, #364, #371, #380, #382).
