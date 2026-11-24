@@ -51,7 +51,7 @@ pub fn build_page(
 
     let page = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
-        .spacing(20)
+        .spacing(16)
         .build();
 
     // ── Header ────────────────────────────────────────────────

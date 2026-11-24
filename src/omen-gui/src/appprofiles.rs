@@ -18,7 +18,7 @@ struct AppProfile {
 pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     let page = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
-        .spacing(20)
+        .spacing(16)
         .build();
 
     // Header

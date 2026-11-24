@@ -219,14 +219,14 @@ pub fn open_full_dump_dialog(parent: &adw::ApplicationWindow, issue_title: &str)
 pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     let root_box = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
-        .spacing(12)
+        .spacing(16)
         .build();
 
     // ── Header Title & Subtitle ──────────────────────────────────────────────
     let title_box = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(4)
-        .margin_bottom(8)
+        .margin_bottom(4)
         .build();
 
     let header_row = gtk::Box::builder()
@@ -242,25 +242,36 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
         .build();
     header_row.append(&title_label);
 
-    // Daemon status pill badge
-    let status_pill = gtk::Button::builder()
-        .label("Daemon: Connecting...")
-        .css_classes(["flat", "suggested-action"])
+    // Daemon status pill matching Performance page
+    let status_pill = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(7)
+        .css_classes(["daemon-pill"])
         .valign(gtk::Align::Center)
         .build();
+    let daemon_dot = gtk::Label::builder()
+        .label("●")
+        .css_classes(["daemon-dot-off"])
+        .build();
+    let daemon_text = gtk::Label::builder()
+        .label(i18n::t("debug_daemon_connecting"))
+        .css_classes(["daemon-pill-text"])
+        .build();
+    status_pill.append(&daemon_dot);
+    status_pill.append(&daemon_text);
     header_row.append(&status_pill);
 
     // Restart daemon button (systemd + OpenRC compatible, #361)
     let restart_tooltip = if is_systemd_running() {
-        "Restart Daemon (pkexec systemctl restart omen-space-daemon)"
+        format!("{} (pkexec systemctl restart omen-space-daemon)", i18n::t("debug_restart_daemon"))
     } else if is_openrc_running() {
-        "Restart Daemon (pkexec rc-service omen-space-daemon restart)"
+        format!("{} (pkexec rc-service omen-space-daemon restart)", i18n::t("debug_restart_daemon"))
     } else {
-        "Restart Daemon"
+        i18n::t("debug_restart_daemon").to_string()
     };
     let restart_btn = gtk::Button::builder()
         .icon_name("system-reboot-symbolic")
-        .tooltip_text(restart_tooltip)
+        .tooltip_text(&restart_tooltip)
         .valign(gtk::Align::Center)
         .build();
     let win_c_restart = window.clone();
@@ -274,10 +285,10 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
             };
             match res {
                 Ok(output) if output.status.success() => {
-                    show_toast(&win_clone, "omen-space-daemon restarted successfully");
+                    show_toast(&win_clone, i18n::t("debug_restart_ok"));
                 }
                 _ => {
-                    show_toast(&win_clone, "Failed to restart daemon (auth cancelled or service error)");
+                    show_toast(&win_clone, i18n::t("debug_restart_err"));
                 }
             }
         });
@@ -294,21 +305,23 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     root_box.append(&title_box);
 
     // Listen to daemon status transitions to update badge
-    let status_pill_c = status_pill.clone();
+    let daemon_dot_c = daemon_dot.clone();
+    let daemon_text_c = daemon_text.clone();
     daemon_client::subscribe_daemon_status(move |status| {
         match status {
             DaemonStatus::Online => {
-                status_pill_c.set_label("Daemon: Online");
-                status_pill_c.set_css_classes(&["flat", "success"]);
+                daemon_dot_c.remove_css_class("daemon-dot-off");
+                daemon_dot_c.add_css_class("daemon-dot-on");
+                daemon_text_c.set_label(i18n::t("debug_daemon_online"));
             }
             DaemonStatus::Offline => {
-                status_pill_c.set_label("Daemon: Offline");
-                status_pill_c.set_css_classes(&["flat", "destructive-action"]);
+                daemon_dot_c.remove_css_class("daemon-dot-on");
+                daemon_dot_c.add_css_class("daemon-dot-off");
+                daemon_text_c.set_label(i18n::t("debug_daemon_offline"));
             }
         }
     });
 
-    let prefs_page = adw::PreferencesPage::builder().build();
     let specs = daemon_client::get_hardware_specs_sync();
     let board_id = std::fs::read_to_string("/sys/class/dmi/id/board_name")
         .unwrap_or_default()
@@ -355,24 +368,24 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
 
     dump_row.add_suffix(&dump_btn);
     dump_group.add(&dump_row);
-    prefs_page.add(&dump_group);
+    root_box.append(&dump_group);
 
     // ─────────────────────────────────────────────────────────────────────────
     // 2. Hardware & Driver Status Group
     // ─────────────────────────────────────────────────────────────────────────
     let hw_group = adw::PreferencesGroup::builder()
-        .title("Hardware &amp; Driver Environment")
-        .description("Detected system identity, ACPI WMI tables, and kernel module bindings")
+        .title(i18n::t("debug_group_hw"))
+        .description(i18n::t("debug_group_hw_desc"))
         .build();
 
     let is_verified = daemon_client::is_board_verified_sync(&board_id);
     let board_row = adw::ActionRow::builder()
-        .title("Motherboard ID (DMI)")
+        .title(i18n::t("debug_board_id"))
         .subtitle(&format!("{} — {}", specs.product_name, if board_id.is_empty() { "Unknown" } else { &board_id }))
         .build();
     let badge_label = gtk::Label::builder()
-        .label(if is_verified { "Community Verified" } else { "Unverified Board" })
-        .css_classes([if is_verified { "success" } else { "warning" }, "caption"])
+        .label(i18n::t(if is_verified { "debug_board_verified" } else { "debug_board_unverified" }))
+        .css_classes([if is_verified { "badge-ok" } else { "badge-warn" }])
         .valign(gtk::Align::Center)
         .margin_end(8)
         .build();
@@ -391,7 +404,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
         "Non-systemd"
     };
     let kernel_row = adw::ActionRow::builder()
-        .title("Linux Kernel &amp; Init System")
+        .title(i18n::t("debug_kernel_init"))
         .subtitle(&format!("{} ({})", kernel_release, init_label))
         .build();
     hw_group.add(&kernel_row);
@@ -409,7 +422,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     };
 
     let driver_row = adw::ActionRow::builder()
-        .title("Kernel Modules")
+        .title(i18n::t("debug_kernel_modules"))
         .subtitle(&format!(
             "hp-wmi: {} | hp-omen-extra: {} | ec_sys: {}",
             if has_hp_wmi { "Loaded" } else { "Missing" },
@@ -422,12 +435,12 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     // Conflicting background services row (#373, #361)
     let conflicts = detect_conflicting_services();
     let conflict_sub = if conflicts.is_empty() {
-        "No interfering services detected (thermald, power-profiles-daemon, tlp, throttled are inactive)".to_string()
+        i18n::t("debug_no_conflicts").to_string()
     } else {
-        format!("Warning: Conflicting services running: {}. These may override daemon thermal curves and power profiles.", conflicts.join(", "))
+        i18n::t("debug_conflicts_warn").replace("{}", &conflicts.join(", "))
     };
     let conflict_row = adw::ActionRow::builder()
-        .title("Power &amp; Thermal Service Conflicts")
+        .title(i18n::t("debug_conflicts"))
         .subtitle(&conflict_sub)
         .build();
 
@@ -466,7 +479,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
                     if let Some(display) = gtk::gdk::Display::default() {
                         display.clipboard().set_text(&cmd_c);
                     }
-                    show_toast(&win_toast, "Command copied to clipboard");
+                    show_toast(&win_toast, i18n::t("debug_cmd_copied"));
                 }
                 d.close();
             });
@@ -484,36 +497,36 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     }
     hw_group.add(&conflict_row);
 
-    prefs_page.add(&hw_group);
+    root_box.append(&hw_group);
 
     // ─────────────────────────────────────────────────────────────────────────
     // 3. Live Sensor & Telemetry Inspector Group
     // ─────────────────────────────────────────────────────────────────────────
     let telem_group = adw::PreferencesGroup::builder()
-        .title("Live Sensor &amp; Hardware Telemetry")
-        .description("Real-time metrics sampled directly from kernel sysfs, hwmon, and NVML")
+        .title(i18n::t("debug_group_telemetry"))
+        .description(i18n::t("debug_group_telemetry_desc"))
         .build();
 
     let cpu_telem_row = adw::ActionRow::builder()
-        .title("CPU Package")
+        .title(i18n::t("debug_cpu_pkg"))
         .subtitle("Temperature: --°C | Power: -- W | Usage: --%")
         .build();
     telem_group.add(&cpu_telem_row);
 
     let gpu_telem_row = adw::ActionRow::builder()
-        .title("GPU (NVIDIA / Discrete)")
+        .title(i18n::t("debug_gpu_discrete"))
         .subtitle("Temperature: --°C | Power: -- W | Usage: --% | State: --")
         .build();
     telem_group.add(&gpu_telem_row);
 
     let fan_telem_row = adw::ActionRow::builder()
-        .title("Cooling Fans")
+        .title(i18n::t("debug_cooling_fans"))
         .subtitle("Fan 1: -- RPM | Fan 2: -- RPM")
         .build();
     telem_group.add(&fan_telem_row);
 
     let battery_telem_row = adw::ActionRow::builder()
-        .title("Battery &amp; Power Source")
+        .title(i18n::t("debug_battery_power"))
         .subtitle("Charge: --% | Care Limit: --% | Status: --")
         .build();
     telem_group.add(&battery_telem_row);
@@ -546,13 +559,13 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
                 bat.charge_pct, bat.charge_limit_pct.unwrap_or(100), bat.status, bat.power_w
             ));
         } else {
-            bat_row_c.set_subtitle("Battery: No battery detected (AC / Desktop)");
+            bat_row_c.set_subtitle(i18n::t("debug_no_battery"));
         }
     });
 
     let sysfs_expander = adw::ExpanderRow::builder()
-        .title("Sysfs &amp; Hwmon Detected Paths")
-        .subtitle("Click to inspect discovered kernel paths on this device")
+        .title(i18n::t("debug_sysfs_paths"))
+        .subtitle(i18n::t("debug_sysfs_paths_sub"))
         .build();
 
     let mut paths_found = Vec::new();
@@ -583,14 +596,14 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     }
     telem_group.add(&sysfs_expander);
 
-    prefs_page.add(&telem_group);
+    root_box.append(&telem_group);
 
     // ─────────────────────────────────────────────────────────────────────────
     // 4. Hardware Maintenance & Interactive Test Bench
     // ─────────────────────────────────────────────────────────────────────────
     let test_group = adw::PreferencesGroup::builder()
-        .title("Hardware Maintenance &amp; Test Bench")
-        .description("Fan dust cleaning, PWM actuation checks, RGB tests, and hotkey event monitor")
+        .title(i18n::t("debug_group_maint"))
+        .description(i18n::t("debug_group_maint_desc"))
         .build();
 
     // Fan Dust Cleaning (moved from Settings into Debug Center)
@@ -621,7 +634,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
         glib::spawn_future_local(async move {
             let res = daemon_client::run_fan_cleaning_async().await;
             spinner.set_spinning(false);
-            dialog_clone.set_heading(Some("Complete"));
+            dialog_clone.set_heading(Some(i18n::t("debug_complete")));
             dialog_clone.set_body(&res.unwrap_or_else(|e| format!("Error: {}", e)));
             dialog_clone.add_response("ok", i18n::t("btn_close"));
             dialog_clone.connect_response(None, |d: &adw::MessageDialog, _| d.close());
@@ -631,8 +644,8 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
 
     // Fan Speed Override Tests
     let fan_test_row = adw::ActionRow::builder()
-        .title("Fan Speed Override Tests")
-        .subtitle("Test manual PWM actuation and BIOS auto recovery")
+        .title(i18n::t("debug_fan_test"))
+        .subtitle(i18n::t("debug_fan_test_sub"))
         .build();
 
     let fan_btn_box = gtk::Box::builder()
@@ -641,8 +654,8 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
         .valign(gtk::Align::Center)
         .build();
 
-    let btn_fan_max = gtk::Button::builder().label("100% Max").css_classes(["destructive-action"]).build();
-    let btn_fan_auto = gtk::Button::builder().label("Restore Auto").css_classes(["suggested-action"]).build();
+    let btn_fan_max = gtk::Button::builder().label(i18n::t("debug_fan_max_btn")).css_classes(["destructive-action"]).build();
+    let btn_fan_auto = gtk::Button::builder().label(i18n::t("debug_fan_auto_btn")).css_classes(["suggested-action"]).build();
 
     btn_fan_max.connect_clicked(|_| {
         daemon_client::set_fan_mode_sync("max".to_string());
@@ -658,8 +671,8 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
 
     // RGB Lighting Test Row
     let rgb_test_row = adw::ActionRow::builder()
-        .title("RGB Color Diagnostics")
-        .subtitle("Quick color verification across all zones &amp; lightbar")
+        .title(i18n::t("debug_rgb_diag"))
+        .subtitle(i18n::t("debug_rgb_diag_sub"))
         .build();
 
     let rgb_btn_box = gtk::Box::builder()
@@ -690,8 +703,8 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
 
     // Per-Key HID Direct Key Tester
     let per_key_test_row = adw::ActionRow::builder()
-        .title("Per-Key HID Single Key Tester")
-        .subtitle("Light a single key index (0..103) with red color via USB HID")
+        .title(i18n::t("debug_hid_tester"))
+        .subtitle(i18n::t("debug_hid_tester_sub"))
         .build();
 
     let pk_box = gtk::Box::builder()
@@ -702,7 +715,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
 
     let spin_idx = gtk::SpinButton::with_range(0.0, 103.0, 1.0);
     spin_idx.set_value(0.0);
-    let btn_light_key = gtk::Button::builder().label("Test Key").build();
+    let btn_light_key = gtk::Button::builder().label(i18n::t("debug_test_key_btn")).build();
     let spin_idx_c = spin_idx.clone();
     btn_light_key.connect_clicked(move |_| {
         let idx = spin_idx_c.value() as u32;
@@ -716,13 +729,13 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
 
     // Hotkey & Macro Key Realtime Event Monitor
     let macro_row = adw::ActionRow::builder()
-        .title("Macro Key &amp; Hotkey Event Listener")
-        .subtitle("Press OMEN Key, Calculator, or P1..P6 to see live events")
+        .title(i18n::t("debug_macro_listener"))
+        .subtitle(i18n::t("debug_macro_listener_sub"))
         .build();
 
     let macro_badge = gtk::Label::builder()
-        .label("Waiting for key...")
-        .css_classes(["dim-label", "caption"])
+        .label(i18n::t("debug_waiting_key"))
+        .css_classes(["badge-neutral"])
         .valign(gtk::Align::Center)
         .margin_end(8)
         .build();
@@ -743,7 +756,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
                                 .unwrap_or_default()
                                 .as_secs() % 10000;
                             badge_c.set_label(&format!("EVENT: {} (T+{})", key, time));
-                            badge_c.set_css_classes(&["success", "title-4"]);
+                            badge_c.set_css_classes(&["badge-ok", "os-mono"]);
                         }
                     }
                 }
@@ -752,19 +765,19 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     });
 
     test_group.add(&macro_row);
-    prefs_page.add(&test_group);
+    root_box.append(&test_group);
 
     // ─────────────────────────────────────────────────────────────────────────
     // 5. EC Memory & System Logs Inspector
     // ─────────────────────────────────────────────────────────────────────────
     let logs_group = adw::PreferencesGroup::builder()
-        .title("EC Register Explorer &amp; System Logs")
-        .description("Inspect raw 256-byte EC memory, daemon service logs, and kernel dmesg")
+        .title(i18n::t("debug_group_ec_logs"))
+        .description(i18n::t("debug_group_ec_logs_desc"))
         .build();
 
     let ec_row = adw::ExpanderRow::builder()
-        .title("Embedded Controller (EC) 256-Byte Hex Dump")
-        .subtitle("Click to inspect raw EC register dump")
+        .title(i18n::t("debug_ec_dump"))
+        .subtitle(i18n::t("debug_ec_dump_sub"))
         .build();
 
     let ec_tv = gtk::TextView::builder()
@@ -778,7 +791,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
         .build();
 
     let refresh_ec_btn = gtk::Button::builder()
-        .label("Read EC Memory")
+        .label(i18n::t("debug_read_ec_btn"))
         .valign(gtk::Align::Center)
         .build();
 
@@ -842,8 +855,8 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     logs_group.add(&ec_row);
 
     let logs_expander = adw::ExpanderRow::builder()
-        .title("System &amp; Daemon Logs")
-        .subtitle("View recent output from omen-space-daemon and kernel dmesg")
+        .title(i18n::t("debug_sys_logs"))
+        .subtitle(i18n::t("debug_sys_logs_sub"))
         .build();
 
     let logs_tv = gtk::TextView::builder()
@@ -862,7 +875,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
         .build();
 
     let refresh_logs_btn = gtk::Button::builder()
-        .label("Fetch Recent Logs")
+        .label(i18n::t("debug_fetch_logs_btn"))
         .valign(gtk::Align::Center)
         .build();
 
@@ -903,9 +916,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     logs_expander.add_row(&adw::ActionRow::builder().child(&logs_box).build());
     logs_group.add(&logs_expander);
 
-    prefs_page.add(&logs_group);
-
-    root_box.append(&prefs_page);
+    root_box.append(&logs_group);
     root_box
 }
 

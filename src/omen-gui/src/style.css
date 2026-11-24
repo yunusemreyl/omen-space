@@ -1,11 +1,7 @@
 /* ═══════════════════════════════════════════════════════════
    OmenSpace — Global Stylesheet
-   Modern, Clean, Borderless Elevated Glassmorphism
+   Clean Libadwaita Surfaces, Unified Tokens & Tabular Data
    ═══════════════════════════════════════════════════════════ */
-
-* {
-    font-family: 'Inter', 'Roboto', 'Ubuntu', sans-serif;
-}
 
 /* ── Sidebar stabilization ───────────────────────────────── */
 .navigation-sidebar,
@@ -26,7 +22,7 @@ overlay-split-view > sidebar,
 /* ── Typography scale ─────────────────────────────────────── */
 .page-title {
     color: @window_fg_color;
-    font-size: 17px;
+    font-size: 20px;
     font-weight: 700;
     letter-spacing: -0.3px;
 }
@@ -35,64 +31,69 @@ overlay-split-view > sidebar,
     color: @window_fg_color;
     font-size: 14px;
     font-weight: 600;
-    letter-spacing: 0.2px;
+    letter-spacing: 0.1px;
 }
 
 .os-cat-label {
-    color: alpha(@window_fg_color, 0.55);
-    font-size: 10px;
+    color: alpha(@window_fg_color, 0.62);
+    font-size: 10.5px;
     font-weight: 700;
-    letter-spacing: 1.5px;
+    letter-spacing: 1.2px;
 }
 
 .os-section-desc {
-    color: alpha(@window_fg_color, 0.60);
-    font-size: 12px;
-    line-height: 1.5;
+    color: alpha(@window_fg_color, 0.68);
+    font-size: 12.5px;
+    line-height: 1.45;
+}
+
+.os-mono {
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+    font-feature-settings: "tnum" 1;
 }
 
 /* ── Base cards ───────────────────────────────────────────── */
 .os-card {
     background-color: @card_bg_color;
     background-image: none;
-    border: 1px solid alpha(@window_fg_color, 0.05);
-    border-radius: 14px;
-    padding: 18px;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.02);
+    border: 1px solid alpha(@window_fg_color, 0.08);
+    border-radius: 12px;
+    padding: 16px 18px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 .os-card-header {
     color: @window_fg_color;
     font-size: 12px;
     font-weight: 600;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.4px;
 }
 
 /* ── Thick rectangular cards (performance modes) ───────── */
 .chip-card {
     background-color: @card_bg_color;
     background-image: none;
-    border: 1px solid alpha(@window_fg_color, 0.05);
+    border: 1px solid alpha(@window_fg_color, 0.08);
     border-radius: 12px;
-    padding: 16px 20px;
+    padding: 14px 18px;
     min-height: 64px;
     transition: all 150ms ease;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
     outline: none;
 }
 
 .chip-card:hover {
     background-color: @popover_bg_color;
     background-image: none;
-    border: 1px solid alpha(@accent_bg_color, 0.35);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+    border: 1px solid alpha(@accent_bg_color, 0.38);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.07);
 }
 
 .chip-card:checked {
     background-color: @accent_bg_color;
     background-image: none;
     border: 1px solid transparent;
-    box-shadow: 0 4px 16px alpha(@accent_bg_color, 0.35);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.14);
 }
 
 .chip-card:checked .chip-title,
@@ -108,7 +109,7 @@ overlay-split-view > sidebar,
 }
 
 .chip-sub {
-    color: alpha(@window_fg_color, 0.55);
+    color: alpha(@window_fg_color, 0.60);
     font-size: 11px;
     font-weight: 500;
 }
@@ -117,27 +118,27 @@ overlay-split-view > sidebar,
 .fan-chip-card {
     background-color: @card_bg_color;
     background-image: none;
-    border: 1px solid alpha(@window_fg_color, 0.05);
+    border: 1px solid alpha(@window_fg_color, 0.08);
     border-radius: 10px;
     padding: 9px 14px;
     min-height: 42px;
     transition: all 150ms ease;
-    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.03);
+    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.04);
     outline: none;
 }
 
 .fan-chip-card:hover {
     background-color: @popover_bg_color;
     background-image: none;
-    border: 1px solid alpha(@accent_bg_color, 0.35);
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.05);
+    border: 1px solid alpha(@accent_bg_color, 0.38);
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.06);
 }
 
 .fan-chip-card:checked {
     background-color: @accent_bg_color;
     background-image: none;
     border: 1px solid transparent;
-    box-shadow: 0 3px 14px alpha(@accent_bg_color, 0.35);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
 }
 
 .fan-chip-card:checked .fan-chip-title,
@@ -152,51 +153,51 @@ overlay-split-view > sidebar,
 }
 
 .fan-chip-sub {
-    color: alpha(@window_fg_color, 0.55);
-    font-size: 10px;
+    color: alpha(@window_fg_color, 0.60);
+    font-size: 10.5px;
     font-weight: 400;
 }
 
 /* ── Daemon status pill ───────────────────────────────────── */
 .daemon-pill {
     background-color: @card_bg_color;
-    border: 1px solid alpha(@window_fg_color, 0.06);
-    border-radius: 20px;
-    padding: 4px 11px;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
+    border: 1px solid alpha(@window_fg_color, 0.08);
+    border-radius: 999px;
+    padding: 4px 12px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
 
 .daemon-dot-on {
     color: @success_color;
-    font-size: 8px;
+    font-size: 9px;
 }
 
 .daemon-dot-off {
     color: @error_color;
-    font-size: 8px;
+    font-size: 9px;
 }
 
 .daemon-pill-text {
-    color: alpha(@window_fg_color, 0.65);
+    color: alpha(@window_fg_color, 0.72);
     font-size: 11px;
-    font-weight: 500;
+    font-weight: 600;
 }
 
 /* ── EC delegate button ───────────────────────────────────── */
 .ec-btn {
     background-color: @card_bg_color;
-    border: 1px solid alpha(@window_fg_color, 0.06);
+    border: 1px solid alpha(@window_fg_color, 0.08);
     border-radius: 8px;
     padding: 4px 12px;
     transition: all 120ms ease;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
 
 .ec-btn:checked {
     background-color: @accent_bg_color;
     border: 1px solid transparent;
     color: #FFFFFF;
-    box-shadow: 0 2px 10px alpha(@accent_bg_color, 0.30);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
 }
 
 .ec-btn:checked .ec-btn-lbl {
@@ -205,29 +206,29 @@ overlay-split-view > sidebar,
 
 .ec-btn:hover {
     background-color: @popover_bg_color;
-    border: 1px solid alpha(@accent_bg_color, 0.35);
+    border: 1px solid alpha(@accent_bg_color, 0.38);
 }
 
 .ec-btn-lbl {
-    color: alpha(@window_fg_color, 0.65);
+    color: alpha(@window_fg_color, 0.72);
     font-size: 11px;
     font-weight: 500;
 }
 
 /* ── CPU/GPU pill switcher ────────────────────────────────── */
 .curve-pill {
-    background-color: alpha(@window_fg_color, 0.05);
-    border: none;
-    border-radius: 20px;
+    background-color: alpha(@window_fg_color, 0.06);
+    border: 1px solid alpha(@window_fg_color, 0.06);
+    border-radius: 999px;
     padding: 3px;
 }
 
 .curve-pill-btn {
     background-color: transparent;
     border: none;
-    border-radius: 18px;
+    border-radius: 999px;
     padding: 4px 16px;
-    color: alpha(@window_fg_color, 0.60);
+    color: alpha(@window_fg_color, 0.65);
     font-size: 11px;
     font-weight: 600;
     transition: all 120ms ease;
@@ -241,55 +242,59 @@ overlay-split-view > sidebar,
 .curve-pill-btn:checked {
     background-color: @card_bg_color;
     color: @window_fg_color;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.10);
 }
 
 /* ── Monitoring cards ─────────────────────────────────────── */
 .os-monitor-card {
     background-color: @card_bg_color;
-    border: 1px solid alpha(@window_fg_color, 0.05);
-    border-radius: 14px;
+    border: 1px solid alpha(@window_fg_color, 0.08);
+    border-radius: 12px;
     padding: 14px 18px;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.02);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 .monitor-icon-label {
-    color: alpha(@window_fg_color, 0.70);
+    color: alpha(@window_fg_color, 0.76);
     font-size: 12px;
     font-weight: 600;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.2px;
 }
 
 .os-monitor-val {
     color: @window_fg_color;
     font-size: 20px;
     font-weight: 700;
-    letter-spacing: -0.5px;
+    letter-spacing: -0.4px;
+    font-feature-settings: "tnum" 1;
 }
 
 .os-monitor-val-sm {
     color: @window_fg_color;
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 700;
+    font-feature-settings: "tnum" 1;
 }
 
 .os-monitor-label {
-    color: alpha(@window_fg_color, 0.50);
-    font-size: 9px;
+    color: alpha(@window_fg_color, 0.62);
+    font-size: 10px;
     font-weight: 700;
-    letter-spacing: 1.2px;
+    letter-spacing: 1.0px;
+    font-feature-settings: "tnum" 1;
 }
 
 .os-monitor-sublabel {
-    color: alpha(@window_fg_color, 0.60);
+    color: alpha(@window_fg_color, 0.65);
     font-size: 11px;
     font-weight: 500;
 }
 
 .os-monitor-val-sub {
-    color: alpha(@window_fg_color, 0.75);
+    color: alpha(@window_fg_color, 0.80);
     font-size: 12px;
     font-weight: 600;
+    font-feature-settings: "tnum" 1;
 }
 
 /* ── Progress bars ────────────────────────────────────────── */
@@ -324,7 +329,7 @@ progressbar.os-prog-bat-low > trough > progress {
     border-radius: 2px;
 }
 progressbar > trough {
-    background-color: alpha(@window_fg_color, 0.07);
+    background-color: alpha(@window_fg_color, 0.08);
     min-height: 4px;
     min-width: 10px;
     border-radius: 2px;
@@ -333,10 +338,10 @@ progressbar > trough {
 /* ── Device spec card ─────────────────────────────────────── */
 .spec-card {
     background-color: @card_bg_color;
-    border: 1px solid alpha(@window_fg_color, 0.05);
-    border-radius: 14px;
+    border: 1px solid alpha(@window_fg_color, 0.08);
+    border-radius: 12px;
     padding: 14px 18px;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.02);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 .spec-device-name {
@@ -346,32 +351,32 @@ progressbar > trough {
 }
 
 .spec-label {
-    color: alpha(@window_fg_color, 0.50);
+    color: alpha(@window_fg_color, 0.62);
     font-size: 10px;
     font-weight: 700;
-    letter-spacing: 1.5px;
+    letter-spacing: 1.2px;
 }
 
 .spec-value {
     color: @window_fg_color;
-    font-size: 11px;
+    font-size: 11.5px;
     font-weight: 500;
 }
 
 /* ── App profile cards ────────────────────────────────────── */
 .app-profile-card {
     background-color: @card_bg_color;
-    border: 1px solid alpha(@window_fg_color, 0.05);
+    border: 1px solid alpha(@window_fg_color, 0.08);
     border-radius: 12px;
     padding: 14px 16px;
     transition: all 120ms ease;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
 .app-profile-card:hover {
     background-color: @popover_bg_color;
-    border: 1px solid alpha(@accent_bg_color, 0.35);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+    border: 1px solid alpha(@accent_bg_color, 0.38);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.06);
 }
 
 .app-name-label {
@@ -381,7 +386,7 @@ progressbar > trough {
 }
 
 .app-mode-label {
-    color: alpha(@window_fg_color, 0.55);
+    color: alpha(@window_fg_color, 0.62);
     font-size: 11px;
 }
 
@@ -393,37 +398,60 @@ progressbar > trough {
 }
 
 .setting-row-sub {
-    color: alpha(@window_fg_color, 0.55);
+    color: alpha(@window_fg_color, 0.62);
     font-size: 11px;
 }
 
-/* ── Status badges ────────────────────────────────────────── */
+/* ── Unified status badges ────────────────────────────────── */
 .badge-ok {
-    background-color: rgba(0, 180, 100, 0.12);
-    border: 1px solid rgba(0, 180, 100, 0.25);
-    border-radius: 12px;
-    padding: 2px 10px;
+    background-color: rgba(46, 194, 126, 0.14);
+    border: 1px solid rgba(46, 194, 126, 0.28);
+    border-radius: 999px;
+    padding: 3px 10px;
     color: @success_color;
     font-size: 11px;
     font-weight: 600;
 }
 
 .badge-warn {
-    background-color: rgba(230, 160, 0, 0.12);
-    border: 1px solid rgba(230, 160, 0, 0.25);
-    border-radius: 12px;
-    padding: 2px 10px;
+    background-color: rgba(245, 158, 11, 0.14);
+    border: 1px solid rgba(245, 158, 11, 0.28);
+    border-radius: 999px;
+    padding: 3px 10px;
     color: @warning_color;
     font-size: 11px;
     font-weight: 600;
 }
 
 .badge-err {
-    background-color: rgba(220, 50, 50, 0.12);
-    border: 1px solid rgba(220, 50, 50, 0.25);
-    border-radius: 12px;
-    padding: 2px 10px;
+    background-color: rgba(224, 51, 85, 0.14);
+    border: 1px solid rgba(224, 51, 85, 0.28);
+    border-radius: 999px;
+    padding: 3px 10px;
     color: @error_color;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.badge-accent,
+.os-chip-btn {
+    background-color: alpha(@accent_bg_color, 0.14);
+    border: 1px solid alpha(@accent_bg_color, 0.30);
+    border-radius: 999px;
+    padding: 3px 10px;
+    color: @accent_color;
+    font-size: 11px;
+    font-weight: 600;
+    font-feature-settings: "tnum" 1;
+}
+
+.badge-neutral,
+.os-badge {
+    background-color: alpha(@window_fg_color, 0.07);
+    border: 1px solid alpha(@window_fg_color, 0.12);
+    border-radius: 999px;
+    padding: 3px 10px;
+    color: alpha(@window_fg_color, 0.78);
     font-size: 11px;
     font-weight: 600;
 }
@@ -431,45 +459,46 @@ progressbar > trough {
 /* ── Keyboard RGB ─────────────────────────────────────────── */
 .kb-card {
     background-color: @card_bg_color;
-    border: 1px solid alpha(@window_fg_color, 0.05);
-    border-radius: 14px;
-    padding: 20px;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+    border: 1px solid alpha(@window_fg_color, 0.08);
+    border-radius: 12px;
+    padding: 18px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 /* ── Log / monospace ──────────────────────────────────────── */
 .os-log-card {
     background-color: @view_bg_color;
-    border: 1px solid alpha(@window_fg_color, 0.06);
-    border-radius: 12px;
-    padding: 16px;
+    border: 1px solid alpha(@window_fg_color, 0.08);
+    border-radius: 10px;
+    padding: 14px 16px;
 }
 
 .os-log-text {
-    color: alpha(@window_fg_color, 0.70);
+    color: alpha(@window_fg_color, 0.76);
     font-family: "JetBrains Mono", "Fira Code", monospace;
+    font-feature-settings: "tnum" 1;
     font-size: 11px;
 }
 
 .os-spec-text {
-    color: alpha(@window_fg_color, 0.55);
-    font-size: 10px;
-    letter-spacing: 0.3px;
+    color: alpha(@window_fg_color, 0.62);
+    font-size: 10.5px;
+    letter-spacing: 0.2px;
 }
 
 /* ── Compat shims for legacy code ─────────────────────────── */
 .os-profile-card {
     background-color: @card_bg_color;
-    border: 1px solid alpha(@window_fg_color, 0.05);
+    border: 1px solid alpha(@window_fg_color, 0.08);
     border-radius: 10px;
     padding: 10px 14px;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
 }
-.os-profile-card:hover  { background-color: @popover_bg_color; border: 1px solid alpha(@accent_bg_color, 0.35); }
+.os-profile-card:hover  { background-color: @popover_bg_color; border: 1px solid alpha(@accent_bg_color, 0.38); }
 .os-profile-card:checked { background-color: alpha(@accent_bg_color, 0.15); border-color: @accent_bg_color; }
 .os-profile-title { color: @window_fg_color; font-size: 13px; font-weight: 600; }
-.os-profile-sub   { color: alpha(@window_fg_color, 0.55); font-size: 9px; }
-.os-profile-tag   { color: alpha(@window_fg_color, 0.55); font-size: 10px; }
+.os-profile-sub   { color: alpha(@window_fg_color, 0.62); font-size: 10px; }
+.os-profile-tag   { color: alpha(@window_fg_color, 0.62); font-size: 10.5px; }
 .os-profile-icon  { color: #0099CC; font-size: 24px; }
 .daemon-connected { color: @success_color; font-size: 12px; }
 .daemon-error     { color: @error_color; font-size: 12px; }
@@ -483,7 +512,7 @@ progressbar > trough {
     font-size: 11px;
     font-weight: 500;
     transition: background 0.15s ease;
-    border: 1px solid alpha(@window_fg_color, 0.05);
+    border: 1px solid alpha(@window_fg_color, 0.07);
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 .kb-key:hover {
@@ -496,27 +525,25 @@ separator {
     min-height: 1px;
 }
 
-
-
 /* ── Keyboard Zone Buttons (1-Zone / 4-Zone) ─────────────── */
 .kb-zone-btn {
-    border-radius: 16px;
-    font-size: 16px;
+    border-radius: 12px;
+    font-size: 15px;
     font-weight: 700;
-    letter-spacing: 1.2px;
+    letter-spacing: 0.8px;
     color: #ffffff;
-    text-shadow: 0 2px 4px rgba(0,0,0,0.4);
-    border: 2px solid rgba(255,255,255,0.1);
-    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15), inset 0 2px 4px rgba(255,255,255,0.2);
-    transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94), box-shadow 0.2s ease;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14), inset 0 1px 2px rgba(255, 255, 255, 0.16);
+    transition: transform 0.16s cubic-bezier(0.25, 0.46, 0.45, 0.94), box-shadow 0.16s ease;
 }
 .kb-zone-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 12px 20px rgba(0, 0, 0, 0.2), inset 0 2px 4px rgba(255,255,255,0.3);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.18), inset 0 1px 2px rgba(255, 255, 255, 0.22);
 }
 .kb-zone-btn:active {
     transform: translateY(1px);
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15), inset 0 1px 2px rgba(0,0,0,0.2);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12), inset 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 /* ── Overlay Position Grid ────────────────────────────────── */
@@ -524,31 +551,31 @@ separator {
     min-width: 62px;
     min-height: 48px;
     padding: 4px 6px;
-    border-radius: 0;
+    border-radius: 6px;
     background-color: alpha(@window_fg_color, 0.04);
-    border: 1px solid alpha(@window_fg_color, 0.07);
+    border: 1px solid alpha(@window_fg_color, 0.08);
     transition: all 100ms ease;
 }
 .pos-grid-btn:hover {
     background-color: alpha(@accent_bg_color, 0.12);
-    border-color: alpha(@accent_bg_color, 0.3);
+    border-color: alpha(@accent_bg_color, 0.35);
 }
 .pos-grid-btn:checked {
-    background-color: alpha(@accent_bg_color, 0.22);
+    background-color: alpha(@accent_bg_color, 0.20);
     border-color: @accent_bg_color;
     box-shadow: inset 0 0 0 1px @accent_bg_color;
 }
 .pos-grid-icon {
     font-size: 14px;
     font-weight: 600;
-    color: alpha(@window_fg_color, 0.7);
+    color: alpha(@window_fg_color, 0.72);
 }
 .pos-grid-btn:checked .pos-grid-icon {
     color: @accent_color;
 }
 .pos-grid-label {
-    font-size: 8px;
-    color: alpha(@window_fg_color, 0.45);
+    font-size: 10px;
+    color: alpha(@window_fg_color, 0.60);
 }
 .pos-grid-btn:checked .pos-grid-label {
     color: @accent_color;

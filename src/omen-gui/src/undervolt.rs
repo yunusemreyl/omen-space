@@ -41,7 +41,7 @@ pub fn build_page() -> gtk::Box {
     let hdr = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(4)
-        .margin_bottom(2)
+        .margin_bottom(4)
         .build();
     hdr.append(&gtk::Label::builder()
         .label(i18n::t("title_undervolt"))

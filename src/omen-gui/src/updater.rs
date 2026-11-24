@@ -293,23 +293,31 @@ async fn check_github_updates_async() -> RemoteUpdateCheck {
 pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
     let page = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
+        .spacing(16)
         .build();
 
-    let status_page = adw::StatusPage::builder()
-        .icon_name("software-update-available-symbolic")
-        .title(i18n::t("title_updater"))
-        .description(i18n::t("updater_desc"))
-        .margin_top(18)
-        .margin_bottom(8)
+    let hdr = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(4)
+        .margin_bottom(4)
         .build();
-    page.append(&status_page);
+    hdr.append(&gtk::Label::builder()
+        .label(i18n::t("title_updater"))
+        .css_classes(["page-title"])
+        .halign(gtk::Align::Start)
+        .build());
+    hdr.append(&gtk::Label::builder()
+        .label(i18n::t("updater_desc"))
+        .css_classes(["os-section-desc"])
+        .halign(gtk::Align::Start)
+        .wrap(true)
+        .build());
+    page.append(&hdr);
 
     let content_box = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
-        .spacing(20)
-        .margin_start(24)
-        .margin_end(24)
-        .margin_bottom(32)
+        .spacing(16)
+        .margin_bottom(16)
         .build();
     page.append(&content_box);
 
@@ -341,7 +349,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
 
     let version_badge = gtk::Label::builder()
         .label(format!("v{}", init_ver))
-        .css_classes(["os-chip-btn", "accent"])
+        .css_classes(["badge-accent"])
         .valign(gtk::Align::Center)
         .build();
     badge_box.append(&version_badge);
@@ -352,7 +360,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
         } else {
             "git".to_string()
         })
-        .css_classes(["os-badge"])
+        .css_classes(["badge-neutral", "os-mono"])
         .valign(gtk::Align::Center)
         .build();
     badge_box.append(&commit_badge);
@@ -467,7 +475,7 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
 
     let step_pct_lbl = gtk::Label::builder()
         .label("0%")
-        .css_classes(["os-chip-btn", "accent"])
+        .css_classes(["badge-accent", "os-mono"])
         .valign(gtk::Align::Center)
         .build();
     step_row.add_suffix(&step_pct_lbl);

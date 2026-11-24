@@ -108,7 +108,7 @@ pub fn build_interactive_keyboard(
         KeyboardMode::PerKey => (
             vec![
                 crate::i18n::t("effect_static"),
-                "Per-Key Custom",
+                crate::i18n::t("kb_per_key_custom"),
                 crate::i18n::t("effect_breathing"),
                 crate::i18n::t("effect_blinking"),
                 crate::i18n::t("effect_cycle"),
@@ -145,16 +145,16 @@ pub fn build_interactive_keyboard(
 
     // -- Selection Tools (Left-aligned) --
     let sel_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).build();
-    let sel_label = gtk::Label::builder().label("Select:").css_classes(["dim-label"]).build();
+    let sel_label = gtk::Label::builder().label(crate::i18n::t("kb_select_label")).css_classes(["dim-label"]).build();
     sel_box.append(&sel_label);
     
     let sel_btns_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(0).build();
     sel_btns_box.add_css_class("linked");
     
-    let btn_off = gtk::ToggleButton::builder().label("Off").build();
-    let btn_key = gtk::ToggleButton::builder().label("Key").active(detected_mode == KeyboardMode::PerKey).sensitive(detected_mode == KeyboardMode::PerKey).build();
-    let btn_zone = gtk::ToggleButton::builder().label("Zone").active(detected_mode != KeyboardMode::PerKey).build();
-    let btn_all = gtk::ToggleButton::builder().label("All").build();
+    let btn_off = gtk::ToggleButton::builder().label(crate::i18n::t("kb_sel_off")).build();
+    let btn_key = gtk::ToggleButton::builder().label(crate::i18n::t("kb_sel_key")).active(detected_mode == KeyboardMode::PerKey).sensitive(detected_mode == KeyboardMode::PerKey).build();
+    let btn_zone = gtk::ToggleButton::builder().label(crate::i18n::t("kb_sel_zone")).active(detected_mode != KeyboardMode::PerKey).build();
+    let btn_all = gtk::ToggleButton::builder().label(crate::i18n::t("kb_sel_all")).build();
     
     // Set initial sel_mode based on supported mode
     let sel_mode = Rc::new(RefCell::new(if detected_mode == KeyboardMode::PerKey { SelectionMode::Key } else { SelectionMode::Zone }));
@@ -267,7 +267,7 @@ pub fn build_interactive_keyboard(
         }
     });
 
-    top_bar.append(&gtk::Label::builder().label("Effect:").css_classes(["dim-label"]).build());
+    top_bar.append(&gtk::Label::builder().label(crate::i18n::t("kb_effect_label")).css_classes(["dim-label"]).build());
     top_bar.append(&effects_dropdown);
 
     kb_card.append(&top_bar);
@@ -340,10 +340,10 @@ pub fn build_interactive_keyboard(
         .model(&layout_model)
         .selected(if layout_de.get() { 1 } else { 0 })
         .valign(gtk::Align::Center)
-        .tooltip_text("Keyboard key labels")
+        .tooltip_text(crate::i18n::t("kb_layout_tooltip"))
         .build();
     top_bar.prepend(&layout_dropdown);
-    top_bar.prepend(&gtk::Label::builder().label("Layout:").css_classes(["dim-label"]).build());
+    top_bar.prepend(&gtk::Label::builder().label(crate::i18n::t("kb_layout_label")).css_classes(["dim-label"]).build());
 
     let da_layout = drawing_area.clone();
     let layout_labels_c = layout_labels.clone();
@@ -707,7 +707,7 @@ pub fn build_interactive_keyboard(
     let controls_row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(16).halign(gtk::Align::Center).build();
 
     let color_container = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).valign(gtk::Align::Center).build();
-    color_container.append(&gtk::Label::builder().label("Color:").css_classes(["dim-label"]).build());
+    color_container.append(&gtk::Label::builder().label(crate::i18n::t("kb_color_label")).css_classes(["dim-label"]).build());
     
     let global_color_btn = gtk::Button::builder().width_request(32).height_request(32).build();
     global_color_btn.add_css_class("circular");
@@ -861,11 +861,11 @@ pub fn build_interactive_keyboard(
     let hw_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).build();
     if is_darfon {
         hw_on.set(state_json_opt.as_ref().and_then(|j| j["hw_effects"].as_bool()).unwrap_or(false));
-        let hw_label = gtk::Label::builder().label("Hardware / Fn effects").xalign(0.0).build();
+        let hw_label = gtk::Label::builder().label(crate::i18n::t("kb_hw_effects")).xalign(0.0).build();
         label_sg.add_widget(&hw_label);
         hw_box.append(&hw_label);
         let hw_switch = gtk::Switch::builder().valign(gtk::Align::Center).active(hw_on.get()).build();
-        hw_switch.set_tooltip_text(Some("Let keyboard firmware own lighting so Fn+1/Fn+2 hardware effects work. Rainbow, cycle, breathing, starlight and raindrop run on the MCU; brightness slider does not apply in firmware mode."));
+        hw_switch.set_tooltip_text(Some(crate::i18n::t("kb_hw_effects_tooltip")));
         hw_box.append(&hw_switch);
         bright_scale.set_sensitive(!hw_on.get());
         let hw_on_c = hw_on.clone();

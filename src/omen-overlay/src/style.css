@@ -1,20 +1,17 @@
-/* ═══════════════════════════════════════════════════════════════════════════
-   OMEN SPACE OVERLAY — High Performance Gaming HUD
-   ═══════════════════════════════════════════════════════════════════════════ */
+/* OMEN Space Quick HUD Overlay Stylesheet (GTK4 / Libadwaita) */
 
-window.omen-overlay-window {
+.omen-overlay-window {
     background-color: transparent;
 }
 
 .omen-overlay-card {
-    background: rgba(13, 15, 24, 0.92);
-    border: 1.5px solid rgba(255, 255, 255, 0.14);
-    border-radius: 18px;
-    padding: 20px 24px;
-    box-shadow: 0 18px 45px rgba(0, 0, 0, 0.75), 0 0 25px rgba(0, 229, 255, 0.15);
+    background-color: rgba(22, 24, 30, 0.94);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+    padding: 20px;
 }
 
-/* Header */
 .overlay-header {
     margin-bottom: 14px;
 }
@@ -22,160 +19,150 @@ window.omen-overlay-window {
 .overlay-title {
     font-size: 16px;
     font-weight: 800;
-    letter-spacing: 1.5px;
-    color: #ffffff;
-    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.95);
+    letter-spacing: 0.4px;
 }
 
 .overlay-brand-tag {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 700;
-    color: #00e5ff;
-    background: rgba(0, 229, 255, 0.12);
-    border: 1px solid rgba(0, 229, 255, 0.35);
-    border-radius: 6px;
+    letter-spacing: 0.9px;
     padding: 2px 8px;
-    letter-spacing: 0.8px;
+    border-radius: 999px;
+    background-color: alpha(@accent_bg_color, 0.16);
+    border: 1px solid alpha(@accent_bg_color, 0.32);
+    color: @accent_color;
 }
 
 .overlay-close-btn {
-    border-radius: 50%;
+    border-radius: 999px;
+    background-color: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.65);
     min-width: 28px;
     min-height: 28px;
     padding: 0;
-    color: #8f9ba8;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: background-color 150ms cubic-bezier(0.25, 1, 0.5, 1), color 150ms cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 .overlay-close-btn:hover {
-    color: #ffffff;
-    background: rgba(255, 0, 85, 0.25);
-    border-color: rgba(255, 0, 85, 0.5);
+    background-color: rgba(255, 85, 85, 0.22);
+    color: #ff6e6e;
 }
 
-/* Section Titles */
 .section-label {
-    font-size: 12px;
+    font-size: 10.5px;
     font-weight: 700;
-    letter-spacing: 1px;
-    color: #8e9bb0;
-    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: rgba(255, 255, 255, 0.50);
+    margin-top: 6px;
     margin-bottom: 6px;
 }
 
-/* Mode Selection Cards / Buttons */
 .mode-btn {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1.5px solid rgba(255, 255, 255, 0.08);
+    background-color: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 12px;
-    padding: 12px 14px;
-    transition: all 180ms ease-in-out;
+    padding: 12px 10px;
+    transition: background-color 160ms cubic-bezier(0.25, 1, 0.5, 1), border-color 160ms cubic-bezier(0.25, 1, 0.5, 1);
+    color: rgba(255, 255, 255, 0.85);
 }
 
 .mode-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.2);
+    background-color: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.16);
+}
+
+.mode-btn:active {
+    background-color: rgba(255, 255, 255, 0.11);
 }
 
 .mode-btn.active {
-    background: linear-gradient(135deg, rgba(0, 229, 255, 0.18), rgba(0, 150, 255, 0.08));
-    border-color: #00e5ff;
-    box-shadow: 0 0 16px rgba(0, 229, 255, 0.35);
+    background-color: alpha(@accent_bg_color, 0.16);
+    border-color: alpha(@accent_bg_color, 0.55);
+    color: #ffffff;
 }
 
 .mode-btn.active-perf {
-    background: linear-gradient(135deg, rgba(255, 0, 85, 0.22), rgba(255, 75, 0, 0.1));
-    border-color: #ff0055;
-    box-shadow: 0 0 16px rgba(255, 0, 85, 0.4);
+    background-color: rgba(248, 113, 113, 0.14);
+    border-color: rgba(248, 113, 113, 0.55);
 }
 
 .mode-btn.active-eco {
-    background: linear-gradient(135deg, rgba(0, 230, 118, 0.2), rgba(0, 180, 80, 0.08));
-    border-color: #00e676;
-    box-shadow: 0 0 16px rgba(0, 230, 118, 0.35);
+    background-color: rgba(52, 211, 153, 0.14);
+    border-color: rgba(52, 211, 153, 0.55);
 }
 
 .mode-btn.active-turbo {
-    background: linear-gradient(135deg, rgba(255, 145, 0, 0.22), rgba(255, 80, 0, 0.1));
-    border-color: #ff9100;
-    box-shadow: 0 0 16px rgba(255, 145, 0, 0.4);
+    background-color: rgba(96, 165, 250, 0.16);
+    border-color: rgba(96, 165, 250, 0.58);
 }
 
 .mode-badge {
-    font-size: 11px;
-    font-weight: 800;
-    font-family: monospace;
-    background: rgba(255, 255, 255, 0.12);
-    color: #e0e6ed;
-    border-radius: 5px;
-    padding: 2px 6px;
+    font-size: 16px;
+    margin-bottom: 2px;
 }
 
 .mode-name {
-    font-size: 13px;
     font-weight: 700;
-    color: #ffffff;
+    font-size: 12.5px;
+    color: rgba(255, 255, 255, 0.94);
 }
 
 .mode-desc {
-    font-size: 11px;
-    color: #8e9bb0;
+    font-size: 10.5px;
+    color: rgba(255, 255, 255, 0.62);
 }
 
-/* Telemetry Section */
 .telemetry-box {
-    background: rgba(0, 0, 0, 0.35);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background-color: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 12px;
-    padding: 10px 16px;
-    margin-top: 6px;
+    padding: 12px 14px;
+    margin-top: 8px;
 }
 
 .telem-chip-title {
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 700;
-    color: #00e5ff;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.6px;
+    color: rgba(255, 255, 255, 0.55);
 }
 
 .telem-chip-val {
-    font-size: 13px;
-    font-weight: 700;
-    color: #ffffff;
-    font-family: monospace;
+    font-size: 17px;
+    font-weight: 800;
+    color: rgba(255, 255, 255, 0.96);
+    font-feature-settings: "tnum" 1;
 }
 
 .telem-sub {
     font-size: 11px;
-    color: #8e9bb0;
+    color: rgba(255, 255, 255, 0.62);
+    font-feature-settings: "tnum" 1;
 }
 
 .telem-separator {
-    background: rgba(255, 255, 255, 0.1);
+    background-color: rgba(255, 255, 255, 0.08);
     min-width: 1px;
-    margin: 2px 8px;
+    margin-top: 4px;
+    margin-bottom: 4px;
 }
 
-/* Footer Shortcuts */
 .footer-shortcut-box {
     margin-top: 10px;
-    padding-top: 10px;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .shortcut-hint {
     font-size: 11px;
-    color: #718096;
+    color: rgba(255, 255, 255, 0.58);
 }
 
 .shortcut-key {
-    font-family: monospace;
-    font-size: 10px;
-    font-weight: 800;
-    color: #00e5ff;
-    background: rgba(0, 229, 255, 0.1);
-    border: 1px solid rgba(0, 229, 255, 0.25);
-    border-radius: 4px;
-    padding: 1px 5px;
+    background-color: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 6px;
+    padding: 1px 6px;
+    font-size: 10.5px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.85);
 }

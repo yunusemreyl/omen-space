@@ -267,23 +267,23 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
         .selection_mode(gtk::SelectionMode::Single)
         .build();
 
+    let m = 20;
     let spec_header = monitoring::build_spec_header();
     let page_perf = performance_control::build_page();
     let page_mon = monitoring::build_page(true);
     let gen_box = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .valign(gtk::Align::Start)
-        .spacing(10)
-        .margin_top(14)
-        .margin_start(18)
-        .margin_end(18)
-        .margin_bottom(14)
+        .spacing(14)
+        .margin_top(m)
+        .margin_start(m)
+        .margin_end(m)
+        .margin_bottom(m)
         .build();
     gen_box.append(&spec_header);
     gen_box.append(&page_perf);
     gen_box.append(&page_mon);
 
-    let m = 20;
     let page_undervolt = undervolt::build_page();
     page_undervolt.set_margin_top(m);
     page_undervolt.set_margin_start(m);
@@ -299,18 +299,18 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
     let mon_hdr = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(4)
-        .margin_bottom(12)
+        .margin_bottom(6)
         .build();
     mon_hdr.append(&gtk::Label::builder().label(i18n::t("title_monitoring")).css_classes(["page-title"]).halign(gtk::Align::Start).build());
     mon_hdr.append(&gtk::Label::builder().label(i18n::t("monitoring_desc")).css_classes(["os-section-desc"]).halign(gtk::Align::Start).build());
     
     let mon_content = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
-        .spacing(10)
-        .margin_top(20)
-        .margin_start(20)
-        .margin_end(20)
-        .margin_bottom(20)
+        .spacing(16)
+        .margin_top(m)
+        .margin_start(m)
+        .margin_end(m)
+        .margin_bottom(m)
         .build();
     mon_content.append(&mon_hdr);
     mon_content.append(&monitoring::build_page(false));
@@ -318,7 +318,7 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
     let rgb_hdr = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(4)
-        .margin_bottom(12)
+        .margin_bottom(6)
         .build();
     rgb_hdr.append(&gtk::Label::builder().label(i18n::t("title_lighting")).css_classes(["page-title"]).halign(gtk::Align::Start).build());
     rgb_hdr.append(&gtk::Label::builder().label(i18n::t("lighting_desc")).css_classes(["os-section-desc"]).halign(gtk::Align::Start).build());
@@ -326,6 +326,7 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
     let (page_rgb_content, lb_group_opt, lb_preview_group_opt) = keyboardrgb::build_page();
     let page_rgb = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
+        .spacing(16)
         .build();
     page_rgb.append(&rgb_hdr);
     page_rgb.append(&page_rgb_content);
@@ -430,10 +431,16 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
 
     let content_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
     
+    let content_clamp = adw::Clamp::builder()
+        .maximum_size(1040)
+        .tightening_threshold(760)
+        .child(&stack)
+        .build();
+
     let scroll = gtk::ScrolledWindow::builder()
         .vexpand(true)
         .hscrollbar_policy(gtk::PolicyType::Never)
-        .child(&stack)
+        .child(&content_clamp)
         .build();
     content_box.append(&scroll);
 

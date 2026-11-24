@@ -81,7 +81,7 @@ fn format_mux_mode_label(mode: &str) -> String {
 pub fn build_page() -> gtk::Box {
     let page = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
-        .spacing(18)
+        .spacing(16)
         .build();
 
     let drv_version = get_nvidia_driver_version();
