@@ -763,6 +763,50 @@ pub fn set_battery_care_sync(limit: u32) {
     });
 }
 
+pub fn set_battery_limit_config_sync(enabled: bool, stop: u32, start: u32, off_hold: bool) {
+    let rt = get_runtime();
+    rt.spawn(async move {
+        if let Ok(conn) = get_conn().await {
+            if let Ok(proxy) = PlatformProxy::new(&conn).await {
+                if let Err(e) = proxy.set_battery_limit_config(enabled, stop, start, off_hold).await {
+                    notify_dbus_error("Pil şarj sınırı ayarlanamıyor", &e).await;
+                }
+            }
+        }
+    });
+}
+
+pub fn set_battery_bypass_sync(enabled: bool) {
+    let rt = get_runtime();
+    rt.spawn(async move {
+        if let Ok(conn) = get_conn().await {
+            if let Ok(proxy) = PlatformProxy::new(&conn).await {
+                if let Err(e) = proxy.set_battery_bypass(enabled).await {
+                    notify_dbus_error("Pil tam şarj modu ayarlanamıyor", &e).await;
+                }
+            }
+        }
+    });
+}
+
+pub async fn get_battery_limit_state_async() -> Result<String, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    get_runtime().spawn(async move {
+        let res = match get_conn().await {
+            Ok(conn) => match PlatformProxy::new(&conn).await {
+                Ok(proxy) => proxy
+                    .get_battery_limit_state()
+                    .await
+                    .map_err(|e| format!("{}", e)),
+                Err(e) => Err(format!("{}", e)),
+            },
+            Err(e) => Err(format!("{}", e)),
+        };
+        let _ = tx.send(res);
+    });
+    rx.await.unwrap_or_else(|_| Err("Daemon communication aborted".to_string()))
+}
+
 
 
 

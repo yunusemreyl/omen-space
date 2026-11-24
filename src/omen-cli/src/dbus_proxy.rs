@@ -76,6 +76,9 @@ pub trait Platform {
     async fn get_state(&self) -> zbus::Result<String>;
     async fn set_keyboard_fixes(&self, prtsc: bool, f1: bool) -> zbus::Result<String>;
     async fn set_battery_care(&self, limit: u32) -> zbus::Result<String>;
+    async fn set_battery_limit_config(&self, enabled: bool, stop: u32, start: u32, off_hold: bool) -> zbus::Result<String>;
+    async fn set_battery_bypass(&self, enabled: bool) -> zbus::Result<String>;
+    async fn get_battery_limit_state(&self) -> zbus::Result<String>;
     async fn clean_memory(&self) -> zbus::Result<String>;
     async fn generate_hardware_dump(&self) -> zbus::Result<String>;
     async fn get_hardware_dump_json(&self) -> zbus::Result<String>;

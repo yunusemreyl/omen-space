@@ -220,7 +220,21 @@ pub fn probe_battery(sysfs_root: &Path) -> Option<BatteryTelemetry> {
 
     let charge_limit_pct = read_u32(&bat_path.join("charge_control_end_threshold"))
         .filter(|&l| (50..=100).contains(&l))
-        .map(|l| l as u8);
+        .map(|l| l as u8)
+        .or_else(|| {
+            if crate::battery_limit::hp_wmi_charge_mode_supported() {
+                if let Ok(raw) = std::fs::read_to_string("/etc/omen-space/platform.json") {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
+                        let lim = val.get("battery_charge_limit").and_then(|v| v.as_u64()).unwrap_or(100);
+                        let bypass = val.get("battery_charge_bypass").and_then(|v| v.as_bool()).unwrap_or(false);
+                        if (50..=95).contains(&lim) && !bypass {
+                            return Some(lim as u8);
+                        }
+                    }
+                }
+            }
+            None
+        });
 
     Some(BatteryTelemetry {
         name,

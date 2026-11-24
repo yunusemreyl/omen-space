@@ -537,6 +537,7 @@ enum hp_wmi_commandtype {
 	HPWMI_FEATURE2_QUERY      = 0x0d,
 	HPWMI_WIRELESS2_QUERY     = 0x1b,
 	HPWMI_POSTCODEERROR_QUERY = 0x2a,
+	HPWMI_BATTERY_CHARGE_MODE = 0x2b,
 	HPWMI_SYSTEM_DEVICE_MODE  = 0x40,
 	HPWMI_THERMAL_PROFILE_QUERY = 0x4c,
 	HPWMI_GRAPHICS_MUX_QUERY    = 0x52,
@@ -1836,6 +1837,100 @@ static ssize_t chassis_temp_show(struct device *dev,
 
 static DEVICE_ATTR_RO(chassis_temp);
 
+/*
+ * battery_charge_mode — legacy HP WMI command type 0x2B (GBCC / SBCC).
+ * Lets userspace switch the EC firmware charge state safely on Victus/OMEN
+ * models that lack native kernel charge_control_end_threshold support.
+ *
+ * Readable states (first byte of GBCC reply):
+ *   auto, charging, discharging, hold, inhibit, inhibit_variant,
+ *   inhibit_ship, no_battery, unknown.
+ * Writable states (strictly whitelisted — force-discharge 0x0200 and ship
+ * modes 0x0600/0x0700 are intentionally refused):
+ *   auto    (0x0000) — normal charging
+ *   inhibit (0x0500) — SBIS inhibit charging while running
+ *   hold    (0x0300) — SBTC hold charging across shutdown
+ */
+static ssize_t battery_charge_mode_show(struct device *dev,
+					struct device_attribute *attr, char *buf)
+{
+	u8 out[4] = {0};
+	const char *mode_name;
+	int ret;
+
+	ret = hp_wmi_perform_query(HPWMI_BATTERY_CHARGE_MODE, HPWMI_READ,
+				   out, sizeof(out), sizeof(out));
+	if (ret == HPWMI_RET_INVALID_PARAMETERS) {
+		memset(out, 0, sizeof(out));
+		ret = hp_wmi_perform_query(HPWMI_BATTERY_CHARGE_MODE, HPWMI_READ,
+					   out, 0, sizeof(out));
+	}
+	if (ret == HPWMI_RET_UNKNOWN_COMMAND || ret == HPWMI_RET_UNKNOWN_CMDTYPE)
+		return -EOPNOTSUPP;
+	if (ret)
+		return ret < 0 ? ret : -EIO;
+
+	switch (out[0]) {
+	case 0:
+		mode_name = "auto";
+		break;
+	case 1:
+		mode_name = "charging";
+		break;
+	case 2:
+		mode_name = "discharging";
+		break;
+	case 3:
+		mode_name = "hold";
+		break;
+	case 4:
+		mode_name = "inhibit";
+		break;
+	case 5:
+		mode_name = "inhibit_variant";
+		break;
+	case 6:
+		mode_name = "inhibit_ship";
+		break;
+	case 0xFF:
+		mode_name = "no_battery";
+		break;
+	default:
+		mode_name = "unknown";
+		break;
+	}
+
+	return sysfs_emit(buf, "%s\n", mode_name);
+}
+
+static ssize_t battery_charge_mode_store(struct device *dev,
+					 struct device_attribute *attr,
+					 const char *buf, size_t count)
+{
+	__le32 mode;
+	int ret;
+
+	if (sysfs_streq(buf, "auto"))
+		mode = cpu_to_le32(0x0000);
+	else if (sysfs_streq(buf, "inhibit"))
+		mode = cpu_to_le32(0x0500);
+	else if (sysfs_streq(buf, "hold"))
+		mode = cpu_to_le32(0x0300);
+	else
+		return -EINVAL;
+
+	ret = hp_wmi_perform_query(HPWMI_BATTERY_CHARGE_MODE, HPWMI_WRITE,
+				   &mode, sizeof(mode), 0);
+	if (ret == HPWMI_RET_UNKNOWN_COMMAND || ret == HPWMI_RET_UNKNOWN_CMDTYPE)
+		return -EOPNOTSUPP;
+	if (ret)
+		return ret < 0 ? ret : -EIO;
+
+	return count;
+}
+
+static DEVICE_ATTR_RW(battery_charge_mode);
+
 static struct attribute *hp_wmi_attrs[] = {
 	&dev_attr_display.attr,
 	&dev_attr_hddtemp.attr,
@@ -1848,6 +1943,7 @@ static struct attribute *hp_wmi_attrs[] = {
 	&dev_attr_gpu_ppab.attr,
 	&dev_attr_gpu_mux_mode.attr,
 	&dev_attr_chassis_temp.attr,
+	&dev_attr_battery_charge_mode.attr,
 	NULL,
 };
 

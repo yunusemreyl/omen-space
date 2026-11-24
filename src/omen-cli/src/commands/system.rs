@@ -14,9 +14,25 @@ pub enum SystemCommand {
         #[arg(long)]
         f1: bool,
     },
-    /// Set battery charge limit (50 to 100)
+    /// Set battery charge limit (50 to 100; 100 disables)
     BatteryCare {
         limit: u32,
+    },
+    /// Configure hysteretic battery charge limiter (50-95 stop, or 100 to disable)
+    BatteryLimit {
+        /// Stop charging percentage (50..=95, or 100 to disable)
+        stop: u32,
+        /// Resume charging percentage (20..stop)
+        #[arg(long)]
+        start: Option<u32>,
+        /// Hold charge blocking across shutdown/reboot on WMI 0x2B boards
+        #[arg(long, default_value_t = true)]
+        off_hold: bool,
+    },
+    /// Toggle temporary one-shot full charge bypass (on/off)
+    BatteryBypass {
+        /// "on" or "off"
+        mode: String,
     },
     /// Show live battery charge, health, and status
     Battery,
@@ -54,9 +70,25 @@ pub async fn handle(cmd: &SystemCommand, conn: &Connection) -> Result<()> {
             let res = proxy.set_battery_care(*limit).await?;
             println!("Response: {}", res);
         }
+        SystemCommand::BatteryLimit { stop, start, off_hold } => {
+            let enabled = *stop < 100;
+            let s_stop = if enabled { (*stop).clamp(50, 95) } else { 100 };
+            let s_start = start.unwrap_or_else(|| s_stop.saturating_sub(5).max(20));
+            let res = proxy.set_battery_limit_config(enabled, s_stop, s_start, *off_hold).await?;
+            println!("Response: {}", res);
+        }
+        SystemCommand::BatteryBypass { mode } => {
+            let enabled = matches!(mode.trim().to_ascii_lowercase().as_str(), "on" | "1" | "true" | "yes");
+            let res = proxy.set_battery_bypass(enabled).await?;
+            println!("Response: {}", res);
+        }
         SystemCommand::Battery => {
             let sysmon = crate::dbus_proxy::SysMonProxy::new(conn).await?;
             let diag_str = sysmon.get_diagnostics().await?;
+            let limit_json: serde_json::Value = match proxy.get_battery_limit_state().await {
+                Ok(s) => serde_json::from_str(&s).unwrap_or(serde_json::Value::Null),
+                Err(_) => serde_json::Value::Null,
+            };
             let json: serde_json::Value = serde_json::from_str(&diag_str).unwrap_or(serde_json::Value::Null);
             if let Some(bat) = json.get("battery").filter(|b| !b.is_null()) {
                 let name = bat["name"].as_str().unwrap_or("BAT0");
@@ -92,6 +124,30 @@ pub async fn handle(cmd: &SystemCommand, conn: &Connection) -> Result<()> {
                 }
                 if let Some(lim) = bat["charge_limit_pct"].as_u64() {
                     println!("  \x1b[1mCare Limit:\x1b[0m     {}%", lim);
+                }
+                if limit_json["supported"].as_bool().unwrap_or(false) {
+                    let backend = limit_json["backend"].as_str().unwrap_or("unknown");
+                    let enabled = limit_json["enabled"].as_bool().unwrap_or(false);
+                    let stop = limit_json["stop"].as_u64().unwrap_or(100);
+                    let start = limit_json["start"].as_u64().unwrap_or(75);
+                    let state = limit_json["limiter_state"].as_str().unwrap_or("disabled");
+                    let bypass = limit_json["bypass"].as_bool().unwrap_or(false);
+                    let off_hold = limit_json["off_hold"].as_bool().unwrap_or(true);
+                    let fw = limit_json["firmware_mode"].as_str().unwrap_or("");
+                    if enabled {
+                        println!(
+                            "  \x1b[1mCharge Limiter:\x1b[0m {} ({}%..{}%, off_hold={}, bypass={}, backend={}{})",
+                            state,
+                            start,
+                            stop,
+                            off_hold,
+                            bypass,
+                            backend,
+                            if fw.is_empty() { String::new() } else { format!(", fw={}", fw) }
+                        );
+                    } else {
+                        println!("  \x1b[1mCharge Limiter:\x1b[0m off (backend={})", backend);
+                    }
                 }
             } else {
                 println!("No battery detected (desktop system or battery not reporting).");

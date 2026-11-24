@@ -23,6 +23,7 @@ mod game_automation;
 mod power_automation;
 pub mod desktop_rgb;
 mod hotkey_monitor;
+mod battery_limit;
 
 #[cfg(test)]
 mod tests;
@@ -135,7 +136,36 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    std::future::pending::<()>().await;
+    let shutdown_fut = async {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{signal, SignalKind};
+            let mut sigterm = signal(SignalKind::terminate()).ok();
+            let mut sigint = signal(SignalKind::interrupt()).ok();
+            tokio::select! {
+                _ = async {
+                    if let Some(ref mut s) = sigterm {
+                        s.recv().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                } => {}
+                _ = async {
+                    if let Some(ref mut s) = sigint {
+                        s.recv().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                } => {}
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = tokio::signal::ctrl_c().await;
+    };
+
+    shutdown_fut.await;
+    info!("Shutdown signal received — applying battery off-state charge policy...");
+    platform_service.shutdown_battery_limiter().await;
 
     Ok(())
 }

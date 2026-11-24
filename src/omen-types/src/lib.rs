@@ -250,6 +250,9 @@ pub trait Rgb {
 )]
 pub trait Platform {
     async fn set_battery_care(&self, limit: u32) -> zbus::Result<String>;
+    async fn set_battery_limit_config(&self, enabled: bool, stop: u32, start: u32, off_hold: bool) -> zbus::Result<String>;
+    async fn set_battery_bypass(&self, enabled: bool) -> zbus::Result<String>;
+    async fn get_battery_limit_state(&self) -> zbus::Result<String>;
     async fn run_fan_cleaning(&self) -> zbus::Result<String>;
     async fn toggle_overlay(&self) -> zbus::Result<String>;
     async fn generate_triage_bundle(&self) -> zbus::Result<String>;

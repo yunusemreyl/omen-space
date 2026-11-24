@@ -28,11 +28,36 @@ const HWDB_PATH: &str = "/etc/udev/hwdb.d/90-hp-keyboard-fixes.hwdb";
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+fn default_battery_start() -> u32 { 75 }
+fn default_true() -> bool { true }
+fn default_100() -> u32 { 100 }
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(default)]
 struct PlatformConfig {
     prtsc_fix: bool,
     f1_fix: bool,
+    #[serde(default = "default_100")]
     battery_charge_limit: u32,
+    #[serde(default = "default_battery_start")]
+    battery_charge_start: u32,
+    #[serde(default)]
+    battery_charge_bypass: bool,
+    #[serde(default = "default_true")]
+    battery_off_hold: bool,
+}
+
+impl Default for PlatformConfig {
+    fn default() -> Self {
+        Self {
+            prtsc_fix: false,
+            f1_fix: false,
+            battery_charge_limit: 100,
+            battery_charge_start: 75,
+            battery_charge_bypass: false,
+            battery_off_hold: true,
+        }
+    }
 }
 
 impl PlatformConfig {
@@ -40,10 +65,7 @@ impl PlatformConfig {
         if let Ok(data) = std::fs::read_to_string(CONFIG_PATH) {
             serde_json::from_str(&data).unwrap_or_default()
         } else {
-            Self {
-                battery_charge_limit: 100,
-                ..Default::default()
-            }
+            Self::default()
         }
     }
     fn save(&self) {
@@ -53,6 +75,18 @@ impl PlatformConfig {
         if let Ok(json) = serde_json::to_string_pretty(self) {
             let _ = std::fs::write(CONFIG_PATH, json);
         }
+    }
+
+    fn to_limiter_config(&self) -> crate::battery_limit::BatteryLimitConfig {
+        let enabled = self.battery_charge_limit < 100;
+        crate::battery_limit::BatteryLimitConfig {
+            enabled,
+            stop_pct: self.battery_charge_limit.clamp(50, 95) as u8,
+            start_pct: self.battery_charge_start.clamp(20, 90) as u8,
+            off_hold: self.battery_off_hold,
+            bypass: enabled && self.battery_charge_bypass,
+        }
+        .sanitized()
     }
 }
 
@@ -217,6 +251,7 @@ struct PlatformInner {
     gpu_temp_path: Option<String>,
     info_cache: serde_json::Value,
     last_temp_path_refresh: std::time::Instant,
+    limiter: crate::battery_limit::HysteresisLimiter,
 }
 
 #[derive(Clone)]
@@ -290,6 +325,7 @@ impl PlatformService {
                 gpu_temp_path,
                 info_cache,
                 last_temp_path_refresh: std::time::Instant::now(),
+                limiter: crate::battery_limit::HysteresisLimiter::new(),
             })),
         };
 
@@ -307,7 +343,114 @@ impl PlatformService {
         let inner_clone = svc.inner.clone();
         tokio::spawn(Self::monitor_loop(inner_clone));
 
+        // Background battery charge limiter loop (30s interval)
+        let inner_bat = svc.inner.clone();
+        tokio::spawn(Self::battery_limit_loop(inner_bat));
+
         Ok(svc)
+    }
+
+    async fn apply_battery_limit_once(inner: &Arc<Mutex<PlatformInner>>) -> crate::battery_limit::BackendKind {
+        use crate::battery_limit::{
+            apply_native_threshold, detect_backend, read_sysfs_battery_reading, BackendKind,
+            HpWmiSysfsBackend, LimiterState,
+        };
+
+        let backend = tokio::task::spawn_blocking(detect_backend)
+            .await
+            .unwrap_or(BackendKind::None);
+
+        match backend {
+            BackendKind::NativeThreshold => {
+                let mut cfg = {
+                    let g = inner.lock().await;
+                    g.config.to_limiter_config()
+                };
+                let reading = tokio::task::spawn_blocking(read_sysfs_battery_reading)
+                    .await
+                    .unwrap_or(None);
+                let mut cleared_bypass = false;
+                if cfg.bypass && reading.is_some_and(|r| r.is_full || r.capacity >= 99) {
+                    cfg.bypass = false;
+                    cleared_bypass = true;
+                }
+                let target = if !cfg.enabled || cfg.bypass { 100 } else { cfg.stop_pct };
+                let ok = tokio::task::spawn_blocking(move || apply_native_threshold(target))
+                    .await
+                    .unwrap_or(Err("join error".to_string()))
+                    .is_ok();
+                let mut g = inner.lock().await;
+                if cleared_bypass {
+                    g.config.battery_charge_bypass = false;
+                    g.config.save();
+                }
+                if ok {
+                    g.limiter.state = if !cfg.enabled {
+                        LimiterState::Disabled
+                    } else if cfg.bypass {
+                        LimiterState::Bypassed
+                    } else {
+                        LimiterState::Limiting
+                    };
+                }
+            }
+            BackendKind::HpWmiMode => {
+                let (mut cfg, mut limiter) = {
+                    let mut g = inner.lock().await;
+                    (g.config.to_limiter_config(), std::mem::take(&mut g.limiter))
+                };
+                let (cfg_out, limiter_out, cleared) = tokio::task::spawn_blocking(move || {
+                    let mut cleared = false;
+                    if let Some(reading) = read_sysfs_battery_reading() {
+                        let mut writer = HpWmiSysfsBackend::system();
+                        cleared = limiter.tick(reading, &mut cfg, &mut writer);
+                    }
+                    (cfg, limiter, cleared)
+                })
+                .await
+                .unwrap_or((cfg, crate::battery_limit::HysteresisLimiter::new(), false));
+                let _ = cfg_out;
+                let mut g = inner.lock().await;
+                g.limiter = limiter_out;
+                if cleared {
+                    g.config.battery_charge_bypass = false;
+                    g.config.save();
+                }
+            }
+            BackendKind::None => {}
+        }
+
+        backend
+    }
+
+    async fn battery_limit_loop(inner: Arc<Mutex<PlatformInner>>) {
+        Self::apply_battery_limit_once(&inner).await;
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+            Self::apply_battery_limit_once(&inner).await;
+        }
+    }
+
+    pub async fn shutdown_battery_limiter(&self) {
+        use crate::battery_limit::{
+            detect_backend, read_sysfs_battery_reading, BackendKind, HpWmiSysfsBackend,
+        };
+        let backend = tokio::task::spawn_blocking(detect_backend)
+            .await
+            .unwrap_or(BackendKind::None);
+        if backend != BackendKind::HpWmiMode {
+            return;
+        }
+        let (cfg, mut limiter) = {
+            let mut g = self.inner.lock().await;
+            (g.config.to_limiter_config(), std::mem::take(&mut g.limiter))
+        };
+        let _ = tokio::task::spawn_blocking(move || {
+            let reading = read_sysfs_battery_reading();
+            let mut writer = HpWmiSysfsBackend::system();
+            limiter.on_shutdown(reading, &cfg, &mut writer)
+        })
+        .await;
     }
 
     async fn monitor_loop(inner: Arc<Mutex<PlatformInner>>) {
@@ -448,29 +591,110 @@ impl PlatformService {
         "OK".to_string()
     }
 
-    /// SetBatteryCare(limit) — clamps to [50,100], writes to sysfs.
+    /// SetBatteryCare(limit) — clamps to [50,100], applies via native sysfs or HP WMI 0x2B limiter.
     async fn set_battery_care(&self, limit: u32) -> String {
-        let limit = limit.clamp(50, 100);
+        let enabled = limit < 100;
+        let stop = limit.clamp(50, 100);
         {
             let mut g = self.inner.lock().await;
-            g.config.battery_charge_limit = limit;
+            g.config.battery_charge_limit = stop;
+            if enabled {
+                if g.config.battery_charge_start >= stop {
+                    g.config.battery_charge_start = stop.saturating_sub(5).max(20);
+                }
+                g.config.battery_charge_bypass = false;
+            } else {
+                g.config.battery_charge_bypass = false;
+            }
+            g.limiter.reset_for_reconfigure();
             g.config.save();
         }
 
-        let mut set = false;
-        if let Ok(entries) = glob("/sys/class/power_supply/BAT*/charge_control_end_threshold") {
-            for entry in entries.filter_map(Result::ok) {
-                if tokio::fs::write(&entry, limit.to_string()).await.is_ok() { set = true; }
-            }
-        }
-
-        if set {
-            info!("Battery care limit set to {}%", limit);
+        let backend = Self::apply_battery_limit_once(&self.inner).await;
+        if backend != crate::battery_limit::BackendKind::None {
+            info!("Battery care updated: enabled={}, stop={}% (backend={})", enabled, stop, backend.as_str());
             "OK".to_string()
         } else {
-            warn!("Battery care sysfs node not available");
-            "FAIL".to_string()
+            warn!("Battery charge limiter backend unavailable on this device");
+            "UNSUPPORTED".to_string()
         }
+    }
+
+    /// SetBatteryLimitConfig(enabled, stop, start, off_hold) — full hysteresis configuration.
+    async fn set_battery_limit_config(&self, enabled: bool, stop: u32, start: u32, off_hold: bool) -> String {
+        let stop_clamped = if enabled { stop.clamp(50, 95) } else { 100 };
+        let max_start = stop_clamped.saturating_sub(1).max(20);
+        let start_clamped = start.clamp(20, max_start);
+        {
+            let mut g = self.inner.lock().await;
+            g.config.battery_charge_limit = stop_clamped;
+            g.config.battery_charge_start = start_clamped;
+            g.config.battery_off_hold = off_hold;
+            if !enabled {
+                g.config.battery_charge_bypass = false;
+            }
+            g.limiter.reset_for_reconfigure();
+            g.config.save();
+        }
+        let backend = Self::apply_battery_limit_once(&self.inner).await;
+        if backend != crate::battery_limit::BackendKind::None {
+            info!(
+                "SetBatteryLimitConfig: enabled={}, stop={}%, start={}%, off_hold={} (backend={})",
+                enabled, stop_clamped, start_clamped, off_hold, backend.as_str()
+            );
+            "OK".to_string()
+        } else {
+            "UNSUPPORTED".to_string()
+        }
+    }
+
+    /// SetBatteryBypass(enabled) — temporary one-shot full charge bypass (resets at 100%).
+    async fn set_battery_bypass(&self, enabled: bool) -> String {
+        {
+            let mut g = self.inner.lock().await;
+            g.config.battery_charge_bypass = enabled && g.config.battery_charge_limit < 100;
+            g.limiter.reset_for_reconfigure();
+            g.config.save();
+        }
+        let backend = Self::apply_battery_limit_once(&self.inner).await;
+        if backend != crate::battery_limit::BackendKind::None {
+            "OK".to_string()
+        } else {
+            "UNSUPPORTED".to_string()
+        }
+    }
+
+    /// GetBatteryLimitState() -> JSON snapshot of backend & hysteresis state.
+    async fn get_battery_limit_state(&self) -> String {
+        use crate::battery_limit::{detect_backend, BackendKind, ChargeModeWriter, HpWmiSysfsBackend};
+        let (cfg, state_str) = {
+            let g = self.inner.lock().await;
+            (g.config.to_limiter_config(), g.limiter.state.as_str().to_string())
+        };
+        let (backend, fw_mode) = tokio::task::spawn_blocking(|| {
+            let b = detect_backend();
+            let fw = if b == BackendKind::HpWmiMode {
+                HpWmiSysfsBackend::system().read_mode().unwrap_or_default()
+            } else {
+                String::new()
+            };
+            (b, fw)
+        })
+        .await
+        .unwrap_or((BackendKind::None, String::new()));
+
+        serde_json::json!({
+            "supported": backend != BackendKind::None,
+            "backend": backend.as_str(),
+            "enabled": cfg.enabled,
+            "stop": cfg.stop_pct,
+            "start": cfg.start_pct,
+            "off_hold": cfg.off_hold,
+            "bypass": cfg.bypass,
+            "limiter_state": state_str,
+            "firmware_mode": fw_mode,
+        })
+        .to_string()
     }
 
     /// CleanMemory — mirrors Python CleanMemory().

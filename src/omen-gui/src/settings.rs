@@ -22,6 +22,9 @@ pub fn build_page(
     let mut init_auto = true;
     let mut init_startup_profile = 0u32;
     let mut init_battery_care = false;
+    let mut init_battery_stop = 80.0;
+    let mut init_battery_start = 75.0;
+    let mut init_battery_off_hold = true;
     let mut init_thermal_alerts = true;
     let mut init_thermal_prot = true;
     let mut init_zone_override = 0u32;
@@ -39,6 +42,9 @@ pub fn build_page(
                 if let Some(auto) = json.get("autostart").and_then(|v| v.as_bool()) { init_auto = auto; }
                 if let Some(sp) = json.get("startup_profile").and_then(|v| v.as_u64()) { init_startup_profile = sp as u32; }
                 if let Some(bc) = json.get("battery_care").and_then(|v| v.as_bool()) { init_battery_care = bc; }
+                if let Some(bs) = json.get("battery_stop").and_then(|v| v.as_f64()) { init_battery_stop = bs.clamp(50.0, 95.0); }
+                if let Some(br) = json.get("battery_start").and_then(|v| v.as_f64()) { init_battery_start = br.clamp(20.0, 90.0); }
+                if let Some(bh) = json.get("battery_off_hold").and_then(|v| v.as_bool()) { init_battery_off_hold = bh; }
                 if let Some(ta) = json.get("thermal_alerts").and_then(|v| v.as_bool()) { init_thermal_alerts = ta; }
                 if let Some(tp) = json.get("thermal_protection").and_then(|v| v.as_bool()) { init_thermal_prot = tp; }
                 if let Some(zo) = json.get("zone_override").and_then(|v| v.as_u64()) { init_zone_override = zo as u32; }
@@ -208,18 +214,6 @@ pub fn build_page(
     startup_mode_row.set_selected(init_startup_profile);
     perf_group.add(&startup_mode_row);
 
-    let bat_sub = if !specs.battery_spec.is_empty() {
-        format!("{} ({})", i18n::t("battery_care_sub"), specs.battery_spec)
-    } else {
-        i18n::t("battery_care_sub").to_string()
-    };
-    let battery_row = adw::SwitchRow::builder()
-        .title(i18n::t("battery_care"))
-        .subtitle(&bat_sub)
-        .build();
-    battery_row.set_active(init_battery_care);
-    perf_group.add(&battery_row);
-
     let thermal_row = adw::SwitchRow::builder()
         .title(i18n::t("thermal_alerts"))
         .subtitle(i18n::t("thermal_alerts_sub"))
@@ -235,6 +229,74 @@ pub fn build_page(
     perf_group.add(&thermal_prot_row);
 
     page.append(&perf_group);
+
+    // ── 3b. Battery Charge Limiter ────────────────────────────
+    let bat_status_badge = gtk::Label::builder()
+        .label(if init_battery_care {
+            i18n::t("battery_limit_status_limiting")
+        } else {
+            i18n::t("battery_limit_status_off")
+        })
+        .css_classes([if init_battery_care { "badge-ok" } else { "badge-neutral" }])
+        .valign(gtk::Align::Center)
+        .build();
+
+    let bat_group = adw::PreferencesGroup::builder()
+        .title(i18n::t("battery_limit_group"))
+        .header_suffix(&bat_status_badge)
+        .build();
+
+    let bat_sub = if !specs.battery_spec.is_empty() {
+        format!("{} ({})", i18n::t("battery_care_sub"), specs.battery_spec)
+    } else {
+        i18n::t("battery_care_sub").to_string()
+    };
+    let battery_row = adw::SwitchRow::builder()
+        .title(i18n::t("battery_care"))
+        .subtitle(&bat_sub)
+        .build();
+    battery_row.set_active(init_battery_care);
+    bat_group.add(&battery_row);
+
+    let stop_row = adw::ActionRow::builder()
+        .title(i18n::t("battery_limit_stop"))
+        .subtitle(i18n::t("battery_limit_stop_sub"))
+        .build();
+    let stop_spin = gtk::SpinButton::with_range(50.0, 95.0, 5.0);
+    stop_spin.set_value(init_battery_stop);
+    stop_spin.set_valign(gtk::Align::Center);
+    stop_row.add_suffix(&stop_spin);
+    stop_row.set_sensitive(init_battery_care);
+    bat_group.add(&stop_row);
+
+    let start_row = adw::ActionRow::builder()
+        .title(i18n::t("battery_limit_start"))
+        .subtitle(i18n::t("battery_limit_start_sub"))
+        .build();
+    let start_spin = gtk::SpinButton::with_range(20.0, 90.0, 5.0);
+    start_spin.set_value(init_battery_start.min((init_battery_stop - 5.0).max(20.0)));
+    start_spin.set_valign(gtk::Align::Center);
+    start_row.add_suffix(&start_spin);
+    start_row.set_sensitive(init_battery_care);
+    bat_group.add(&start_row);
+
+    let off_hold_row = adw::SwitchRow::builder()
+        .title(i18n::t("battery_limit_off_hold"))
+        .subtitle(i18n::t("battery_limit_off_hold_sub"))
+        .build();
+    off_hold_row.set_active(init_battery_off_hold);
+    off_hold_row.set_sensitive(init_battery_care);
+    bat_group.add(&off_hold_row);
+
+    let bypass_row = adw::SwitchRow::builder()
+        .title(i18n::t("battery_limit_bypass"))
+        .subtitle(i18n::t("battery_limit_bypass_sub"))
+        .build();
+    bypass_row.set_active(false);
+    bypass_row.set_sensitive(init_battery_care);
+    bat_group.add(&bypass_row);
+
+    page.append(&bat_group);
 
     // ── 4. Quick HUD Hotkey ───────────────────────────────────
     let hotkey_spec = Rc::new(RefCell::new(init_hotkey));
@@ -343,6 +405,9 @@ pub fn build_page(
     let as_row_clone = autostart_row.clone();
     let sm_row_clone = startup_mode_row.clone();
     let bat_row_clone = battery_row.clone();
+    let bat_stop_clone = stop_spin.clone();
+    let bat_start_clone = start_spin.clone();
+    let bat_hold_clone = off_hold_row.clone();
     let thm_row_clone = thermal_row.clone();
     let thm_prot_clone = thermal_prot_row.clone();
     let zone_row_clone = zone_override_row.clone();
@@ -370,6 +435,9 @@ pub fn build_page(
             json["autostart"] = serde_json::json!(auto);
             json["startup_profile"] = serde_json::json!(sp);
             json["battery_care"] = serde_json::json!(bc);
+            json["battery_stop"] = serde_json::json!(bat_stop_clone.value());
+            json["battery_start"] = serde_json::json!(bat_start_clone.value());
+            json["battery_off_hold"] = serde_json::json!(bat_hold_clone.is_active());
             json["thermal_alerts"] = serde_json::json!(ta);
             json["thermal_protection"] = serde_json::json!(tp);
             json["zone_override"] = serde_json::json!(zo);
@@ -418,12 +486,162 @@ pub fn build_page(
     let s3 = save_settings_rc.clone();
     startup_mode_row.connect_selected_notify(move |_| s3());
 
-    let s4 = save_settings_rc.clone();
-    battery_row.connect_active_notify(move |r| {
-        s4();
-        let limit = if r.is_active() { 80 } else { 100 };
-        crate::daemon_client::set_battery_care_sync(limit);
-    });
+    let syncing_battery = Rc::new(std::cell::Cell::new(false));
+    let update_bat_ui = {
+        let stop_r = stop_row.clone();
+        let start_r = start_row.clone();
+        let hold_r = off_hold_row.clone();
+        let byp_r = bypass_row.clone();
+        let badge = bat_status_badge.clone();
+        let bat_sw = battery_row.clone();
+        Rc::new(move || {
+            let active = bat_sw.is_active();
+            let byp = byp_r.is_active();
+            stop_r.set_sensitive(active);
+            start_r.set_sensitive(active);
+            hold_r.set_sensitive(active);
+            byp_r.set_sensitive(active);
+            if !active {
+                badge.set_label(i18n::t("battery_limit_status_off"));
+                badge.set_css_classes(&["badge-neutral"]);
+            } else if byp {
+                badge.set_label(i18n::t("battery_limit_status_bypassed"));
+                badge.set_css_classes(&["badge-accent"]);
+            } else {
+                badge.set_label(i18n::t("battery_limit_status_limiting"));
+                badge.set_css_classes(&["badge-ok"]);
+            }
+        })
+    };
+
+    let send_bat_cfg = {
+        let save = save_settings_rc.clone();
+        let bat_sw = battery_row.clone();
+        let stop_sp = stop_spin.clone();
+        let start_sp = start_spin.clone();
+        let hold_sw = off_hold_row.clone();
+        let ui = update_bat_ui.clone();
+        let guard = syncing_battery.clone();
+        Rc::new(move || {
+            if guard.get() {
+                return;
+            }
+            let stop_v = stop_sp.value() as u32;
+            let start_v = (start_sp.value() as u32).min(stop_v.saturating_sub(1).max(20));
+            if start_sp.value() as u32 != start_v {
+                guard.set(true);
+                start_sp.set_value(start_v as f64);
+                guard.set(false);
+            }
+            save();
+            ui();
+            crate::daemon_client::set_battery_limit_config_sync(
+                bat_sw.is_active(),
+                stop_v,
+                start_v,
+                hold_sw.is_active(),
+            );
+        })
+    };
+
+    {
+        let f = send_bat_cfg.clone();
+        battery_row.connect_active_notify(move |_| f());
+    }
+    {
+        let f = send_bat_cfg.clone();
+        stop_spin.connect_value_changed(move |_| f());
+    }
+    {
+        let f = send_bat_cfg.clone();
+        let guard = syncing_battery.clone();
+        let stop_sp = stop_spin.clone();
+        start_spin.connect_value_changed(move |sp| {
+            if guard.get() {
+                return;
+            }
+            let max_s = (stop_sp.value() - 1.0).max(20.0);
+            if sp.value() > max_s {
+                guard.set(true);
+                sp.set_value(max_s);
+                guard.set(false);
+            }
+            f();
+        });
+    }
+    {
+        let f = send_bat_cfg.clone();
+        off_hold_row.connect_active_notify(move |_| f());
+    }
+    {
+        let guard = syncing_battery.clone();
+        let ui = update_bat_ui.clone();
+        bypass_row.connect_active_notify(move |r| {
+            if guard.get() {
+                return;
+            }
+            ui();
+            crate::daemon_client::set_battery_bypass_sync(r.is_active());
+        });
+    }
+    {
+        let guard = syncing_battery.clone();
+        let bat_sw = battery_row.clone();
+        let stop_sp = stop_spin.clone();
+        let start_sp = start_spin.clone();
+        let hold_sw = off_hold_row.clone();
+        let byp_sw = bypass_row.clone();
+        let stop_r = stop_row.clone();
+        let start_r = start_row.clone();
+        let hold_r = off_hold_row.clone();
+        let byp_r = bypass_row.clone();
+        let badge = bat_status_badge.clone();
+        glib::spawn_future_local(async move {
+            if let Ok(state_json) = crate::daemon_client::get_battery_limit_state_async().await {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&state_json) {
+                    let supported = val.get("supported").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let enabled = val.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let stop = val.get("stop").and_then(|v| v.as_f64()).unwrap_or(80.0);
+                    let start = val.get("start").and_then(|v| v.as_f64()).unwrap_or(75.0);
+                    let off_hold = val.get("off_hold").and_then(|v| v.as_bool()).unwrap_or(true);
+                    let bypass = val.get("bypass").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let lim_state = val.get("limiter_state").and_then(|v| v.as_str()).unwrap_or("off");
+                    let backend = val.get("backend").and_then(|v| v.as_str()).unwrap_or("none");
+
+                    guard.set(true);
+                    bat_sw.set_active(enabled);
+                    stop_sp.set_value(stop.clamp(50.0, 95.0));
+                    start_sp.set_value(start.clamp(20.0, 90.0));
+                    hold_sw.set_active(off_hold);
+                    byp_sw.set_active(bypass);
+                    guard.set(false);
+
+                    let native_only = backend == "native_threshold";
+                    stop_r.set_sensitive(enabled);
+                    start_r.set_sensitive(enabled && !native_only);
+                    hold_r.set_sensitive(enabled && !native_only);
+                    byp_r.set_sensitive(enabled);
+
+                    if !supported {
+                        badge.set_label(i18n::t("battery_limit_status_unsupported"));
+                        badge.set_css_classes(&["badge-warn"]);
+                    } else if !enabled {
+                        badge.set_label(i18n::t("battery_limit_status_off"));
+                        badge.set_css_classes(&["badge-neutral"]);
+                    } else if bypass {
+                        badge.set_label(i18n::t("battery_limit_status_bypassed"));
+                        badge.set_css_classes(&["badge-accent"]);
+                    } else if lim_state == "charging" {
+                        badge.set_label(i18n::t("battery_limit_status_charging"));
+                        badge.set_css_classes(&["badge-accent"]);
+                    } else {
+                        badge.set_label(i18n::t("battery_limit_status_limiting"));
+                        badge.set_css_classes(&["badge-ok"]);
+                    }
+                }
+            }
+        });
+    }
 
     let s5 = save_settings_rc.clone();
     thermal_row.connect_active_notify(move |_| {
