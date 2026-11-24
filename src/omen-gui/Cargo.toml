@@ -8,7 +8,7 @@ gtk = { version = "0.7", package = "gtk4", features = ["v4_12"] }
 libadwaita = { version = "0.5", features = ["v1_4"] }
 glib = "0.18"
 tokio = { version = "1", features = ["full"] }
-zbus = "4.4"
+zbus = "6.5"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 glob = "0.3.4"
