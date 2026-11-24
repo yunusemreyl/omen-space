@@ -1,15 +1,16 @@
-/// Integration / unit tests for omen-space-daemon
-///
-/// Issues covered:
-///   #264 — chassis_temp cache prevents AE_AML_BUFFER_LIMIT journal flood
-///   #266 — hotkey raw scancode 200 (XF86Launch2) accepted as "omen" event
-///   #268 — boards.json contains 8D41 with correct fields
-///   #270 — board 8E0F has supports_gpu_power_boost = true
-///   #275 — board 8DD0 is present in models and verified_boards
-///   #282 — ACPI health guard blocks profile switch under error storm
-///   #283 — PPD profile names mapped correctly from omen-space names
+//! Integration / unit tests for omen-space-daemon
+//!
+//! Issues covered:
+//!   #264 — chassis_temp cache prevents AE_AML_BUFFER_LIMIT journal flood
+//!   #266 — hotkey raw scancode 200 (XF86Launch2) accepted as "omen" event
+//!   #268 — boards.json contains 8D41 with correct fields
+//!   #270 — board 8E0F has supports_gpu_power_boost = true
+//!   #275 — board 8DD0 is present in models and verified_boards
+//!   #282 — ACPI health guard blocks profile switch under error storm
+//!   #283 — PPD profile names mapped correctly from omen-space names
 
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod tests {
     use std::time::{Duration, Instant};
 

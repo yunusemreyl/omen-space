@@ -355,7 +355,7 @@ mod tests {
         assert!((health - 80.0).abs() < 0.01);
 
         assert!((telem.power_w - 18.0).abs() < 0.01);
-        assert_eq!(telem.ac_online, false);
+        assert!(!telem.ac_online);
     }
 
     #[test]

@@ -1,0 +1,49 @@
+name: Bug Report
+description: Report a bug in OMEN Space (GUI, daemon, CLI, tray, overlay, or kernel driver)
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue! For hardware/fan/MUX/RGB issues, generating a **Full System Dump** in **Settings → Diagnostics** speeds up triage dramatically.
+
+  - type: input
+    id: model
+    attributes:
+      label: Laptop Model & Board ID
+      description: Output of `cat /sys/class/dmi/id/product_name /sys/class/dmi/id/board_name`
+      placeholder: "e.g. Victus by HP Gaming Laptop 16-r0xxx / 8BBE"
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Distribution, Kernel & Desktop Environment
+      placeholder: "e.g. Arch Linux / 6.12.x / KDE Plasma 6 (Wayland)"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: OMEN Space Version
+      placeholder: "e.g. v2.4.3"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What Happened?
+      description: Clear description of the bug and how to reproduce it
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Debug Center Dump / Journal Logs
+      description: Paste output from Settings → Diagnostics → Submit Full System Dump, or `journalctl -u omen-space-daemon -n 80 --no-pager`
+      render: text

@@ -1,0 +1,38 @@
+name: Board Verification / Hardware Support
+description: Submit hardware test results to verify a laptop board ID in boards.json
+title: "Verify my laptop (Board XXXX)"
+labels: ["hardware-support"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Help us verify your HP OMEN / Victus / Transcend board in `boards.json`!
+        You can auto-fill most of this directly from **Settings → Diagnostics → Submit Full System Dump**.
+
+  - type: input
+    id: board_id
+    attributes:
+      label: DMI Board ID & Product Name
+      placeholder: "e.g. 8BBE — Victus by HP Gaming Laptop 16-r0xxx"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Verified Features
+      options:
+        - label: Performance profiles (Eco / Balanced / Performance)
+        - label: Manual fan speeds / custom fan curves & RPM telemetry
+        - label: GPU MUX / Advanced Optimus switching
+        - label: Battery charge limit (WMI 0x2B or native charge_control_end_threshold)
+        - label: Keyboard / Lightbar RGB lighting
+
+  - type: textarea
+    id: dump
+    attributes:
+      label: Full System Dump
+      description: Paste the Debug Center report or hardware telemetry details
+      render: text
+    validations:
+      required: true

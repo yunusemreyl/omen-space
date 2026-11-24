@@ -185,13 +185,8 @@ pub fn show_fan_curve_editor(
                 let aw = da_d.width() as f64 - 2.0 * pad;
                 let ah = da_d.height() as f64 - 2.0 * pad;
                 
-                let mut temp = 40.0 + (x - pad) / aw * 60.0;
-                let mut speed = 100.0 - (y - pad) / ah * 100.0;
-                
-                if temp < 40.0 { temp = 40.0; }
-                if temp > 100.0 { temp = 100.0; }
-                if speed < 0.0 { speed = 0.0; }
-                if speed > 100.0 { speed = 100.0; }
+                let mut temp = (40.0 + (x - pad) / aw * 60.0).clamp(40.0, 100.0);
+                let speed = (100.0 - (y - pad) / ah * 100.0).clamp(0.0, 100.0);
                 
                 let mut p = pts_d.borrow_mut();
                 if idx > 0

@@ -1,18 +1,22 @@
-# Kernel Driver (`omen-rgb-keyboard` DKMS)
+# Kernel Driver (`hp-wmi` & `hp-omen-extra` DKMS)
 
-The `driver/` directory contains a C-based Linux kernel module. 
+The [`driver/`](../driver) directory builds two Linux kernel modules via DKMS:
 
-## Why is a kernel module needed?
-For many functions (like fan control, CPU power, and reading thermal sensors), OMENSpace interacts with standard Linux kernel interfaces (like `sysfs`, `hwmon`, and standard WMI-ACPI events). 
+- **`hp-wmi`**: Enhanced HP platform WMI driver exposing laptop thermal profiles, MUX capabilities/switching, battery charge mode (`0x2B`), chassis sensor, and GPU TGP/PPAB knobs.
+- **`hp-omen-extra`**: Companion driver exposing 4-zone/lightbar RGB sysfs controls and hardware interfaces where required.
 
-However, modern HP Omen and Victus laptops utilize proprietary, undocumented I2C/USB endpoints for **Keyboard RGB Lighting** (especially 4-zone and per-key RGB models). The mainline Linux kernel (`hid-hp`) does not fully support these advanced lighting controls. 
+## Sysfs Interfaces Exposed (`hp-wmi`)
 
-## Responsibilities
-1. **Hardware Communication:** Sends the precise hexadecimal byte payloads required by the keyboard's microcontroller to change colors and animations.
-2. **Exposing a Character Device:** The driver mounts a node (typically in `/dev/`) or a specific `sysfs` tree that allows user-space applications to write color data.
-3. **DKMS Integration:** 
-   - Distributed as a DKMS (Dynamic Kernel Module Support) package.
-   - This ensures that whenever the user updates their Linux kernel (e.g., from `6.1` to `6.5`), the driver automatically recompiles itself for the new kernel version during boot.
+| Sysfs Path | Access | Description |
+| :--- | :--- | :--- |
+| `/sys/devices/platform/hp-wmi/gpu_mux_mode` | RW | BIOS GPU MUX selector (`0=hybrid`, `1=discrete`, `2=advanced`, `3=integrated`). Verified against hardware mask before writes. |
+| `/sys/devices/platform/hp-wmi/gpu_mux_supported_modes` | RO | Space-separated list of modes advertised by BIOS `HPWMI_GET_SYSTEM_DESIGN_DATA` (e.g. `hybrid discrete` or `hybrid discrete advanced`). |
+| `/sys/devices/platform/hp-wmi/battery_charge_mode` | RW | Legacy HP WMI `0x2B` (`GBCC`/`SBCC`) charge control (`auto`, `inhibit`, `hold`); unsafe force-discharge/ship commands are rejected. |
+| `/sys/devices/platform/hp-wmi/gpu_tgp` / `gpu_ppab` | RW | GPU Dynamic Boost / Total Graphics Power toggles on supported Victus S / OMEN systems. |
+| `/sys/devices/platform/hp-wmi/chassis_temp` | RO | Firmware WMI `0x23` board surface sensor (with WMBA-abort board guards). |
+| `/sys/devices/platform/hp-wmi/hwmon/hwmon*/fan*_target` | RW | Fan speed targets & live RPM telemetry. |
 
-## How it interacts with OMENSpace
-The `omen-space-daemon` contains a `lighting.rs` module. When the user selects a color in the GUI, the daemon translates this color into a raw byte buffer and pipes it directly into the kernel module's exposed endpoint, triggering an instant hardware-level color change on the keyboard.
+## DKMS & Secure Boot Notes
+
+- `driver/dkms.conf` automatically detects whether the running kernel was compiled with **Clang/LLVM** (`/proc/version`) and passes `LLVM=1` when required (e.g., CachyOS / LLVM kernels).
+- `setup.sh` and `driver/setup.sh` support automatic Secure Boot MOK signing (reusing distro `shim-signed` keys where present) and kernel-compatible `.ko.xz` / `.ko.zst` compression.

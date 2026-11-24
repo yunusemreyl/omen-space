@@ -1,47 +1,35 @@
-# Contributing to OMENSpace
+# Contributing to OMEN Space
 
-Thank you for your interest in contributing to OMENSpace! As an open-source tool aiming to provide the best HP Omen/Victus hardware control on Linux, we welcome all pull requests—from typo fixes to entirely new hardware reverse-engineering.
+Thank you for contributing to **OMEN Space**! From board verification reports to kernel driver fixes and UI polish, pull requests are welcome.
 
-## Development Environment Setup
+## Development Environment
 
 1. **Prerequisites:**
-   - Rust toolchain (via `rustup`)
-   - `libgtk-4-dev` and `libadwaita-1-dev` (for `omen-gui`)
-   - `dbus` and `pkg-config`
-   - Kernel headers (for building the DKMS module)
+   - Rust stable toolchain (`rustup` with `clippy` and `rustfmt`)
+   - `libgtk-4-dev`, `libadwaita-1-dev`, `libdbus-1-dev`, `libudev-dev`, `libhidapi-dev`, `pkg-config`
+   - Linux kernel headers (if editing `driver/`)
 
-2. **Local Compilation:**
-   Instead of using `sudo ./setup.sh`, you can build components locally.
+2. **Local Build, Test & Lint:**
    ```bash
-   cd src/omen-space-daemon
-   cargo build
-   
-   cd ../omen-gui
-   cargo run
+   cargo check --workspace --locked
+   cargo test --workspace
+   cargo clippy --workspace --all-targets -- -D warnings
    ```
+   (For kernel driver changes, also build modules with `make -C driver` and check `git status` after `make -C driver clean`.)
 
-## Architectural Rules for Contributors
+## Architectural Rules
 
-1. **No Root in the GUI:**
-   - OMENSpace strictly follows a split privilege model. `omen-gui`, `omen-cli`, and `omen-tray` must **never** require `sudo`. 
-   - If you need to access a new `/sys/` or `/dev/` endpoint, that logic MUST be written in `omen-space-daemon`.
-   - The GUI will communicate with the daemon via D-Bus (`zbus`).
-
-2. **D-Bus Interface Definitions:**
-   - Ensure you update the XML definitions in `data/org.hp.omen.conf` if you add new D-Bus methods, to ensure standard users in the `omen-hw` group can access them.
-
-3. **Asynchronous Code (Tokio):**
-   - The GUI thread (GTK) must never be blocked. When calling the D-Bus daemon from `omen-gui` or `omen-tray`, you must use `tokio::spawn` or `glib::spawn_future_local`.
-   - Avoid `std::thread::sleep`—use `tokio::time::sleep`.
-
-## Code Style (Rust)
-- Run `cargo fmt` before submitting your PR.
-- Run `cargo clippy -- -D warnings` to ensure there are no linting issues.
-- Keep variable names descriptive. Use `snake_case` for variables/functions and `CamelCase` for structs/enums.
+1. **Split Privileges ([SECURITY.md](../SECURITY.md)):**
+   - `omen-gui`, `omen-cli`, `omen-tray`, and `omen-overlay` must **never** require `sudo`.
+   - All hardware I/O (`/sys/`, `/dev/hidraw*`, MSR, EC) belongs strictly in `omen-space-daemon` or `driver/` and must validate/clamp inputs.
+2. **D-Bus & Hardware Gating:**
+   - Check `data/org.hp.omen.conf` when adding D-Bus interfaces.
+   - Gate optional BIOS/hardware features (`gpu_mux_supported_modes`, `battery_charge_mode`, Per-Key PIDs) gracefully so unsupported laptops never show broken controls.
+3. **Never Block GTK Main Thread:**
+   - Dispatch D-Bus/process work via `glib::spawn_future_local` + `tokio` runtime handles instead of blocking GTK threads.
+4. **Localization:**
+   - Update **TR**, **EN**, and **ES** strings in `src/omen-gui/src/i18n.rs`, escaping literal `&` as `&amp;` for Adwaita markup rows/groups.
 
 ## Submitting a Pull Request
-1. Fork the repository.
-2. Create a new branch: `git checkout -b feature/my-cool-feature`.
-3. Commit your changes logically with descriptive commit messages.
-4. Push to your branch and open a PR against the `main` branch.
-5. In your PR description, explain **what** you changed and **why**.
+
+Please follow `.github/PULL_REQUEST_TEMPLATE.md` and review [CODE_REVIEW_GUIDE.md](CODE_REVIEW_GUIDE.md) before opening a PR against `main`.

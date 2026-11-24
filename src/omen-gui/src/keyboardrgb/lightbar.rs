@@ -47,18 +47,18 @@ pub fn build_interactive_lightbar(state_json_opt: &Option<serde_json::Value>) ->
     let mut initial_colors = default_colors.iter().map(|s| s.to_string()).collect::<Vec<_>>();
     if let Some(state) = state_json_opt {
         if let Some(lb_colors) = state.get("lightbar_colors").and_then(|z| z.as_array()) {
-            for i in 0..4 {
+            for (i, slot) in initial_colors.iter_mut().enumerate().take(4) {
                 if let Some(hex) = lb_colors.get(i).and_then(|h| h.as_str()) {
                     let formatted = if hex.starts_with('#') { hex.to_string() } else { format!("#{}", hex) };
-                    initial_colors[i] = formatted;
+                    *slot = formatted;
                 }
             }
         } else if let Some(zones) = state.get("zones").and_then(|z| z.as_object()) {
-            for i in 0..4 {
+            for (i, slot) in initial_colors.iter_mut().enumerate().take(4) {
                 let key = format!("{}", i + 4); // Lightbar zones are 4, 5, 6, 7
                 if let Some(hex) = zones.get(&key).and_then(|h| h.as_str()) {
                     let formatted = if hex.starts_with('#') { hex.to_string() } else { format!("#{}", hex) };
-                    initial_colors[i] = formatted;
+                    *slot = formatted;
                 }
             }
         }

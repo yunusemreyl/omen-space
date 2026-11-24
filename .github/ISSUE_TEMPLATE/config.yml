@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability (Private Advisory)
+    url: https://github.com/yunusemreyl/omen-space/security/advisories/new
+    about: Report security vulnerabilities privately via GitHub Security Advisories
+  - name: Known Issues & Workarounds
+    url: https://github.com/yunusemreyl/omen-space/blob/main/knownissues.md
+    about: Check documented hardware quirks and Linux kernel notes before filing a report

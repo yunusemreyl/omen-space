@@ -62,7 +62,7 @@ impl OverlayWindow {
 
         let window = adw::ApplicationWindow::builder()
             .application(app)
-            .title(&crate::i18n::t("title"))
+            .title(crate::i18n::t("title"))
             .decorated(false)
             .resizable(false)
             .default_width(680)
@@ -96,7 +96,7 @@ impl OverlayWindow {
         header.append(&brand_icon);
 
         let title_label = gtk::Label::builder()
-            .label(&crate::i18n::t("title"))
+            .label(crate::i18n::t("title"))
             .css_classes(["overlay-title"])
             .hexpand(true)
             .halign(gtk::Align::Start)
@@ -105,7 +105,7 @@ impl OverlayWindow {
 
         // Show configured hotkey in header tag
         let tag_label = gtk::Label::builder()
-            .label(&cfg.hotkey.to_uppercase())
+            .label(cfg.hotkey.to_uppercase())
             .css_classes(["overlay-brand-tag"])
             .build();
         header.append(&tag_label);
@@ -129,7 +129,7 @@ impl OverlayWindow {
             .build();
 
         let perf_label = gtk::Label::builder()
-            .label(&crate::i18n::t("perf_mode"))
+            .label(crate::i18n::t("perf_mode"))
             .css_classes(["section-label"])
             .halign(gtk::Align::Start)
             .build();
@@ -211,7 +211,7 @@ impl OverlayWindow {
             .build();
 
         let fan_label = gtk::Label::builder()
-            .label(&crate::i18n::t("fan_mode"))
+            .label(crate::i18n::t("fan_mode"))
             .css_classes(["section-label"])
             .halign(gtk::Align::Start)
             .build();
@@ -313,7 +313,7 @@ impl OverlayWindow {
 
         // Fan chip
         let fan_chip = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).build();
-        fan_chip.append(&gtk::Label::builder().label(&crate::i18n::t("fans")).css_classes(["telem-chip-title"]).halign(gtk::Align::Start).build());
+        fan_chip.append(&gtk::Label::builder().label(crate::i18n::t("fans")).css_classes(["telem-chip-title"]).halign(gtk::Align::Start).build());
         let fan_val = gtk::Label::builder().label("── RPM").css_classes(["telem-chip-val"]).halign(gtk::Align::Start).build();
         fan_chip.append(&fan_val);
         telemetry_box.append(&fan_chip);
@@ -327,7 +327,7 @@ impl OverlayWindow {
 
         // BAT chip (revealed when laptop battery telemetry is active)
         let battery_chip = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).visible(false).build();
-        battery_chip.append(&gtk::Label::builder().label(&crate::i18n::t("battery")).css_classes(["telem-chip-title"]).halign(gtk::Align::Start).build());
+        battery_chip.append(&gtk::Label::builder().label(crate::i18n::t("battery")).css_classes(["telem-chip-title"]).halign(gtk::Align::Start).build());
         let battery_val = gtk::Label::builder().label("──%").css_classes(["telem-chip-val"]).halign(gtk::Align::Start).build();
         battery_chip.append(&battery_val);
         telemetry_box.append(&battery_chip);
@@ -344,17 +344,17 @@ impl OverlayWindow {
 
         let hint1 = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(4).build();
         hint1.append(&gtk::Label::builder().label("1-3").css_classes(["shortcut-key"]).build());
-        hint1.append(&gtk::Label::builder().label(&crate::i18n::t("perf_mode")).css_classes(["shortcut-hint"]).build());
+        hint1.append(&gtk::Label::builder().label(crate::i18n::t("perf_mode")).css_classes(["shortcut-hint"]).build());
         footer.append(&hint1);
 
         let hint2 = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(4).build();
         hint2.append(&gtk::Label::builder().label("Q/W/E").css_classes(["shortcut-key"]).build());
-        hint2.append(&gtk::Label::builder().label(&crate::i18n::t("fan_mode")).css_classes(["shortcut-hint"]).build());
+        hint2.append(&gtk::Label::builder().label(crate::i18n::t("fan_mode")).css_classes(["shortcut-hint"]).build());
         footer.append(&hint2);
 
         let hint3 = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(4).build();
         hint3.append(&gtk::Label::builder().label("ESC").css_classes(["shortcut-key"]).build());
-        hint3.append(&gtk::Label::builder().label(&crate::i18n::t("close")).css_classes(["shortcut-hint"]).build());
+        hint3.append(&gtk::Label::builder().label(crate::i18n::t("close")).css_classes(["shortcut-hint"]).build());
         footer.append(&hint3);
 
         root_box.append(&footer);

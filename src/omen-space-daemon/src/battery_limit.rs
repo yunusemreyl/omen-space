@@ -221,10 +221,6 @@ impl HysteresisLimiter {
         }
     }
 
-    pub fn last_written_mode(&self) -> Option<ChargeMode> {
-        self.last_written_mode
-    }
-
     fn write_mode(
         &mut self,
         writer: &mut impl ChargeModeWriter,
@@ -271,10 +267,10 @@ impl HysteresisLimiter {
         *cfg = sanitized;
 
         if !cfg.enabled {
-            if self.state != LimiterState::Disabled || self.last_written_mode != Some(ChargeMode::Auto) {
-                if self.write_mode(writer, ChargeMode::Auto, "disable", reading.capacity) {
-                    self.state = LimiterState::Disabled;
-                }
+            if (self.state != LimiterState::Disabled || self.last_written_mode != Some(ChargeMode::Auto))
+                && self.write_mode(writer, ChargeMode::Auto, "disable", reading.capacity)
+            {
+                self.state = LimiterState::Disabled;
             }
             return false;
         }

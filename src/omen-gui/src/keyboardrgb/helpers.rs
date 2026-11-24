@@ -15,15 +15,15 @@ pub fn hsl_to_rgb(h: f64, s: f64, l: f64) -> (f64, f64, f64) {
     let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
     let mut h_prime = h / 60.0;
     while h_prime < 0.0 { h_prime += 6.0; }
-    h_prime = h_prime % 6.0;
+    h_prime %= 6.0;
     let x = c * (1.0 - (h_prime % 2.0 - 1.0).abs());
     let m = l - c / 2.0;
     
-    let (r1, g1, b1) = if h_prime >= 0.0 && h_prime < 1.0 { (c, x, 0.0) }
-    else if h_prime >= 1.0 && h_prime < 2.0 { (x, c, 0.0) }
-    else if h_prime >= 2.0 && h_prime < 3.0 { (0.0, c, x) }
-    else if h_prime >= 3.0 && h_prime < 4.0 { (0.0, x, c) }
-    else if h_prime >= 4.0 && h_prime < 5.0 { (x, 0.0, c) }
+    let (r1, g1, b1) = if (0.0..1.0).contains(&h_prime) { (c, x, 0.0) }
+    else if (1.0..2.0).contains(&h_prime) { (x, c, 0.0) }
+    else if (2.0..3.0).contains(&h_prime) { (0.0, c, x) }
+    else if (3.0..4.0).contains(&h_prime) { (0.0, x, c) }
+    else if (4.0..5.0).contains(&h_prime) { (x, 0.0, c) }
     else { (c, 0.0, x) };
     
     (r1 + m, g1 + m, b1 + m)

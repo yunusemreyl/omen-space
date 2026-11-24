@@ -1611,9 +1611,11 @@ mod tests {
 
     #[test]
     fn test_thermal_protection_constants() {
-        assert!(THERMAL_PROTECTION_TRIGGER_TEMP >= 95.0, "Trigger must protect at critical temp");
-        assert!(THERMAL_PROTECTION_RECOVER_TEMP <= 85.0, "Recover must allow normal operation");
-        assert!(THERMAL_PROTECTION_TRIGGER_TEMP > THERMAL_PROTECTION_RECOVER_TEMP, "Trigger must be higher than recover");
+        const {
+            assert!(THERMAL_PROTECTION_TRIGGER_TEMP >= 95.0, "Trigger must protect at critical temp");
+            assert!(THERMAL_PROTECTION_RECOVER_TEMP <= 85.0, "Recover must allow normal operation");
+            assert!(THERMAL_PROTECTION_TRIGGER_TEMP > THERMAL_PROTECTION_RECOVER_TEMP, "Trigger must be higher than recover");
+        }
         assert_eq!(AUTO_PEAK_HOLD_SECS, 15, "Peak hold must be responsive");
     }
 

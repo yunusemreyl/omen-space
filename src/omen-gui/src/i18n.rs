@@ -25,7 +25,7 @@ impl Language {
         }
     }
 
-    pub fn to_code(&self) -> &'static str {
+    pub fn to_code(self) -> &'static str {
         match self {
             Language::Auto => "auto",
             Language::Tr => "tr",
@@ -43,7 +43,7 @@ impl Language {
         }
     }
 
-    pub fn to_index(&self) -> u32 {
+    pub fn to_index(self) -> u32 {
         match self {
             Language::Auto => 0,
             Language::Tr => 1,

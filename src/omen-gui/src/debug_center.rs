@@ -404,7 +404,7 @@ fn build_page_inner(window: &adw::ApplicationWindow, embedded: bool) -> gtk::Box
     let is_verified = daemon_client::is_board_verified_sync(&board_id);
     let board_row = adw::ActionRow::builder()
         .title(i18n::t("debug_board_id"))
-        .subtitle(&format!("{} — {}", specs.product_name, if board_id.is_empty() { "Unknown" } else { &board_id }))
+        .subtitle(format!("{} — {}", specs.product_name, if board_id.is_empty() { "Unknown" } else { &board_id }))
         .build();
     let badge_label = gtk::Label::builder()
         .label(i18n::t(if is_verified { "debug_board_verified" } else { "debug_board_unverified" }))
@@ -428,7 +428,7 @@ fn build_page_inner(window: &adw::ApplicationWindow, embedded: bool) -> gtk::Box
     };
     let kernel_row = adw::ActionRow::builder()
         .title(i18n::t("debug_kernel_init"))
-        .subtitle(&format!("{} ({})", kernel_release, init_label))
+        .subtitle(format!("{} ({})", kernel_release, init_label))
         .build();
     hw_group.add(&kernel_row);
 
@@ -446,7 +446,7 @@ fn build_page_inner(window: &adw::ApplicationWindow, embedded: bool) -> gtk::Box
 
     let driver_row = adw::ActionRow::builder()
         .title(i18n::t("debug_kernel_modules"))
-        .subtitle(&format!(
+        .subtitle(format!(
             "hp-wmi: {} | hp-omen-extra: {} | ec_sys: {}",
             if has_hp_wmi { "Loaded" } else { "Missing" },
             if has_hp_omen_extra { "Loaded" } else { "Not Loaded" },

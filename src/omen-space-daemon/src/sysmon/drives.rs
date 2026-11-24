@@ -172,7 +172,7 @@ pub fn list_internal_drives(sys_root: &Path) -> Vec<DriveInfo> {
         .flatten()
         .filter_map(|e| probe_disk(&block_dir, &e.file_name().to_string_lossy()))
         .collect();
-    drives.sort_by(|a, b| name_order_key(&a.name).cmp(&name_order_key(&b.name)));
+    drives.sort_by_key(|a| name_order_key(&a.name));
     drives
 }
 
@@ -286,7 +286,7 @@ fn physical_disk_of(sys_root: &Path, name: &str, depth: usize) -> Option<String>
         let mut slaves: Vec<String> = fs::read_dir(top.join("slaves"))
             .map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
             .unwrap_or_default();
-        slaves.sort_by(|a, b| name_order_key(a).cmp(&name_order_key(b)));
+        slaves.sort_by_key(|a| name_order_key(a));
         return match slaves.first() {
             Some(slave) => physical_disk_of(sys_root, slave, depth + 1),
             None => Some(name.to_string()),
@@ -932,9 +932,11 @@ mod tests {
         assert!(json.contains(r#""kind":"nvme""#));
         assert_eq!(serde_json::from_str::<HardwareSpecs>(&json).unwrap().drives, specs.drives);
 
-        let mut stats = SystemStats::default();
-        stats.drives = vec![DriveUsage { name: "nvme0n1".into(), used_bytes: 48, total_bytes: 1024, mounts: vec!["/".into()], ..Default::default() }];
-        stats.disk_total_gb = 1.0;
+        let stats = SystemStats {
+            drives: vec![DriveUsage { name: "nvme0n1".into(), used_bytes: 48, total_bytes: 1024, mounts: vec!["/".into()], ..Default::default() }],
+            disk_total_gb: 1.0,
+            ..Default::default()
+        };
         let json = serde_json::to_string(&stats).unwrap();
         assert!(json.contains("\"disk_total_gb\""), "old GUIs still read the scalar fields");
         assert_eq!(serde_json::from_str::<SystemStats>(&json).unwrap().drives, stats.drives);

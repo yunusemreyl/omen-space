@@ -4,7 +4,7 @@ use std::cell::RefCell;
 
 pub fn build_desktop_rgb_card(
     zone_colors: Rc<RefCell<Vec<String>>>,
-) -> (gtk::Box, Rc<dyn Fn(&str, f64)>, gtk::Box) {
+) -> (gtk::Box, crate::keyboardrgb::keyboard::AnimCallback, gtk::Box) {
     let card = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .css_classes(["os-card"])
@@ -106,11 +106,9 @@ pub fn build_desktop_rgb_card(
         dyn_clone.load_from_string(&css_str);
     });
 
-    for i in 0..7 {
-        let btn = &zone_buttons[i];
+    for (idx, btn) in zone_buttons.iter().enumerate().take(7) {
         let zc_local = zc_global.clone();
         let update_css_local = update_css.clone();
-        let idx = i;
         
         btn.connect_clicked(move |btn_ref| {
             let zc_inner = zc_local.clone();

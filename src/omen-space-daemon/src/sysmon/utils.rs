@@ -5,21 +5,6 @@ pub fn parse_kb(line: &str) -> f64 {
     parts.next().and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0)
 }
 
-/// Returns true if the current process is running as root (UID 0).
-/// Reads /proc/self/status to avoid a libc dependency.
-pub fn nix_is_root() -> bool {
-    std::fs::read_to_string("/proc/self/status")
-        .ok()
-        .and_then(|s| {
-            s.lines()
-                .find(|l| l.starts_with("Uid:"))
-                .and_then(|l| l.split_whitespace().nth(1))
-                .and_then(|uid| uid.parse::<u32>().ok())
-        })
-        .map(|uid| uid == 0)
-        .unwrap_or(false)
-}
-
 pub fn get_running_process_names() -> Vec<String> {
     let mut names = Vec::with_capacity(128);
     if let Ok(entries) = std::fs::read_dir("/proc") {

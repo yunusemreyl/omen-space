@@ -717,10 +717,7 @@ pub fn get_rgb_state_sync() -> String {
 pub fn ping_daemon_sync() -> bool {
     tokio::task::block_in_place(|| {
         get_runtime().block_on(async {
-            match tokio::time::timeout(std::time::Duration::from_millis(500), get_fan_mode_async()).await {
-                Ok(Ok(_)) => true,
-                _ => false
-            }
+            matches!(tokio::time::timeout(std::time::Duration::from_millis(500), get_fan_mode_async()).await, Ok(Ok(_)))
         })
     })
 }
@@ -745,19 +742,6 @@ pub fn light_key_index_sync(index: u32, hex_color: String) {
         if let Ok(conn) = get_conn().await {
             if let Ok(proxy) = RgbProxy::new(&conn).await {
                 let _ = proxy.light_key_index(index, &hex_color).await;
-            }
-        }
-    });
-}
-
-pub fn set_battery_care_sync(limit: u32) {
-    let rt = get_runtime();
-    rt.spawn(async move {
-        if let Ok(conn) = get_conn().await {
-            if let Ok(proxy) = PlatformProxy::new(&conn).await {
-                if let Err(e) = proxy.set_battery_care(limit).await {
-                    notify_dbus_error("Pil bakım limiti ayarlanamıyor", &e).await;
-                }
             }
         }
     });

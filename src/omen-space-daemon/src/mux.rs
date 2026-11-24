@@ -85,7 +85,8 @@ pub fn parse_supported_modes_str(raw: &str) -> Vec<String> {
     CANONICAL_MUX_MODES
         .iter()
         .enumerate()
-        .filter_map(|(i, m)| found[i].then(|| (*m).to_string()))
+        .filter(|&(i, _)| found[i])
+        .map(|(_, m)| (*m).to_string())
         .collect()
 }
 

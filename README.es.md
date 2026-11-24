@@ -8,7 +8,7 @@
 
   <p>
     <a href="https://github.com/yunusemreyl/omen-space/releases/latest">
-      <img src="https://img.shields.io/badge/Versi%C3%B3n-v2.4.2-e11d48?style=flat-square" alt="Versión v2.4.2" />
+      <img src="https://img.shields.io/badge/Versi%C3%B3n-v2.4.3-e11d48?style=flat-square" alt="Versión v2.4.3" />
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/Licencia-GPL--3.0-10b981?style=flat-square" alt="Licencia" />
@@ -73,13 +73,17 @@ curl -sSL https://raw.githubusercontent.com/yunusemreyl/omen-space/main/install.
 
 ---
 
-## Novedades en v2.4.2
+## Novedades en v2.4.3
 
-- **Selector GPU MUX según hardware y Advanced Optimus en Linux:** Expone las capacidades reales de MUX de la BIOS en `/sys/devices/platform/hp-wmi/gpu_mux_supported_modes`, oculta Advanced Optimus en equipos no compatibles tanto en la GUI como en la bandeja del sistema, muestra el estado pasivo D3cold de la dGPU y las salidas conectadas, y añade una guía con botón de copia rápida para **Steam / PRIME Offload**.
-- **Limitador de carga de batería (`0x2B` GBCC/SBCC) en Energía y Batería:** Añade control por kernel `hp-wmi` (`battery_charge_mode`) y daemon con histéresis (`stop`/`start`, modo `hold` al apagar y carga completa puntual) ubicado en la parte superior de la página **Energía y Batería**.
-- **Corrección de Shift+F2 / Quick Overlay en Wayland/X11:** Convierte la comprobación de sockets Unix a `SOCK_NONBLOCK | SOCK_CLOEXEC` para eliminar bloqueos en `/tmp/.X11-unix/X1` bajo KDE Wayland, prioriza `:0` y añade antirrebote de 250 ms al atajo.
-- **Controlador RGB por tecla Primax `0xFF13`:** Soporte HID McuSDK2 para teclados Primax por tecla (`0461:4F03`, `4E9A`, `4E9B`, `4F11`, `4F1E`, `4ECB`, #385).
-- **Resumen v2.4.1 / v2.4.0:** Consistencia visual GTK4/Libadwaita, localización ES/EN/TR completa, atajo configurable e inicio ~33% más rápido (#384, #386), curvas de ventilación independientes (#371), LampArray `0d62:30bf` y soporte nativo OpenRC (#364).
+- **Centro de Ajustes unificado y Selector de Gráficos simplificado:** Agrupa **Actualizaciones** y **Diagnóstico** como subpestañas dentro de **Ajustes** (**General | Actualizaciones | Diagnóstico**) dejando 6 secciones principales en la barra lateral, y simplifica **Selector de gráficos** con tarjetas compactas y un único grupo **Hardware & Pantalla**.
+- **Limpieza, Seguridad y Gobernanza:** Eliminadas dependencias y recursos sin uso junto con todas las advertencias de Clippy (`-D warnings` en CI); añadidos [SECURITY.md](SECURITY.md), [CHANGELOG.md](CHANGELOG.md), `.github/dependabot.yml`, plantillas de Issues/PR y documentación técnica actualizada en `docs/`.
+- **Resumen v2.4.2 / v2.4.1:** MUX GPU validado por BIOS (`gpu_mux_supported_modes`) + guía PRIME, limitador de carga `0x2B` en **Energía y Batería**, corrección de `Shift+F2` / Quick Overlay en Wayland/X11, soporte Primax `0xFF13` (#385) y localización ES/EN/TR completa.
+
+---
+
+## Documentación y Seguridad
+
+- **[Registro de cambios](CHANGELOG.md)** · **[Política de seguridad](SECURITY.md)** · **[Problemas conocidos](knownissues.md)** · **[Guía de instalación](docs/INSTALACION.es.md)**
 
 ---
 

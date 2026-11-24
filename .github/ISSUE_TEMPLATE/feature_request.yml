@@ -1,0 +1,20 @@
+name: Feature Request
+description: Suggest an improvement or new hardware capability for OMEN Space
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Motivation
+      description: What workflow or hardware feature is missing or awkward today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Solution
+      description: Describe the behavior, CLI/D-Bus API, or UI change you have in mind.
+    validations:
+      required: true

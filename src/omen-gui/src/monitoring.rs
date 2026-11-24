@@ -789,9 +789,7 @@ pub fn build_page(is_general: bool) -> gtk::Box {
     };
 
     let gpu_lower = specs.gpu_spec.to_lowercase();
-    let gpu_max_watt = if gpu_lower.contains("4090") {
-        175.0_f64
-    } else if gpu_lower.contains("4080") {
+    let gpu_max_watt = if gpu_lower.contains("4090") || gpu_lower.contains("4080") {
         175.0_f64
     } else if gpu_lower.contains("4070") {
         140.0_f64
@@ -1095,8 +1093,8 @@ fn draw_sparkline(
 
     // Fill
     cr.move_to(0.0, h as f64);
-    for i in 0..n {
-        let yv = (hist[i].0 / max_val).clamp(0.0, 1.0);
+    for (i, item) in hist.iter().enumerate().take(n) {
+        let yv = (item.0 / max_val).clamp(0.0, 1.0);
         cr.line_to(i as f64 * step, h as f64 - yv * h as f64);
     }
     cr.line_to(w as f64, h as f64);

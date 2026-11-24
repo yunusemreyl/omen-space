@@ -57,12 +57,14 @@ fn german_labels() -> HashMap<String, String> {
         .collect()
 }
 
+pub type AnimCallback = Rc<dyn Fn(&str, f64)>;
+
 pub fn build_interactive_keyboard(
     detected_mode: KeyboardMode,
     zone_colors: Rc<RefCell<Vec<String>>>,
     per_key_colors: Rc<RefCell<Vec<String>>>,
     state_json_opt: &Option<serde_json::Value>
-) -> (gtk::Box, Rc<dyn Fn(&str, f64)>, gtk::Box) {
+) -> (gtk::Box, AnimCallback, gtk::Box) {
     // Restore saved 104-key frame from daemon so undrawn placeholder slots (98..103)
     // do not stay #0099ED blue on restart (#355).
     if let Some(state) = state_json_opt {
@@ -225,7 +227,7 @@ pub fn build_interactive_keyboard(
     }
     let speed_rc = Rc::new(RefCell::new(speed_val));
 
-    let apply_anim_rc: Rc<RefCell<Option<Rc<dyn Fn(&str, f64)>>>> = Rc::new(RefCell::new(None));
+    let apply_anim_rc: Rc<RefCell<Option<AnimCallback>>> = Rc::new(RefCell::new(None));
     let aa_hook = apply_anim_rc.clone();
     let msl_c: Vec<String> = mode_str_list.iter().map(|s| s.to_string()).collect();
 
@@ -559,8 +561,8 @@ pub fn build_interactive_keyboard(
                 crate::daemon_client::set_per_key_colors_sync(pk_mut.clone());
             } else if detected_mode == KeyboardMode::Omen4Zone {
                 for z in zones_changed { crate::daemon_client::set_color_sync(z-1, hex.clone()); }
-            } else if detected_mode == KeyboardMode::Victus1Zone {
-                if !zones_changed.is_empty() { crate::daemon_client::set_color_sync(8, hex.clone()); }
+            } else if detected_mode == KeyboardMode::Victus1Zone && !zones_changed.is_empty() {
+                crate::daemon_client::set_color_sync(8, hex.clone());
             }
             da_click.queue_draw();
         }
@@ -684,8 +686,8 @@ pub fn build_interactive_keyboard(
             crate::daemon_client::set_per_key_colors_sync(pk_mut.clone());
         } else if detected_mode == KeyboardMode::Omen4Zone {
             for z in zones_changed { crate::daemon_client::set_color_sync(z-1, hex.clone()); }
-        } else if detected_mode == KeyboardMode::Victus1Zone {
-            if !zones_changed.is_empty() { crate::daemon_client::set_color_sync(8, hex.clone()); }
+        } else if detected_mode == KeyboardMode::Victus1Zone && !zones_changed.is_empty() {
+            crate::daemon_client::set_color_sync(8, hex.clone());
         }
         
         painted_d.borrow_mut().clear();
@@ -699,7 +701,7 @@ pub fn build_interactive_keyboard(
     let bottom_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).margin_top(12).halign(gtk::Align::Center).build();
 
     let instructions = gtk::Label::builder()
-        .label(&*crate::i18n::t("rgb_paint_hint"))
+        .label(crate::i18n::t("rgb_paint_hint"))
         .css_classes(["dim-label"])
         .build();
     bottom_box.append(&instructions);
@@ -817,9 +819,7 @@ pub fn build_interactive_keyboard(
         let idx = *am_idx.borrow();
         if idx < msl_local.len() {
             let m = &msl_local[idx];
-            if m == "wave_ltr" {
-                crate::daemon_client::set_mode_sync("wave", speed as i32);
-            } else if m == "wave_rtl" {
+            if m == "wave_ltr" || m == "wave_rtl" {
                 crate::daemon_client::set_mode_sync("wave", speed as i32);
             } else {
                 crate::daemon_client::set_mode_sync(m, speed as i32);
@@ -898,7 +898,7 @@ pub fn build_interactive_keyboard(
     
     let bright_scale_apply = bright_scale.clone();
     let hw_on_apply = hw_on.clone();
-    let apply_anim: Rc<dyn Fn(&str, f64)> = Rc::new(move |mode: &str, speed: f64| {
+    let apply_anim: AnimCallback = Rc::new(move |mode: &str, speed: f64| {
         let mut ts = anim_state_apply.borrow_mut();
         ts.0 = mode.to_string();
         ts.1 = speed;

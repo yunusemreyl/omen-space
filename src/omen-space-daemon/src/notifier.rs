@@ -143,6 +143,7 @@ impl DesktopNotifier {
         (unsafe { libc::getuid() != 0 }) || std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn run_notify_send(
         user: &str,
         display: &str,
@@ -247,8 +248,8 @@ impl DesktopNotifier {
             }
             Err(first_err) => {
                 // Retry without -r/-p in case an older notify-send implementation rejects them
-                if replaces_id.is_some() || key.is_some() {
-                    if Self::run_notify_send(
+                if (replaces_id.is_some() || key.is_some())
+                    && Self::run_notify_send(
                         &user,
                         &display,
                         &dbus_addr,
@@ -262,9 +263,8 @@ impl DesktopNotifier {
                         false,
                     )
                     .is_ok()
-                    {
-                        return true;
-                    }
+                {
+                    return true;
                 }
                 warn!("{}", first_err);
                 false

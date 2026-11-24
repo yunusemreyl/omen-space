@@ -25,10 +25,7 @@ fn is_cpu_locked(cpu: &str) -> bool {
         }
     }
     // Check for Core Ultra
-    if name_part.contains("ULTRA") {
-        return true;
-    }
-    false
+    name_part.contains("ULTRA")
 }
 
 fn save_battery_settings(enabled: bool, stop: f64, start: f64, off_hold: bool) {

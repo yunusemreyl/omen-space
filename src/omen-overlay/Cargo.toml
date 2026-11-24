@@ -1,6 +1,6 @@
 [package]
 name = "omen-overlay"
-version = "2.4.2"
+version = "2.4.3"
 edition = "2021"
 
 [dependencies]
@@ -15,6 +15,5 @@ serde_json = "1.0"
 log = "0.4"
 env_logger = "0.10"
 libc = "0.2"
-clap = { version = "4.4", features = ["derive"] }
 futures = "0.3.34"
-omen-types = { version = "2.4.2", path = "../omen-types" }
+omen-types = { version = "2.4.3", path = "../omen-types" }

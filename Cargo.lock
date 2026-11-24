@@ -1370,12 +1370,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lazy_static"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
-
-[[package]]
 name = "libadwaita"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1566,7 +1560,7 @@ dependencies = [
 
 [[package]]
 name = "omen-cli"
-version = "2.4.2"
+version = "2.4.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1582,7 +1576,7 @@ dependencies = [
 
 [[package]]
 name = "omen-gui"
-version = "2.4.2"
+version = "2.4.3"
 dependencies = [
  "glib",
  "glob",
@@ -1599,9 +1593,8 @@ dependencies = [
 
 [[package]]
 name = "omen-overlay"
-version = "2.4.2"
+version = "2.4.3"
 dependencies = [
- "clap 4.6.7",
  "env_logger 0.10.2",
  "futures",
  "glib",
@@ -1618,14 +1611,13 @@ dependencies = [
 
 [[package]]
 name = "omen-space-daemon"
-version = "2.4.2"
+version = "2.4.3"
 dependencies = [
  "env_logger 0.11.11",
  "evdev",
  "futures",
  "glob",
  "hidapi",
- "lazy_static",
  "libc",
  "log",
  "nvml-wrapper",
@@ -1638,11 +1630,10 @@ dependencies = [
 
 [[package]]
 name = "omen-tray"
-version = "2.4.2"
+version = "2.4.3"
 dependencies = [
  "env_logger 0.10.2",
  "futures",
- "glib",
  "ksni",
  "libc",
  "log",
@@ -1655,7 +1646,7 @@ dependencies = [
 
 [[package]]
 name = "omen-types"
-version = "2.4.2"
+version = "2.4.3"
 dependencies = [
  "libc",
  "serde",

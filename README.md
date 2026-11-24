@@ -8,7 +8,7 @@
 
   <p>
     <a href="https://github.com/yunusemreyl/omen-space/releases/latest">
-      <img src="https://img.shields.io/badge/Release-v2.4.2-e11d48?style=flat-square" alt="Release v2.4.2" />
+      <img src="https://img.shields.io/badge/Release-v2.4.3-e11d48?style=flat-square" alt="Release v2.4.3" />
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/License-GPL--3.0-10b981?style=flat-square" alt="License" />
@@ -34,11 +34,11 @@
 | Module | Capabilities |
 | :--- | :--- |
 | **Performance & Cooling** | `Eco`, `Balanced`, and `Performance` BIOS thermal profiles; software-smart `Auto` cooling, `Max` fan mode, independent CPU & GPU custom multi-point fan curves with saved presets, one-click **Delegate to EC**, fan dust-cleaning mode, and 3s-debounced `>= 90°C` / `95°C` thermal protection. |
-| **Advanced Power** | Real-time Intel RAPL `PL1` / `PL2` power limits (with boot-default tracking up to 250 W / 300 W), `TCC Offset` temperature ceiling, MSR voltage offsets (with hardware `UV_LOCK` detection), GPU Dynamic Boost (`cTGP` / `PPAB`), and AMD Ryzen SMU tuning. |
-| **Graphics Switcher (MUX)** | Switch between **Hybrid (MSHybrid)**, **Discrete (dGPU)**, and **Advanced Optimus** modes with live `eDP` display routing, readback verification, and NVIDIA driver telemetry. |
-| **RGB Studio** | 4-Zone OMEN, Single-Zone Victus, chassis Lightbar, Desktop RGB, and HID LampArray Per-Key RGB (Darfon `0d62:54bf` / `0d62:30bf`) with physical lamp calibration, EN/DE keyboard layout toggle, low-CPU sysfs animations, and hardware MCU effects. |
-| **Quick HUD (`Shift+F2`, configurable)** | Customizable in-game floating overlay and system tray applet for switching power and fan profiles on the fly without leaving your workflow. |
-| **Debug Center & Updater** | One-click **Full System Dump** for GitHub diagnostics, automatic per-application rules (Wayland & X11), and an integrated **Update Center** with commit tracking, live build progress, and `fwupd` (LVFS) scanning. |
+| **Power & Battery** | HP WMI `0x2B` / native battery charge limiter with hysteresis (`stop`/`start` thresholds, shutdown `hold` protection, one-shot 100% bypass), real-time Intel RAPL `PL1`/`PL2` power limits, `TCC Offset`, MSR undervolting (`UV_LOCK` detection), GPU Dynamic Boost (`cTGP`/`PPAB`), and AMD Ryzen SMU tuning. |
+| **Graphics Switcher (MUX & PRIME)** | Hardware-gated **Hybrid**, **Discrete (dGPU)**, **Advanced Optimus**, and **Integrated** switching backed by BIOS `/sys/devices/platform/hp-wmi/gpu_mux_supported_modes`, live display routing, passive `D3cold` state, and one-click Steam/app **PRIME Offload** launch copy. |
+| **RGB Studio** | 4-Zone OMEN, Single-Zone Victus, chassis Lightbar, Desktop RGB, and HID Per-Key RGB (Darfon `0d62:54bf` / `0d62:30bf` + Primax `0xFF13` McuSDK2) with physical lamp calibration, EN/DE layout toggle, and low-CPU sysfs animations. |
+| **Quick HUD (`Shift+F2`, configurable)** | Lightweight Wayland/X11 floating overlay and system tray applet for switching power/fan/MUX profiles on the fly with non-blocking socket probing. |
+| **Unified Settings Hub** | Clean **General \| Updates \| Diagnostics** segmented hub with one-click GitHub **Full System Dump**, OTA + `fwupd` (LVFS) update checks, conflict detection, and per-app profiles. |
 
 ---
 
@@ -126,13 +126,18 @@ sudo ./setup.sh uninstall   # Remove daemon, UI, and DKMS modules cleanly
 
 ---
 
-## What's New in v2.4.2
+## What's New in v2.4.3
 
-- **Hardware-Gated GPU MUX & Linux Advanced Optimus UX:** Exposed real BIOS MUX mode capabilities via `/sys/devices/platform/hp-wmi/gpu_mux_supported_modes`, hid Advanced Optimus automatically on unsupported laptops across GUI and Tray, added passive dGPU D3cold power state & connected display routing details, and introduced a **Linux GPU Switching & one-click Steam/PRIME Offload** guide.
-- **Battery Charge Limiter (`0x2B` GBCC/SBCC) in Power & Battery:** Added kernel `hp-wmi` `battery_charge_mode` + daemon hysteresis limiter (`stop`/`start` thresholds, shutdown `hold` mode, and one-time full charge bypass) inspired by `hp-charge-limit-rs`, placed at the top of the renamed **Power & Battery** page.
-- **Shift+F2 / Quick Overlay Fix on Wayland/X11:** Converted Unix socket liveness checks to non-blocking `SOCK_NONBLOCK | SOCK_CLOEXEC` to eliminate KDE Wayland `/tmp/.X11-unix/X1` connection deadlocks, preferred `:0` over `:1`, and added 250 ms hotkey debounce.
-- **Primax `0xFF13` Per-Key RGB Backend:** Added McuSDK2 HID support for Primax per-key keyboards (`0461:4F03`, `4E9A`, `4E9B`, `4F11`, `4F1E`, `4ECB`, #385).
-- **v2.4.1 / v2.4.0 Highlights:** Unified GTK4/Libadwaita styling tokens, complete TR/EN/ES localization, configurable Quick HUD hotkey, ~33% faster lazy-loaded GUI startup (#384, #386), independent CPU/GPU fan curves (#371), Darfon `0d62:30bf` LampArray support (#376, #378, #379), and native OpenRC support (#364).
+- **Unified Settings Hub & Streamlined Graphics Switcher:** Consolidated **Update Center** and **Debug Center** as segmented sub-tabs (**General | Updates | Diagnostics**) inside **Settings** for a cleaner 6+1 sidebar, and redesigned **Graphics Switcher** into compact mode cards with a unified **Hardware & Display** group.
+- **Repository Quality, Security & Governance Polish:** Removed unused workspace dependencies/assets and resolved all Clippy warnings (enforced via `-D warnings` in CI); added [SECURITY.md](SECURITY.md), [CHANGELOG.md](CHANGELOG.md), `.github/dependabot.yml`, GitHub Issue/PR templates, and refreshed documentation under [`docs/`](docs/architecture.md).
+- **v2.4.2 / v2.4.1 Highlights:** Hardware-gated `gpu_mux_supported_modes` + Linux PRIME helper, HP WMI `0x2B` battery charge limiter in **Power & Battery**, KDE Wayland/X11 non-blocking Quick Overlay (`Shift+F2`) fix, Primax `0xFF13` Per-Key RGB (#385), unified GTK4/Libadwaita theme tokens, and full TR/EN/ES localization.
+
+---
+
+## Documentation & Security
+
+- **[Changelog](CHANGELOG.md)** · **[Security Policy](SECURITY.md)** · **[Known Issues](knownissues.md)**
+- **[Architecture Map](docs/architecture.md)** · **[Backend Daemon](docs/backend.md)** · **[Kernel Driver](docs/driver.md)** · **[GUI](docs/gui.md)** · **[CLI](docs/cli.md)** · **[Contributing](docs/CONTRIBUTING.md)**
 
 ---
 

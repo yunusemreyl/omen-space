@@ -1,32 +1,20 @@
-# OMENSpace GUI (`omen-gui`)
+# OMEN Space GUI (`omen-gui`)
 
-The graphical user interface for OMENSpace is designed to be modern, responsive, and visually cohesive with Linux desktop environments (like GNOME). It is entirely built in **Rust** using **GTK4** and **LibAdwaita**.
+Built with **Rust**, **GTK4**, and **Libadwaita**, `omen-gui` provides a responsive desktop control center without root privileges.
 
-## Responsibilities
+## Navigation Layout (`main.rs`)
 
-1. **User Interaction:**
-   - Provides an intuitive dashboard for users to monitor hardware statistics (CPU/GPU temperatures, RPMs).
-   - Allows users to easily toggle Fan Modes, Performance Profiles, and RGB animations without using a terminal.
-2. **D-Bus Client Implementation:**
-   - The GUI has **no root privileges**. It cannot control hardware directly.
-   - It uses `zbus` proxy macros (inside `daemon_client.rs`) to asynchronously send commands to the `omen-space-daemon`.
-3. **Asset & Theme Management:**
-   - Automatically loads CSS styling (`style.css`) for custom UI components (like the custom toggle chips).
-   - Resolves image paths dynamically (`asset_resolver.rs`) so the application works perfectly whether it is launched locally (`cargo run`) or installed system-wide (`/usr/share/omen-space/assets`).
-4. **Interface Zoom:**
-   - `Ctrl+Shift+Plus` / `Ctrl+Shift+Minus` scale the whole pane between 80 % and 200 % (`Ctrl+Shift+0` resets it), which keeps the app readable on large or high-density monitors without going fullscreen.
-   - `ui_scale.rs` re-emits `style.css` with every `px` length multiplied by the factor, scales the app-local font DPI (`gtk-xft-dpi`) so theme-font widgets follow, and grows the window proportionally, clamped to the monitor it sits on.
-   - The factor is stored as `ui_scale` in `~/.config/omenspace/settings.json` and is also exposed as "Interface Scale" in Settings → Appearance.
-5. **App Updator:**
-   - Connects to the GitHub API to check for software updates.
-   - Triggers `fwupdmgr` to scan for HP BIOS and firmware updates natively.
+- **Core Hardware Tabs (Sidebar):**
+  1. **Performance** (`performance_control.rs` + compact telemetry summary): Eco / Balanced / Performance profiles, Fan Auto / Max / Custom / EC / Cleaning, independent CPU & GPU fan curves.
+  2. **Power & Battery** (`undervolt.rs`): **Battery Charge Limiter** at the top (hysteresis stop/start thresholds, shutdown hold protection, one-shot 100% bypass), followed by CPU voltage offsets, RAPL `PL1`/`PL2`, and TCC ceiling.
+  3. **Graphics Switcher** (`mux.rs`): Hardware-gated mode cards (Advanced Optimus & Integrated appear only if supported by BIOS), connected display routing, passive D3cold status, and one-click PRIME Offload launch copy.
+  4. **System Monitor** (`monitoring.rs`): Live telemetry charts, storage blocks (`nvme*` / `sd*`), and battery health.
+  5. **RGB Studio** (`keyboardrgb/` + `desktop_rgb_gui.rs`): Interactive keyboard, lightbar, and desktop zone painter + animation presets.
+  6. **Profile Manager** (`appprofiles.rs`): Automatic per-app performance & fan rules (Wayland & X11).
+- **Pinned Bottom Item — Unified Settings Hub (`settings.rs`):**
+  - Segmented pill tabs (**General | Updates | Diagnostics**) housing application preferences (`General`), OTA + `fwupd` firmware updates (`updater.rs`), and one-click GitHub diagnostic dumps (`debug_center.rs`).
 
-## Key Files
+## Interface Scaling & Localization
 
-- `src/main.rs`: Window initialization, sidebar navigation, and CSS loading.
-- `src/performance_control.rs`: The logic and UI for the "Power & Fans" page. Handles the dynamic creation of custom fan curve presets.
-- `src/keyboardrgb.rs`: The RGB color picker and animation effect selector.
-- `src/monitoring.rs`: Renders the real-time statistics cards (CPU/GPU temps).
-- `src/updater.rs`: Manages OTA update checks.
-- `src/i18n.rs`: Handles localization/translations (e.g., Turkish and English support).
-- `src/ui_scale.rs`: Interface zoom — the `Ctrl+Shift+Plus`/`Ctrl+Shift+Minus` actions, stylesheet rescaling, and window sizing.
+- **UI Scale (`ui_scale.rs`):** `Ctrl+Shift+Plus` / `Minus` / `0` rescales CSS `px` lengths and `gtk-xft-dpi` cleanly between `80%` and `200%`.
+- **Localization (`i18n.rs`):** Runtime-switchable **English**, **Türkçe**, and **Español**.
