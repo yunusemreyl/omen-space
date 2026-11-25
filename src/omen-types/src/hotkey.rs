@@ -190,17 +190,19 @@ pub fn is_modifier_code(code: u16) -> bool {
     )
 }
 
-/// True for keys that are safe to bind without any modifier: function keys
-/// and dedicated media/launcher keys. Ordinary typing keys (letters, digits,
-/// Space, Enter, ...) need a modifier, otherwise every keystroke would also
-/// toggle the overlay (the daemon only listens, it does not grab the key).
+/// True for keys that are safe to bind without any modifier: function keys,
+/// dedicated media/launcher keys, and programmable macro keys (such as the HP
+/// OMEN/Victus key). Ordinary typing keys (letters, digits, Space, Enter, ...)
+/// need a modifier, otherwise every keystroke would also toggle the overlay
+/// (the daemon only listens, it does not grab the key).
 pub fn allows_no_modifier(code: u16) -> bool {
     matches!(
         code,
         59..=68 | 87 | 88 | 183..=194 // F1-F24
-            | 99 | 119 | 70 // PrintScreen, Pause, ScrollLock
+            | 99 | 119 | 70 | 110 | 139 // PrintScreen, Pause, ScrollLock, Insert, Menu
             | 113..=115 | 164..=167 // Mute, Volume, Play/Prev/Stop/Next
             | 224 | 225 | 140 | 142 | 143 // Brightness, Calculator, Sleep, WakeUp
+            | 148 | 149 | 200 | 202..=205 | 256 // Prog1-4 / HP OMEN & Victus launch/macro keys
     )
 }
 
@@ -285,6 +287,14 @@ const NAMED_KEYS: &[(u16, &str, &[&str])] = &[
     (142, "Sleep", &["XF86Sleep", "Sleep"]),
     (143, "WakeUp", &["XF86WakeUp", "WakeUp"]),
     (140, "Calculator", &["XF86Calculator", "Calculator"]),
+    (148, "Launch1", &["XF86Launch1", "Prog1", "Launch1"]),
+    (149, "Launch2", &["XF86Launch2", "Prog2", "Launch2"]),
+    (200, "Launch2Raw", &["Launch2Raw"]),
+    (202, "Launch3", &["XF86Launch3", "Prog3", "Launch3"]),
+    (203, "Launch4", &["XF86Launch4", "Prog4", "Launch4"]),
+    (204, "Launch5", &["XF86Launch5", "Launch5"]),
+    (205, "Launch6", &["XF86Launch6", "Launch6"]),
+    (256, "MacroBtn", &["MacroBtn", "BTN_0"]),
 ];
 
 /// Resolve a key name (or `"Key<code>"`) to an evdev key code.
@@ -510,12 +520,25 @@ mod tests {
 
     #[test]
     fn typing_keys_need_a_modifier() {
-        for code in [59u16, 60, 87, 88, 183, 194, 113, 164, 224] {
+        for code in [59u16, 60, 87, 88, 183, 194, 110, 113, 139, 148, 149, 164, 200, 202, 224, 256] {
             assert!(allows_no_modifier(code), "code {code} should be allowed alone");
         }
         for code in [30u16, 2, 57, 28, 15, 1, 14, 103] {
             assert!(!allows_no_modifier(code), "code {code} must require a modifier");
         }
+    }
+
+    #[test]
+    fn programmable_launch_keys_parse_and_round_trip() {
+        let spec = HotkeySpec::parse("Alt+Launch2").unwrap();
+        assert_eq!(spec.key_code, 149);
+        assert!(spec.modifiers.alt);
+        assert_eq!(spec.display(), "Alt+Launch2");
+
+        let bare = HotkeySpec::parse("Launch2").unwrap();
+        assert_eq!(bare.key_code, 149);
+        assert_eq!(bare.modifiers.to_bits(), 0);
+        assert!(allows_no_modifier(bare.key_code));
     }
 
     #[test]

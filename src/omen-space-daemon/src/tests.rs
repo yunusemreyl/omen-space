@@ -215,6 +215,32 @@ mod tests {
     }
 
     #[test]
+    fn cross_device_modifiers_match_hotkeys_on_separate_input_devices() {
+        use crate::hotkey_monitor::{resolve_hotkey, SharedModState};
+        use omen_types::hotkey::{HotkeyModifiers, HotkeySpec};
+
+        // Example: Alt held on the main laptop keyboard (device 0) + HP WMI
+        // KEY_PROG2 (149) pressed on the HP WMI hotkeys device (device 1).
+        let binding = HotkeySpec::with_label(
+            149,
+            HotkeyModifiers { alt: true, ..Default::default() },
+            "Launch2",
+        );
+
+        let mut shared = SharedModState::default();
+        assert!(shared.update(0, 56, true)); // Left Alt on device 0
+        assert_eq!(resolve_hotkey(149, &shared.combined(), &binding), Some("overlay"));
+
+        // SYN_DROPPED on device 1 must not drop Alt held on device 0.
+        shared.reset_device(1);
+        assert_eq!(resolve_hotkey(149, &shared.combined(), &binding), Some("overlay"));
+
+        // Releasing Alt on device 0 restores normal prog2 fallback.
+        assert!(shared.update(0, 56, false));
+        assert_eq!(resolve_hotkey(149, &shared.combined(), &binding), Some("prog2"));
+    }
+
+    #[test]
     fn shift_does_not_change_the_other_macro_keys() {
         use crate::hotkey_monitor::{resolve_hotkey, ModState};
         use omen_types::hotkey::HotkeySpec;

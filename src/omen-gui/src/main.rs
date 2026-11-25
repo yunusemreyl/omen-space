@@ -268,7 +268,6 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
         .build();
 
     let m = 20;
-    let spec_header = monitoring::build_spec_header();
     let page_perf = performance_control::build_page();
     let page_mon = monitoring::build_page(true);
     let gen_box = gtk::Box::builder()
@@ -280,7 +279,6 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
         .margin_end(m)
         .margin_bottom(m)
         .build();
-    gen_box.append(&spec_header);
     gen_box.append(&page_perf);
     gen_box.append(&page_mon);
 

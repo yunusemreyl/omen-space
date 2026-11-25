@@ -1,16 +1,17 @@
 use evdev::{Device, Key};
 use log::{info, warn};
 use omen_types::hotkey::HotkeySpec;
+use std::collections::HashMap;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::io::unix::AsyncFd;
 use zbus::Connection;
 
 /// Modifier keys currently held on one keyboard device.
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ModState {
     left_ctrl: bool,
     right_ctrl: bool,
@@ -40,8 +41,18 @@ impl ModState {
         true
     }
 
-    fn reset(&mut self) {
-        *self = Self::default();
+    /// Combine two modifier states (bitwise OR across devices).
+    fn union(self, other: Self) -> Self {
+        Self {
+            left_ctrl: self.left_ctrl || other.left_ctrl,
+            right_ctrl: self.right_ctrl || other.right_ctrl,
+            left_alt: self.left_alt || other.left_alt,
+            right_alt: self.right_alt || other.right_alt,
+            left_shift: self.left_shift || other.left_shift,
+            right_shift: self.right_shift || other.right_shift,
+            left_meta: self.left_meta || other.left_meta,
+            right_meta: self.right_meta || other.right_meta,
+        }
     }
 
     /// Exact modifier match: `Shift+F2` must not fire on `Ctrl+Shift+F2`.
@@ -50,6 +61,33 @@ impl ModState {
             && (self.left_alt || self.right_alt) == spec.modifiers.alt
             && (self.left_shift || self.right_shift) == spec.modifiers.shift
             && (self.left_meta || self.right_meta) == spec.modifiers.meta
+    }
+}
+
+/// Cross-device modifier tracker so a modifier held on one evdev device (e.g.
+/// the main laptop keyboard) applies when the trigger key arrives from another
+/// evdev device (e.g. `HP WMI hotkeys`, a consumer-control HID interface, or
+/// an external keypad). Each device keeps its own slot so `SYN_DROPPED` or
+/// disconnect on one device never clears modifiers held on another.
+#[derive(Default)]
+pub(crate) struct SharedModState {
+    per_device: HashMap<usize, ModState>,
+}
+
+impl SharedModState {
+    pub(crate) fn update(&mut self, device_id: usize, code: u16, pressed: bool) -> bool {
+        self.per_device.entry(device_id).or_default().update(code, pressed)
+    }
+
+    pub(crate) fn reset_device(&mut self, device_id: usize) {
+        self.per_device.remove(&device_id);
+    }
+
+    pub(crate) fn combined(&self) -> ModState {
+        self.per_device
+            .values()
+            .copied()
+            .fold(ModState::default(), ModState::union)
     }
 }
 
@@ -111,7 +149,7 @@ fn apply_binding(binding: &Arc<RwLock<HotkeySpec>>, spec: HotkeySpec) {
 /// single `stat` per second is cheaper (and more portable) than inotify here.
 async fn watch_settings(binding: Arc<RwLock<HotkeySpec>>) {
     let mut path: Option<PathBuf> = None;
-    let mut mtime: Option<SystemTime> = None;
+    let mut stamp: Option<(SystemTime, u64)> = None;
     let mut last_path_check = Instant::now() - Duration::from_secs(3600);
 
     loop {
@@ -121,7 +159,7 @@ async fn watch_settings(binding: Arc<RwLock<HotkeySpec>>) {
             if path_age >= Duration::from_secs(10) {
                 path = settings_path();
                 last_path_check = Instant::now();
-                mtime = None;
+                stamp = None;
             }
         } else if path_age >= Duration::from_secs(60) {
             // Pick up a different active user after logout/login.
@@ -129,24 +167,26 @@ async fn watch_settings(binding: Arc<RwLock<HotkeySpec>>) {
             last_path_check = Instant::now();
             if new_path != path {
                 path = new_path;
-                mtime = None;
+                stamp = None;
             }
         }
 
         if let Some(p) = &path {
-            let current = std::fs::metadata(p).and_then(|m| m.modified()).ok();
-            if current != mtime {
+            let current = std::fs::metadata(p)
+                .ok()
+                .and_then(|m| m.modified().ok().map(|t| (t, m.len())));
+            if current != stamp {
                 match current {
                     Some(_) => {
                         // Retry when the file is caught mid-write instead of
                         // resetting the hotkey to the default.
                         if let Some(spec) = read_hotkey(p) {
-                            mtime = current;
+                            stamp = current;
                             apply_binding(&binding, spec);
                         }
                     }
                     None => {
-                        mtime = None;
+                        stamp = None;
                         apply_binding(&binding, HotkeySpec::default());
                     }
                 }
@@ -189,8 +229,17 @@ impl HotkeyMonitor {
                                 k.contains(Key::KEY_A)
                                     || k.contains(Key::KEY_F2)
                                     || k.contains(Key::KEY_PROG1)
+                                    || k.contains(Key::KEY_PROG2)
+                                    || k.contains(Key::KEY_PROG3)
+                                    || k.contains(Key::KEY_PROG4)
                                     || k.contains(Key::KEY_CALC)
                                     || k.contains(Key::KEY_F13)
+                                    || k.contains(Key::KEY_MUTE)
+                                    || k.contains(Key::KEY_VOLUMEUP)
+                                    || k.contains(Key::KEY_PLAYPAUSE)
+                                    || k.contains(Key::KEY_BRIGHTNESSUP)
+                                    || k.contains(Key::KEY_MENU)
+                                    || k.contains(Key::KEY_INSERT)
                             });
                             let is_mouse = dev.supported_relative_axes().is_some_and(|a| {
                                 a.contains(evdev::RelativeAxisType::REL_X)
@@ -223,11 +272,14 @@ impl HotkeyMonitor {
             }
 
             let mut join_set = tokio::task::JoinSet::new();
-            let last_overlay_emit: Arc<std::sync::Mutex<Option<Instant>>> =
-                Arc::new(std::sync::Mutex::new(None));
-            for path in matching_devices {
+            let shared_mods: Arc<Mutex<SharedModState>> =
+                Arc::new(Mutex::new(SharedModState::default()));
+            let last_overlay_emit: Arc<Mutex<Option<Instant>>> =
+                Arc::new(Mutex::new(None));
+            for (device_id, path) in matching_devices.into_iter().enumerate() {
                 let conn = connection.clone();
                 let binding = binding.clone();
+                let shared_mods = shared_mods.clone();
                 let last_overlay_emit = last_overlay_emit.clone();
                 join_set.spawn(async move {
                     let Ok(file) = std::fs::OpenOptions::new()
@@ -236,7 +288,6 @@ impl HotkeyMonitor {
                         .open(&path) else { return; };
                     let Ok(async_fd) = AsyncFd::new(file) else { return; };
                     info!("HotkeyMonitor: listening to raw events on {:?}", path);
-                    let mut mods = ModState::default();
                     let event_size = std::mem::size_of::<libc::input_event>();
                     let mut read_buf = vec![0u8; event_size * 32];
 
@@ -264,12 +315,20 @@ impl HotkeyMonitor {
                                     // EV_KEY = 1
                                     if ev.type_ == 1 {
                                         let key_code = ev.code;
-                                        if mods.update(key_code, ev.value != 0) {
+                                        let is_mod = shared_mods
+                                            .lock()
+                                            .map(|mut m| m.update(device_id, key_code, ev.value != 0))
+                                            .unwrap_or(false);
+                                        if is_mod {
                                             continue;
                                         }
 
                                         if ev.value == 1 {
                                             // Key pressed
+                                            let mods = shared_mods
+                                                .lock()
+                                                .map(|m| m.combined())
+                                                .unwrap_or_default();
                                             let spec = binding
                                                 .read()
                                                 .map(|b| b.clone())
@@ -302,8 +361,10 @@ impl HotkeyMonitor {
                                             }
                                         }
                                     } else if ev.type_ == 0 && ev.code == 3 {
-                                        // SYN_DROPPED: reset modifier state
-                                        mods.reset();
+                                        // SYN_DROPPED: reset modifier state for this device only
+                                        if let Ok(mut m) = shared_mods.lock() {
+                                            m.reset_device(device_id);
+                                        }
                                     }
                                 }
                             }
@@ -311,6 +372,9 @@ impl HotkeyMonitor {
                             Ok(Err(e)) => {
                                 if e.raw_os_error() == Some(libc::ENODEV) || e.raw_os_error() == Some(libc::EBADF) {
                                     warn!("HotkeyMonitor: device disconnected ({}); refreshing", e);
+                                    if let Ok(mut m) = shared_mods.lock() {
+                                        m.reset_device(device_id);
+                                    }
                                     break;
                                 }
                             }

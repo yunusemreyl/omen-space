@@ -1,168 +1,178 @@
-/* OMEN Space Quick HUD Overlay Stylesheet (GTK4 / Libadwaita) */
+/* OMEN Space Quick Control Overlay — Native GNOME / Libadwaita Stylesheet */
 
 .omen-overlay-window {
-    background-color: transparent;
+    background-color: @window_bg_color;
+    color: @window_fg_color;
 }
 
-.omen-overlay-card {
-    background-color: rgba(22, 24, 30, 0.94);
-    border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.10);
-    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
-    padding: 20px;
+.omen-overlay-surface {
+    background-color: @window_bg_color;
+    border: 1px solid alpha(@window_fg_color, 0.14);
 }
 
+/* ── Header Bar ──────────────────────────────────────────── */
 .overlay-header {
-    margin-bottom: 14px;
+    background-color: @headerbar_bg_color;
+    color: @headerbar_fg_color;
+    padding: 10px 14px;
 }
 
 .overlay-title {
-    font-size: 16px;
-    font-weight: 800;
-    color: rgba(255, 255, 255, 0.95);
-    letter-spacing: 0.4px;
+    font-size: 13.5px;
+    font-weight: 700;
+    color: @headerbar_fg_color;
 }
 
-.overlay-brand-tag {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.9px;
+.overlay-hotkey-cap {
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+    font-size: 10.5px;
+    font-weight: 600;
     padding: 2px 8px;
-    border-radius: 999px;
-    background-color: alpha(@accent_bg_color, 0.16);
-    border: 1px solid alpha(@accent_bg_color, 0.32);
-    color: @accent_color;
+    border-radius: 6px;
+    background-color: alpha(@window_fg_color, 0.08);
+    border: 1px solid alpha(@window_fg_color, 0.14);
+    color: alpha(@window_fg_color, 0.78);
 }
 
 .overlay-close-btn {
-    border-radius: 999px;
-    background-color: rgba(255, 255, 255, 0.06);
-    color: rgba(255, 255, 255, 0.65);
     min-width: 28px;
     min-height: 28px;
     padding: 0;
-    transition: background-color 150ms cubic-bezier(0.25, 1, 0.5, 1), color 150ms cubic-bezier(0.25, 1, 0.5, 1);
 }
 
-.overlay-close-btn:hover {
-    background-color: rgba(255, 85, 85, 0.22);
-    color: #ff6e6e;
+/* ── Main Body ───────────────────────────────────────────── */
+.overlay-body {
+    padding: 16px 18px 16px 18px;
 }
 
-.section-label {
-    font-size: 10.5px;
-    font-weight: 700;
-    letter-spacing: 0.8px;
-    color: rgba(255, 255, 255, 0.50);
-    margin-top: 6px;
-    margin-bottom: 6px;
+.overlay-section-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: alpha(@window_fg_color, 0.68);
 }
 
-.mode-btn {
-    background-color: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    padding: 12px 10px;
-    transition: background-color 160ms cubic-bezier(0.25, 1, 0.5, 1), border-color 160ms cubic-bezier(0.25, 1, 0.5, 1);
-    color: rgba(255, 255, 255, 0.85);
-}
-
-.mode-btn:hover {
-    background-color: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.16);
-}
-
-.mode-btn:active {
-    background-color: rgba(255, 255, 255, 0.11);
-}
-
-.mode-btn.active {
-    background-color: alpha(@accent_bg_color, 0.16);
-    border-color: alpha(@accent_bg_color, 0.55);
-    color: #ffffff;
-}
-
-.mode-btn.active-perf {
-    background-color: rgba(248, 113, 113, 0.14);
-    border-color: rgba(248, 113, 113, 0.55);
-}
-
-.mode-btn.active-eco {
-    background-color: rgba(52, 211, 153, 0.14);
-    border-color: rgba(52, 211, 153, 0.55);
-}
-
-.mode-btn.active-turbo {
-    background-color: rgba(96, 165, 250, 0.16);
-    border-color: rgba(96, 165, 250, 0.58);
-}
-
-.mode-badge {
-    font-size: 16px;
-    margin-bottom: 2px;
-}
-
-.mode-name {
-    font-weight: 700;
-    font-size: 12.5px;
-    color: rgba(255, 255, 255, 0.94);
-}
-
-.mode-desc {
-    font-size: 10.5px;
-    color: rgba(255, 255, 255, 0.62);
-}
-
-.telemetry-box {
-    background-color: rgba(255, 255, 255, 0.035);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+/* ── Mode Tiles (Unified with omen-gui Libadwaita cards) ─── */
+.overlay-tile {
+    background-color: @card_bg_color;
+    background-image: none;
+    border: 1px solid alpha(@window_fg_color, 0.09);
     border-radius: 12px;
     padding: 12px 14px;
-    margin-top: 8px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+    transition: background-color 150ms ease, border-color 150ms ease;
+    outline: none;
 }
 
-.telem-chip-title {
-    font-size: 10.5px;
+.overlay-tile:hover {
+    background-color: @popover_bg_color;
+    background-image: none;
+    border-color: alpha(@accent_bg_color, 0.42);
+}
+
+.overlay-tile:active {
+    background-color: alpha(@window_fg_color, 0.10);
+}
+
+.overlay-tile.active {
+    background-color: @accent_bg_color;
+    background-image: none;
+    border-color: transparent;
+    color: @accent_fg_color;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
+}
+
+.overlay-tile.active .tile-icon,
+.overlay-tile.active .tile-title {
+    color: @accent_fg_color;
+}
+
+.overlay-tile.active .tile-subtitle {
+    color: alpha(@accent_fg_color, 0.82);
+}
+
+.overlay-tile.active .tile-keycap {
+    background-color: alpha(@accent_fg_color, 0.18);
+    border-color: alpha(@accent_fg_color, 0.28);
+    color: @accent_fg_color;
+}
+
+.tile-icon {
+    color: alpha(@window_fg_color, 0.78);
+}
+
+.tile-title {
+    font-size: 13px;
     font-weight: 700;
-    letter-spacing: 0.6px;
-    color: rgba(255, 255, 255, 0.55);
+    color: @window_fg_color;
 }
 
-.telem-chip-val {
-    font-size: 17px;
-    font-weight: 800;
-    color: rgba(255, 255, 255, 0.96);
-    font-feature-settings: "tnum" 1;
-}
-
-.telem-sub {
+.tile-subtitle {
     font-size: 11px;
-    color: rgba(255, 255, 255, 0.62);
+    font-weight: 400;
+    color: alpha(@window_fg_color, 0.62);
+}
+
+.tile-keycap {
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 5px;
+    background-color: alpha(@window_fg_color, 0.07);
+    border: 1px solid alpha(@window_fg_color, 0.12);
+    color: alpha(@window_fg_color, 0.68);
+}
+
+/* ── Live Telemetry Card ─────────────────────────────────── */
+.overlay-telemetry-card {
+    background-color: @card_bg_color;
+    border: 1px solid alpha(@window_fg_color, 0.09);
+    border-radius: 12px;
+    padding: 10px 4px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+}
+
+.telemetry-cell {
+    padding: 2px 12px;
+}
+
+.telemetry-label {
+    font-size: 10.5px;
+    font-weight: 600;
+    color: alpha(@window_fg_color, 0.58);
+}
+
+.telemetry-value {
+    font-size: 13.5px;
+    font-weight: 700;
+    color: @window_fg_color;
     font-feature-settings: "tnum" 1;
 }
 
-.telem-separator {
-    background-color: rgba(255, 255, 255, 0.08);
+.telemetry-sep {
+    background-color: alpha(@window_fg_color, 0.08);
     min-width: 1px;
     margin-top: 4px;
     margin-bottom: 4px;
 }
 
-.footer-shortcut-box {
-    margin-top: 10px;
+/* ── Footer Shortcut Hints ───────────────────────────────── */
+.overlay-footer {
+    margin-top: 2px;
+}
+
+.shortcut-key {
+    font-family: "JetBrains Mono", "Fira Code", monospace;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 5px;
+    background-color: alpha(@window_fg_color, 0.07);
+    border: 1px solid alpha(@window_fg_color, 0.12);
+    color: alpha(@window_fg_color, 0.78);
 }
 
 .shortcut-hint {
     font-size: 11px;
-    color: rgba(255, 255, 255, 0.58);
-}
-
-.shortcut-key {
-    background-color: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 6px;
-    padding: 1px 6px;
-    font-size: 10.5px;
-    font-weight: 700;
-    color: rgba(255, 255, 255, 0.85);
+    color: alpha(@window_fg_color, 0.60);
 }

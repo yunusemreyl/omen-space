@@ -19,6 +19,24 @@ where
     args.into_iter().skip(1).any(|a| a.as_ref() == "--daemon")
 }
 
+fn apply_appearance_mode() {
+    if let Ok(home) = std::env::var("HOME") {
+        let path = format!("{}/.config/omenspace/settings.json", home);
+        if let Ok(json_str) = std::fs::read_to_string(&path) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                if let Some(am) = json.get("appearance_mode").and_then(|v| v.as_u64()) {
+                    let scheme = match am {
+                        1 => adw::ColorScheme::ForceLight,
+                        2 => adw::ColorScheme::ForceDark,
+                        _ => adw::ColorScheme::Default,
+                    };
+                    adw::StyleManager::default().set_color_scheme(scheme);
+                }
+            }
+        }
+    }
+}
+
 fn main() {
     if is_legacy_daemon_launch(std::env::args()) {
         eprintln!(
@@ -47,13 +65,20 @@ fn main() {
 
     app.connect_startup(|_| {
         adw::init().expect("Failed to initialize libadwaita");
-        let provider = gtk::CssProvider::new();
-        provider.load_from_string(include_str!("style.css"));
-        gtk::style_context_add_provider_for_display(
-            &gtk::gdk::Display::default().unwrap(),
-            &provider,
-            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
+        apply_appearance_mode();
+        if let Some(display) = gtk::gdk::Display::default() {
+            let icon_theme = gtk::IconTheme::for_display(&display);
+            icon_theme.add_search_path("assets");
+            icon_theme.add_search_path("/usr/share/omen-space/assets");
+
+            let provider = gtk::CssProvider::new();
+            provider.load_from_string(include_str!("style.css"));
+            gtk::style_context_add_provider_for_display(
+                &display,
+                &provider,
+                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+        }
     });
 
     app.connect_activate(|app| {

@@ -335,34 +335,6 @@ progressbar > trough {
     border-radius: 2px;
 }
 
-/* ── Device spec card ─────────────────────────────────────── */
-.spec-card {
-    background-color: @card_bg_color;
-    border: 1px solid alpha(@window_fg_color, 0.08);
-    border-radius: 12px;
-    padding: 14px 18px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-}
-
-.spec-device-name {
-    color: @window_fg_color;
-    font-size: 15px;
-    font-weight: 700;
-}
-
-.spec-label {
-    color: alpha(@window_fg_color, 0.62);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 1.2px;
-}
-
-.spec-value {
-    color: @window_fg_color;
-    font-size: 11.5px;
-    font-weight: 500;
-}
-
 /* ── App profile cards ────────────────────────────────────── */
 .app-profile-card {
     background-color: @card_bg_color;

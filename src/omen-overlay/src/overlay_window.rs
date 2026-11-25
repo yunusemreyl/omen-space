@@ -1,44 +1,37 @@
+use adw::prelude::*;
 use gtk::prelude::*;
 use libadwaita as adw;
-use adw::prelude::*;
-use std::rc::Rc;
+use omen_types::hotkey::HotkeySpec;
 use std::cell::RefCell;
+use std::rc::Rc;
+
 use crate::daemon_client::{self, SystemStats};
-// ── Overlay config (position, hotkey, margin) ─────────────────────────────────
 
 #[derive(Clone)]
 struct OverlayConfig {
-    halign: String,  // "start" | "center" | "end"
-    valign: String,  // "start" | "center" | "end"
-    margin: i32,
     hotkey: String,
 }
 
 impl Default for OverlayConfig {
     fn default() -> Self {
         Self {
-            halign: "end".into(),
-            valign: "start".into(),
-            margin: 24,
-            hotkey: "Shift+F2".into(),
+            hotkey: HotkeySpec::default().display(),
         }
     }
 }
 
 fn load_overlay_config() -> OverlayConfig {
-    let mut cfg = OverlayConfig::default();
     if let Ok(home) = std::env::var("HOME") {
         let path = format!("{}/.config/omenspace/settings.json", home);
         if let Ok(s) = std::fs::read_to_string(&path) {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) {
-                if let Some(h) = v.get("overlay_halign").and_then(|x| x.as_str()) { cfg.halign = h.to_string(); }
-                if let Some(v2) = v.get("overlay_valign").and_then(|x| x.as_str()) { cfg.valign = v2.to_string(); }
-                if let Some(m) = v.get("overlay_margin").and_then(|x| x.as_i64()) { cfg.margin = m as i32; }
-                if let Some(hk) = v.get("overlay_hotkey").and_then(|x| x.as_str()) { cfg.hotkey = hk.to_string(); }
+                return OverlayConfig {
+                    hotkey: HotkeySpec::from_settings(&v).display(),
+                };
             }
         }
     }
-    cfg
+    OverlayConfig::default()
 }
 
 pub struct OverlayWindow {
@@ -51,6 +44,7 @@ pub struct OverlayWindow {
     gpu_val_label: gtk::Label,
     fan_val_label: gtk::Label,
     ram_val_label: gtk::Label,
+    battery_sep: gtk::Separator,
     battery_chip: gtk::Box,
     battery_val_label: gtk::Label,
     tag_label: gtk::Label,
@@ -65,8 +59,7 @@ impl OverlayWindow {
             .title(crate::i18n::t("title"))
             .decorated(false)
             .resizable(false)
-            .default_width(680)
-            .default_height(420)
+            .default_width(560)
             .css_classes(["omen-overlay-window"])
             .build();
 
@@ -75,25 +68,25 @@ impl OverlayWindow {
         let power_btns = Rc::new(RefCell::new(Vec::new()));
         let fan_btns = Rc::new(RefCell::new(Vec::new()));
 
-        // Outer container
-        let root_box = gtk::Box::builder()
+        // Opaque GNOME / Libadwaita surface container
+        let surface = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
-            .css_classes(["omen-overlay-card"])
-            .spacing(14)
+            .css_classes(["omen-overlay-surface"])
+            .spacing(0)
             .build();
 
-        // ── 1. Header ────────────────────────────────────────────────────────
-        let header = gtk::Box::builder()
+        // ── 1. Native GNOME-style Header Bar (draggable via WindowHandle) ────
+        let header_inner = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
             .css_classes(["overlay-header"])
-            .spacing(10)
+            .spacing(8)
             .build();
 
         let brand_icon = gtk::Image::builder()
-            .icon_name("preferences-desktop-display-symbolic")
-            .pixel_size(20)
+            .icon_name("omenspace")
+            .pixel_size(18)
             .build();
-        header.append(&brand_icon);
+        header_inner.append(&brand_icon);
 
         let title_label = gtk::Label::builder()
             .label(crate::i18n::t("title"))
@@ -101,265 +94,196 @@ impl OverlayWindow {
             .hexpand(true)
             .halign(gtk::Align::Start)
             .build();
-        header.append(&title_label);
+        header_inner.append(&title_label);
 
-        // Show configured hotkey in header tag
         let tag_label = gtk::Label::builder()
-            .label(cfg.hotkey.to_uppercase())
-            .css_classes(["overlay-brand-tag"])
+            .label(&cfg.hotkey)
+            .css_classes(["overlay-hotkey-cap"])
+            .valign(gtk::Align::Center)
             .build();
-        header.append(&tag_label);
+        header_inner.append(&tag_label);
 
         let close_btn = gtk::Button::builder()
             .icon_name("window-close-symbolic")
-            .css_classes(["overlay-close-btn"])
+            .tooltip_text(crate::i18n::t("close"))
+            .css_classes(["circular", "flat", "overlay-close-btn"])
+            .valign(gtk::Align::Center)
             .build();
         let app_c = app.clone();
         close_btn.connect_clicked(move |_| {
             app_c.quit();
         });
-        header.append(&close_btn);
+        header_inner.append(&close_btn);
 
-        root_box.append(&header);
+        let header_handle = gtk::WindowHandle::new();
+        header_handle.set_child(Some(&header_inner));
+        surface.append(&header_handle);
+
+        surface.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+
+        // ── Main Content Body ────────────────────────────────────────────────
+        let body = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .css_classes(["overlay-body"])
+            .spacing(16)
+            .build();
 
         // ── 2. Performance Profiles ──────────────────────────────────────────
         let perf_section = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
-            .spacing(6)
+            .spacing(8)
             .build();
 
-        let perf_label = gtk::Label::builder()
-            .label(crate::i18n::t("perf_mode"))
-            .css_classes(["section-label"])
-            .halign(gtk::Align::Start)
-            .build();
-        perf_section.append(&perf_label);
+        perf_section.append(
+            &gtk::Label::builder()
+                .label(crate::i18n::t("perf_mode"))
+                .css_classes(["overlay-section-label"])
+                .halign(gtk::Align::Start)
+                .build(),
+        );
 
         let perf_grid = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
-            .spacing(10)
+            .spacing(8)
             .homogeneous(true)
             .build();
 
         let power_modes = [
-            ("power-saver", crate::i18n::t("quiet"), "1", crate::i18n::t("eco_silent"), "active-eco", "power-profile-power-saver-symbolic"),
-            ("balanced", crate::i18n::t("default"), "2", crate::i18n::t("balanced"), "active", "power-profile-balanced-symbolic"),
-            ("performance", crate::i18n::t("performance"), "3", crate::i18n::t("max_power"), "active-perf", "power-profile-performance-symbolic"),
+            (
+                "power-saver",
+                crate::i18n::t("quiet"),
+                "1",
+                crate::i18n::t("eco_silent"),
+                "power-profile-power-saver-symbolic",
+            ),
+            (
+                "balanced",
+                crate::i18n::t("default"),
+                "2",
+                crate::i18n::t("balanced"),
+                "power-profile-balanced-symbolic",
+            ),
+            (
+                "performance",
+                crate::i18n::t("performance"),
+                "3",
+                crate::i18n::t("max_power"),
+                "power-profile-performance-symbolic",
+            ),
         ];
 
         let mut p_btns = Vec::new();
-
-        for (mode_key, name, key_shortcut, desc, _active_class, icon_name) in power_modes.iter() {
-            let btn = gtk::Button::builder()
-                .css_classes(["mode-btn"])
-                .build();
-
-            let inner = gtk::Box::builder()
-                .orientation(gtk::Orientation::Vertical)
-                .spacing(4)
-                .build();
-
-            let top_row = gtk::Box::builder()
-                .orientation(gtk::Orientation::Horizontal)
-                .spacing(6)
-                .build();
-
-            let icon = gtk::Image::builder()
-                .icon_name(*icon_name)
-                .pixel_size(18)
-                .build();
-            top_row.append(&icon);
-
-            let lbl = gtk::Label::builder()
-                .label(name)
-                .css_classes(["mode-name"])
-                .hexpand(true)
-                .halign(gtk::Align::Start)
-                .build();
-            top_row.append(&lbl);
-
-            let badge = gtk::Label::builder()
-                .label(*key_shortcut)
-                .css_classes(["mode-badge"])
-                .build();
-            top_row.append(&badge);
-
-            inner.append(&top_row);
-
-            let sub = gtk::Label::builder()
-                .label(desc)
-                .css_classes(["mode-desc"])
-                .halign(gtk::Align::Start)
-                .build();
-            inner.append(&sub);
-
-            btn.set_child(Some(&inner));
-
-            let p_key = mode_key.to_string();
-            p_btns.push((p_key, btn.clone()));
+        for (mode_key, name, key_shortcut, desc, icon_name) in power_modes.iter() {
+            let btn = build_mode_tile(name, desc, key_shortcut, icon_name);
+            p_btns.push(((*mode_key).to_string(), btn.clone()));
             perf_grid.append(&btn);
         }
 
         perf_section.append(&perf_grid);
-        root_box.append(&perf_section);
+        body.append(&perf_section);
 
         // ── 3. Fan Profiles / Modes ──────────────────────────────────────────
         let fan_section = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
-            .spacing(6)
-            .margin_top(4)
+            .spacing(8)
             .build();
 
-        let fan_label = gtk::Label::builder()
-            .label(crate::i18n::t("fan_mode"))
-            .css_classes(["section-label"])
-            .halign(gtk::Align::Start)
-            .build();
-        fan_section.append(&fan_label);
+        fan_section.append(
+            &gtk::Label::builder()
+                .label(crate::i18n::t("fan_mode"))
+                .css_classes(["overlay-section-label"])
+                .halign(gtk::Align::Start)
+                .build(),
+        );
 
         let fan_grid = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
-            .spacing(10)
+            .spacing(8)
             .homogeneous(true)
             .build();
 
         let fan_modes = [
-            ("auto", "Q", crate::i18n::t("auto"), "active", "weather-clear-symbolic"),
-            ("max", "W", crate::i18n::t("max"), "active-turbo", "weather-storm-symbolic"),
-            ("custom", "E", crate::i18n::t("custom"), "active", "emblem-system-symbolic"),
+            (
+                "auto",
+                "Q",
+                crate::i18n::t("auto"),
+                crate::i18n::t("auto_desc"),
+                "weather-clear-symbolic",
+            ),
+            (
+                "max",
+                "W",
+                crate::i18n::t("max"),
+                crate::i18n::t("max_desc"),
+                "weather-storm-symbolic",
+            ),
+            (
+                "custom",
+                "E",
+                crate::i18n::t("custom"),
+                crate::i18n::t("custom_desc"),
+                "emblem-system-symbolic",
+            ),
         ];
 
         let mut f_btns = Vec::new();
-
-        for (mode_key, key_shortcut, title, _active_class, icon_name) in fan_modes.iter() {
-            let btn = gtk::Button::builder()
-                .css_classes(["mode-btn"])
-                .build();
-
-            let inner = gtk::Box::builder()
-                .orientation(gtk::Orientation::Vertical)
-                .spacing(4)
-                .build();
-
-            let top_row = gtk::Box::builder()
-                .orientation(gtk::Orientation::Horizontal)
-                .spacing(6)
-                .build();
-
-            let icon = gtk::Image::builder()
-                .icon_name(*icon_name)
-                .pixel_size(18)
-                .build();
-            top_row.append(&icon);
-
-            let lbl = gtk::Label::builder()
-                .label(title)
-                .css_classes(["mode-name"])
-                .hexpand(true)
-                .halign(gtk::Align::Start)
-                .build();
-            top_row.append(&lbl);
-
-            let badge = gtk::Label::builder()
-                .label(*key_shortcut)
-                .css_classes(["mode-badge"])
-                .build();
-            top_row.append(&badge);
-
-            inner.append(&top_row);
-
-            let sub = gtk::Label::builder()
-                .label(&match *mode_key {
-                    "auto" => crate::i18n::t("auto_desc"),
-                    "max" => crate::i18n::t("max_desc"),
-                    _ => crate::i18n::t("custom_desc"),
-                })
-                .css_classes(["mode-desc"])
-                .halign(gtk::Align::Start)
-                .build();
-            inner.append(&sub);
-
-            btn.set_child(Some(&inner));
-
-            let m_key = mode_key.to_string();
-            f_btns.push((m_key, btn.clone()));
+        for (mode_key, key_shortcut, title, desc, icon_name) in fan_modes.iter() {
+            let btn = build_mode_tile(title, desc, key_shortcut, icon_name);
+            f_btns.push(((*mode_key).to_string(), btn.clone()));
             fan_grid.append(&btn);
         }
 
         fan_section.append(&fan_grid);
-        root_box.append(&fan_section);
+        body.append(&fan_section);
 
-        // ── 4. Live Telemetry Strip ──────────────────────────────────────────
+        // ── 4. Live Telemetry Strip (Opaque Adwaita Card) ────────────────────
         let telemetry_box = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
-            .css_classes(["telemetry-box"])
-            .spacing(12)
-            .homogeneous(true)
+            .css_classes(["overlay-telemetry-card"])
+            .spacing(0)
             .build();
 
-        // CPU chip
-        let cpu_chip = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).build();
-        cpu_chip.append(&gtk::Label::builder().label("CPU").css_classes(["telem-chip-title"]).halign(gtk::Align::Start).build());
-        let cpu_val = gtk::Label::builder().label("──°C | ──W").css_classes(["telem-chip-val"]).halign(gtk::Align::Start).build();
-        cpu_chip.append(&cpu_val);
+        let (cpu_chip, cpu_val) = build_telemetry_cell("CPU", "--°C · --W");
         telemetry_box.append(&cpu_chip);
+        telemetry_box.append(&build_vertical_divider());
 
-        // GPU chip
-        let gpu_chip = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).build();
-        gpu_chip.append(&gtk::Label::builder().label("GPU").css_classes(["telem-chip-title"]).halign(gtk::Align::Start).build());
-        let gpu_val = gtk::Label::builder().label("──°C | ──W").css_classes(["telem-chip-val"]).halign(gtk::Align::Start).build();
-        gpu_chip.append(&gpu_val);
+        let (gpu_chip, gpu_val) = build_telemetry_cell("GPU", "--°C · --W");
         telemetry_box.append(&gpu_chip);
+        telemetry_box.append(&build_vertical_divider());
 
-        // Fan chip
-        let fan_chip = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).build();
-        fan_chip.append(&gtk::Label::builder().label(crate::i18n::t("fans")).css_classes(["telem-chip-title"]).halign(gtk::Align::Start).build());
-        let fan_val = gtk::Label::builder().label("── RPM").css_classes(["telem-chip-val"]).halign(gtk::Align::Start).build();
-        fan_chip.append(&fan_val);
+        let (fan_chip, fan_val) = build_telemetry_cell(&crate::i18n::t("fans"), "-- RPM");
         telemetry_box.append(&fan_chip);
+        telemetry_box.append(&build_vertical_divider());
 
-        // RAM chip
-        let ram_chip = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).build();
-        ram_chip.append(&gtk::Label::builder().label("RAM").css_classes(["telem-chip-title"]).halign(gtk::Align::Start).build());
-        let ram_val = gtk::Label::builder().label("── / ── GB").css_classes(["telem-chip-val"]).halign(gtk::Align::Start).build();
-        ram_chip.append(&ram_val);
+        let (ram_chip, ram_val) = build_telemetry_cell("RAM", "-- / -- GB");
         telemetry_box.append(&ram_chip);
 
-        // BAT chip (revealed when laptop battery telemetry is active)
-        let battery_chip = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).visible(false).build();
-        battery_chip.append(&gtk::Label::builder().label(crate::i18n::t("battery")).css_classes(["telem-chip-title"]).halign(gtk::Align::Start).build());
-        let battery_val = gtk::Label::builder().label("──%").css_classes(["telem-chip-val"]).halign(gtk::Align::Start).build();
-        battery_chip.append(&battery_val);
+        let battery_sep = build_vertical_divider();
+        battery_sep.set_visible(false);
+        telemetry_box.append(&battery_sep);
+
+        let (battery_chip, battery_val) = build_telemetry_cell(&crate::i18n::t("battery"), "--%");
+        battery_chip.set_visible(false);
         telemetry_box.append(&battery_chip);
 
-        root_box.append(&telemetry_box);
+        body.append(&telemetry_box);
 
         // ── 5. Footer Shortcut Hints ─────────────────────────────────────────
         let footer = gtk::Box::builder()
             .orientation(gtk::Orientation::Horizontal)
-            .css_classes(["footer-shortcut-box"])
-            .spacing(14)
+            .css_classes(["overlay-footer"])
+            .spacing(16)
             .halign(gtk::Align::Center)
             .build();
 
-        let hint1 = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(4).build();
-        hint1.append(&gtk::Label::builder().label("1-3").css_classes(["shortcut-key"]).build());
-        hint1.append(&gtk::Label::builder().label(crate::i18n::t("perf_mode")).css_classes(["shortcut-hint"]).build());
-        footer.append(&hint1);
+        footer.append(&build_shortcut_hint("1–3", &crate::i18n::t("perf_mode")));
+        footer.append(&build_shortcut_hint("Q / W / E", &crate::i18n::t("fan_mode")));
+        footer.append(&build_shortcut_hint("Esc", &crate::i18n::t("close")));
 
-        let hint2 = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(4).build();
-        hint2.append(&gtk::Label::builder().label("Q/W/E").css_classes(["shortcut-key"]).build());
-        hint2.append(&gtk::Label::builder().label(crate::i18n::t("fan_mode")).css_classes(["shortcut-hint"]).build());
-        footer.append(&hint2);
+        body.append(&footer);
 
-        let hint3 = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(4).build();
-        hint3.append(&gtk::Label::builder().label("ESC").css_classes(["shortcut-key"]).build());
-        hint3.append(&gtk::Label::builder().label(crate::i18n::t("close")).css_classes(["shortcut-hint"]).build());
-        footer.append(&hint3);
-
-        root_box.append(&footer);
-
-        window.set_content(Some(&root_box));
+        surface.append(&body);
+        window.set_content(Some(&surface));
 
         *power_btns.borrow_mut() = p_btns;
         *fan_btns.borrow_mut() = f_btns;
@@ -374,12 +298,13 @@ impl OverlayWindow {
             gpu_val_label: gpu_val,
             fan_val_label: fan_val,
             ram_val_label: ram_val,
+            battery_sep,
             battery_chip,
             battery_val_label: battery_val,
             tag_label,
         });
 
-        overlay.apply_position(&cfg);
+        overlay.apply_config(&cfg);
         overlay.update_button_states();
         overlay.refresh_initial_state();
         overlay.setup_interactions();
@@ -397,7 +322,6 @@ impl OverlayWindow {
     }
 
     fn setup_interactions(self: &Rc<Self>) {
-        // Connect Power Profile buttons
         for (name, btn) in self.power_btns.borrow().iter() {
             let this = self.clone();
             let p_name = name.clone();
@@ -406,7 +330,6 @@ impl OverlayWindow {
             });
         }
 
-        // Connect Fan Mode buttons
         for (mode, btn) in self.fan_btns.borrow().iter() {
             let this = self.clone();
             let m_name = mode.clone();
@@ -415,15 +338,10 @@ impl OverlayWindow {
             });
         }
 
-        // Keyboard Controller
         let key_controller = gtk::EventControllerKey::new();
         let this = self.clone();
-        key_controller.connect_key_pressed(move |_, key, _keycode, state| {
+        key_controller.connect_key_pressed(move |_, key, _keycode, _state| {
             let key_val = key.name().unwrap_or_default().to_lowercase();
-            let _has_shift = state.contains(gtk::gdk::ModifierType::SHIFT_MASK);
-
-            // Escape closes the HUD (main.rs key controller); Shift+F2 toggles it globally via the daemon/tray
-
             match key_val.as_str() {
                 "1" | "kp_1" => {
                     this.select_power_profile("power-saver");
@@ -483,65 +401,70 @@ impl OverlayWindow {
     pub fn update_button_states(&self) {
         let cur_power = daemon_client::normalize_power_profile(&self.active_power.borrow());
         for (mode_key, btn) in self.power_btns.borrow().iter() {
-            btn.remove_css_class("active");
-            btn.remove_css_class("active-perf");
-            btn.remove_css_class("active-eco");
-
-            let btn_power = daemon_client::normalize_power_profile(mode_key);
-            if btn_power == cur_power {
-                match btn_power {
-                    "performance" => btn.add_css_class("active-perf"),
-                    "power-saver" => btn.add_css_class("active-eco"),
-                    _ => btn.add_css_class("active"),
-                }
+            let is_active = daemon_client::normalize_power_profile(mode_key) == cur_power;
+            if is_active {
+                btn.add_css_class("active");
+            } else {
+                btn.remove_css_class("active");
             }
         }
 
         let cur_fan = daemon_client::normalize_fan_mode(&self.active_fan.borrow());
         for (mode_key, btn) in self.fan_btns.borrow().iter() {
-            btn.remove_css_class("active");
-            btn.remove_css_class("active-turbo");
-
-            let btn_fan = daemon_client::normalize_fan_mode(mode_key);
-            if btn_fan == cur_fan {
-                if btn_fan == "max" {
-                    btn.add_css_class("active-turbo");
-                } else {
-                    btn.add_css_class("active");
-                }
+            let is_active = daemon_client::normalize_fan_mode(mode_key) == cur_fan;
+            if is_active {
+                btn.add_css_class("active");
+            } else {
+                btn.remove_css_class("active");
             }
         }
     }
 
     pub fn update_telemetry(&self, stats: &SystemStats) {
-        self.cpu_val_label.set_label(&format!("{}°C | {:.0}W", stats.cpu_temp, stats.cpu_pwr));
-        let gpu_t = if stats.gpu_temp > 0 { format!("{}°C", stats.gpu_temp) } else { "--".to_string() };
-        let gpu_w = if stats.gpu_pwr >= 0.0 { format!("{:.0}W", stats.gpu_pwr) } else { "--".to_string() };
-        self.gpu_val_label.set_label(&format!("{} | {}", gpu_t, gpu_w));
+        self.cpu_val_label
+            .set_label(&format!("{}°C · {:.0}W", stats.cpu_temp, stats.cpu_pwr));
+
+        let gpu_t = if stats.gpu_temp > 0 {
+            format!("{}°C", stats.gpu_temp)
+        } else {
+            "--".to_string()
+        };
+        let gpu_w = if stats.gpu_pwr >= 0.0 {
+            format!("{:.0}W", stats.gpu_pwr)
+        } else {
+            "--".to_string()
+        };
+        self.gpu_val_label.set_label(&format!("{} · {}", gpu_t, gpu_w));
 
         if stats.fan1_rpm > 0 || stats.fan2_rpm > 0 {
-            self.fan_val_label.set_label(&format!("{} / {} RPM", stats.fan1_rpm, stats.fan2_rpm));
+            self.fan_val_label
+                .set_label(&format!("{} / {}", stats.fan1_rpm, stats.fan2_rpm));
         } else if stats.fan_rpm > 0 {
-            self.fan_val_label.set_label(&format!("{} RPM", stats.fan_rpm));
+            self.fan_val_label
+                .set_label(&format!("{} RPM", stats.fan_rpm));
         } else {
-            self.fan_val_label.set_label("Auto RPM");
+            self.fan_val_label.set_label("Auto");
         }
 
         if stats.ram_total_gb > 0.0 {
-            self.ram_val_label.set_label(&format!("{:.1} / {:.0} GB", stats.ram_used_gb, stats.ram_total_gb));
+            self.ram_val_label
+                .set_label(&format!("{:.1} / {:.0} GB", stats.ram_used_gb, stats.ram_total_gb));
         }
 
         if let Some(ref bat) = stats.battery {
+            self.battery_sep.set_visible(true);
             self.battery_chip.set_visible(true);
             let pwr_str = if bat.power_w > 0.0 {
-                format!(" | {:.0}W", bat.power_w)
+                format!(" · {:.0}W", bat.power_w)
             } else if bat.ac_online {
-                " | AC".to_string()
+                " · AC".to_string()
             } else {
                 String::new()
             };
-            self.battery_val_label.set_label(&format!("{}%{}", bat.charge_pct, pwr_str));
+            self.battery_val_label
+                .set_label(&format!("{}%{}", bat.charge_pct, pwr_str));
         } else {
+            self.battery_sep.set_visible(false);
             self.battery_chip.set_visible(false);
         }
     }
@@ -565,9 +488,109 @@ impl OverlayWindow {
         });
     }
 
-    fn apply_position(&self, cfg: &OverlayConfig) {
-        self.tag_label.set_label(&cfg.hotkey.to_uppercase());
-        // Positioning is blocked by KDE Wayland focus stealing / layer shell rules.
-        // Thus, the window will appear in the center by default as a standard undecorated window.
+    fn apply_config(&self, cfg: &OverlayConfig) {
+        self.tag_label.set_label(&cfg.hotkey);
     }
+}
+
+fn build_mode_tile(title: &str, desc: &str, key_shortcut: &str, icon_name: &str) -> gtk::Button {
+    let btn = gtk::Button::builder()
+        .css_classes(["overlay-tile"])
+        .build();
+
+    let inner = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(4)
+        .build();
+
+    let top_row = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(8)
+        .build();
+
+    let icon = gtk::Image::builder()
+        .icon_name(icon_name)
+        .pixel_size(16)
+        .css_classes(["tile-icon"])
+        .build();
+    top_row.append(&icon);
+
+    let lbl = gtk::Label::builder()
+        .label(title)
+        .css_classes(["tile-title"])
+        .hexpand(true)
+        .halign(gtk::Align::Start)
+        .ellipsize(gtk::pango::EllipsizeMode::End)
+        .build();
+    top_row.append(&lbl);
+
+    let badge = gtk::Label::builder()
+        .label(key_shortcut)
+        .css_classes(["tile-keycap"])
+        .valign(gtk::Align::Center)
+        .build();
+    top_row.append(&badge);
+
+    inner.append(&top_row);
+
+    let sub = gtk::Label::builder()
+        .label(desc)
+        .css_classes(["tile-subtitle"])
+        .halign(gtk::Align::Start)
+        .ellipsize(gtk::pango::EllipsizeMode::End)
+        .build();
+    inner.append(&sub);
+
+    btn.set_child(Some(&inner));
+    btn
+}
+
+fn build_telemetry_cell(title: &str, initial_val: &str) -> (gtk::Box, gtk::Label) {
+    let cell = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(2)
+        .hexpand(true)
+        .css_classes(["telemetry-cell"])
+        .build();
+    cell.append(
+        &gtk::Label::builder()
+            .label(title)
+            .css_classes(["telemetry-label"])
+            .halign(gtk::Align::Start)
+            .build(),
+    );
+    let val = gtk::Label::builder()
+        .label(initial_val)
+        .css_classes(["telemetry-value"])
+        .halign(gtk::Align::Start)
+        .build();
+    cell.append(&val);
+    (cell, val)
+}
+
+fn build_vertical_divider() -> gtk::Separator {
+    let sep = gtk::Separator::new(gtk::Orientation::Vertical);
+    sep.add_css_class("telemetry-sep");
+    sep
+}
+
+fn build_shortcut_hint(key: &str, label: &str) -> gtk::Box {
+    let hint = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(6)
+        .valign(gtk::Align::Center)
+        .build();
+    hint.append(
+        &gtk::Label::builder()
+            .label(key)
+            .css_classes(["shortcut-key"])
+            .build(),
+    );
+    hint.append(
+        &gtk::Label::builder()
+            .label(label)
+            .css_classes(["shortcut-hint"])
+            .build(),
+    );
+    hint
 }

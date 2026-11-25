@@ -668,7 +668,7 @@ fn open_hotkey_dialog(
 
             // Ignore bare modifier presses but show what is being held.
             if is_modifier_key(keyval) {
-                combo_c.set_label(&modifier_preview(state));
+                combo_c.set_label(&modifier_preview(state, keyval));
                 return glib::Propagation::Stop;
             }
 
@@ -748,18 +748,27 @@ fn is_modifier_key(key: gdk::Key) -> bool {
     )
 }
 
-fn modifier_preview(state: gdk::ModifierType) -> String {
+fn modifier_preview(state: gdk::ModifierType, pressed: gdk::Key) -> String {
     let mut parts: Vec<&str> = Vec::new();
-    if state.contains(gdk::ModifierType::CONTROL_MASK) {
+    let ctrl = state.contains(gdk::ModifierType::CONTROL_MASK)
+        || matches!(pressed, gdk::Key::Control_L | gdk::Key::Control_R);
+    let alt = state.contains(gdk::ModifierType::ALT_MASK)
+        || matches!(pressed, gdk::Key::Alt_L | gdk::Key::Alt_R);
+    let shift = state.contains(gdk::ModifierType::SHIFT_MASK)
+        || matches!(pressed, gdk::Key::Shift_L | gdk::Key::Shift_R);
+    let super_key = state.contains(gdk::ModifierType::SUPER_MASK)
+        || matches!(pressed, gdk::Key::Super_L | gdk::Key::Super_R);
+
+    if ctrl {
         parts.push("Ctrl");
     }
-    if state.contains(gdk::ModifierType::ALT_MASK) {
+    if alt {
         parts.push("Alt");
     }
-    if state.contains(gdk::ModifierType::SHIFT_MASK) {
+    if shift {
         parts.push("Shift");
     }
-    if state.contains(gdk::ModifierType::SUPER_MASK) {
+    if super_key {
         parts.push("Super");
     }
     if parts.is_empty() {
