@@ -483,7 +483,20 @@ pub fn build_interactive_keyboard(
     });
     drawing_area.add_controller(motion);
 
-    let paint_color = Rc::new(RefCell::new("#0099ED".to_string()));
+    let initial_paint_color = if detected_mode == KeyboardMode::PerKey {
+        per_key_colors
+            .borrow()
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "#0099ED".to_string())
+    } else {
+        zone_colors
+            .borrow()
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "#0099ED".to_string())
+    };
+    let paint_color = Rc::new(RefCell::new(initial_paint_color.clone()));
     
     let click = gtk::GestureClick::new();
     click.set_button(0);
@@ -716,7 +729,7 @@ pub fn build_interactive_keyboard(
     global_color_btn.set_widget_name("global_color_btn");
     
     let dyn_prov_g = gtk::CssProvider::new();
-    dyn_prov_g.load_from_string(&format!("#global_color_btn {{ background: {}; background-image: none; border: 1px solid rgba(255,255,255,0.4); }}", "#0099ED"));
+    dyn_prov_g.load_from_string(&format!("#global_color_btn {{ background: {}; background-image: none; border: 1px solid rgba(255,255,255,0.4); }}", initial_paint_color));
     #[allow(deprecated)]
     global_color_btn.style_context().add_provider(&dyn_prov_g, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
     
@@ -914,6 +927,9 @@ pub fn build_interactive_keyboard(
             let anim_state_tick = anim_state_apply.clone();
             let da_tick = da_anim.clone();
             let id = da_anim.add_tick_callback(move |_, clock| {
+                if !da_tick.is_mapped() {
+                    return glib::ControlFlow::Continue;
+                }
                 let frame_time = clock.frame_time() as f64 / 1_000_000.0;
                 let mut ts = anim_state_tick.borrow_mut();
                 ts.2 = frame_time;

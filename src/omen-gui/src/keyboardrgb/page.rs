@@ -63,6 +63,13 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
     let zone_colors = Rc::new(RefCell::new(vec!["#0099ED".to_string(); 7]));
     let per_key_colors = Rc::new(RefCell::new(vec!["#0099ED".to_string(); 104]));
 
+    // Hydrate saved zone colors from the already-fetched daemon snapshot BEFORE building
+    // the keyboard preview so keys display their actual hardware color on first paint
+    // with zero extra D-Bus calls or polling.
+    if let Some(state) = &state_json_opt {
+        apply_zone_colors_from_snapshot(state, &mut zone_colors.borrow_mut());
+    }
+
     let (std_kb_grid, apply_anim, _) = if detected_mode == KeyboardMode::DesktopRgb {
         crate::desktop_rgb_gui::build_desktop_rgb_card(zone_colors.clone())
     } else {
@@ -81,37 +88,6 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
     } else {
         apply_anim("static", 50.0);
     }
-
-    let zc_load = zone_colors.clone();
-    glib::spawn_future_local(async move {
-        if let Ok(json) = crate::daemon_client::get_rgb_state_async().await {
-            if let Ok(state) = serde_json::from_str::<serde_json::Value>(&json) {
-                if let Some(colors) = state.get("colors").and_then(|c| c.as_array()) {
-                    let mut loaded_colors = zc_load.borrow_mut();
-                    for (idx, v) in colors.iter().enumerate() {
-                        if let Some(hex) = v.as_str() {
-                            if idx < loaded_colors.len() {
-                                let formatted = if hex.starts_with('#') { hex.to_string() } else { format!("#{}", hex) };
-                                loaded_colors[idx] = formatted;
-                            }
-                        }
-                    }
-                } else if let Some(zones) = state.get("zones").and_then(|z| z.as_object()) {
-                    let mut loaded_colors = zc_load.borrow_mut();
-                    for (i, v) in zones.iter() {
-                        if let Ok(idx) = i.parse::<usize>() {
-                            if let Some(hex) = v.as_str() {
-                                if idx < loaded_colors.len() {
-                                    let formatted = if hex.starts_with('#') { hex.to_string() } else { format!("#{}", hex) };
-                                    loaded_colors[idx] = formatted;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    });
 
     let mut lb_group_ret = None;
     let mut lb_preview_group_ret = None;

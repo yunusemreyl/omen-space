@@ -216,12 +216,75 @@ mod lightbar_tests {
 }
 
 pub fn fill_all_key_slots(colors: &mut [String], color: &str) { colors.fill(color.to_string()); }
+
+fn normalize_hex_color(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().trim_start_matches('#');
+    if trimmed.len() == 6 && trimmed.bytes().all(|b| b.is_ascii_hexdigit()) {
+        Some(format!("#{}", trimmed.to_ascii_uppercase()))
+    } else {
+        None
+    }
+}
+
+/// Populate `zone_colors` from a daemon `GetState()` JSON snapshot before building
+/// the keyboard preview, so the UI shows the keyboard's current color immediately
+/// without polling or extra D-Bus calls.
+pub fn apply_zone_colors_from_snapshot(snapshot: &serde_json::Value, zone_colors: &mut [String]) -> bool {
+    let mut updated = false;
+    if let Some(colors) = snapshot.get("colors").and_then(|c| c.as_array()) {
+        for (idx, v) in colors.iter().enumerate() {
+            if idx >= zone_colors.len() {
+                break;
+            }
+            if let Some(formatted) = v.as_str().and_then(normalize_hex_color) {
+                zone_colors[idx] = formatted;
+                updated = true;
+            }
+        }
+    } else if let Some(zones) = snapshot.get("zones").and_then(|z| z.as_object()) {
+        for (k, v) in zones.iter() {
+            if let Ok(idx) = k.parse::<usize>() {
+                if idx < zone_colors.len() {
+                    if let Some(formatted) = v.as_str().and_then(normalize_hex_color) {
+                        zone_colors[idx] = formatted;
+                        updated = true;
+                    }
+                }
+            }
+        }
+    }
+    updated
+}
+
 #[cfg(test)]
 mod all_key_tests {
     #[test] fn all_includes_the_six_slots_absent_from_the_preview() {
         let mut frame=vec!["0099ED".to_string();104];
         super::fill_all_key_slots(&mut frame,"FF0000");
         assert_eq!(frame.len(),104);assert!(frame.iter().all(|c|c=="FF0000"));
+    }
+
+    #[test]
+    fn zone_colors_hydrate_from_daemon_snapshot_before_preview_build() {
+        let mut zones = vec!["#0099ED".to_string(); 7];
+        let snap = serde_json::json!({
+            "colors": ["FFFFFF", "#ff0055", "00ffaa", "123456"]
+        });
+        assert!(super::apply_zone_colors_from_snapshot(&snap, &mut zones));
+        assert_eq!(zones[0], "#FFFFFF");
+        assert_eq!(zones[1], "#FF0055");
+        assert_eq!(zones[2], "#00FFAA");
+        assert_eq!(zones[3], "#123456");
+        // Untouched slots keep their fallback
+        assert_eq!(zones[4], "#0099ED");
+    }
+
+    #[test]
+    fn zone_colors_ignore_invalid_or_missing_entries() {
+        let mut zones = vec!["#0099ED".to_string(); 4];
+        let snap = serde_json::json!({ "colors": ["nothex", ""] });
+        assert!(!super::apply_zone_colors_from_snapshot(&snap, &mut zones));
+        assert_eq!(zones[0], "#0099ED");
     }
 }
 
