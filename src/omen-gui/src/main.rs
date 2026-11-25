@@ -267,51 +267,60 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
         .selection_mode(gtk::SelectionMode::Single)
         .build();
 
-    let m = 20;
+    let m = 24;
+    let wrap_scrollable = |child: &gtk::Box| -> gtk::ScrolledWindow {
+        let clamp = adw::Clamp::builder()
+            .maximum_size(1040)
+            .tightening_threshold(760)
+            .child(child)
+            .build();
+        gtk::ScrolledWindow::builder()
+            .vexpand(true)
+            .hexpand(true)
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .child(&clamp)
+            .build()
+    };
+
+    // Performance landing page: scrollable controls on top + boxless telemetry dock pinned to bottom
     let page_perf = performance_control::build_page();
-    let page_mon = monitoring::build_page(true);
-    let gen_box = gtk::Box::builder()
+    page_perf.set_margin_top(m);
+    page_perf.set_margin_start(m);
+    page_perf.set_margin_end(m);
+    page_perf.set_margin_bottom(m);
+
+    let perf_scroll = wrap_scrollable(&page_perf);
+    let telemetry_dock = monitoring::build_telemetry_dock();
+
+    let perf_root = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
-        .valign(gtk::Align::Start)
-        .spacing(14)
-        .margin_top(m)
-        .margin_start(m)
-        .margin_end(m)
-        .margin_bottom(m)
+        .vexpand(true)
+        .hexpand(true)
+        .spacing(0)
         .build();
-    gen_box.append(&page_perf);
-    gen_box.append(&page_mon);
+    perf_root.append(&perf_scroll);
+    perf_root.append(&telemetry_dock);
 
     let page_undervolt = undervolt::build_page();
     page_undervolt.set_margin_top(m);
     page_undervolt.set_margin_start(m);
     page_undervolt.set_margin_end(m);
     page_undervolt.set_margin_bottom(m);
+    let scroll_undervolt = wrap_scrollable(&page_undervolt);
 
     let page_mux = mux::build_page();
     page_mux.set_margin_top(m);
     page_mux.set_margin_start(m);
     page_mux.set_margin_end(m);
     page_mux.set_margin_bottom(m);
+    let scroll_mux = wrap_scrollable(&page_mux);
 
-    let mon_hdr = gtk::Box::builder()
-        .orientation(gtk::Orientation::Vertical)
-        .spacing(4)
-        .margin_bottom(6)
-        .build();
-    mon_hdr.append(&gtk::Label::builder().label(i18n::t("title_monitoring")).css_classes(["page-title"]).halign(gtk::Align::Start).build());
-    mon_hdr.append(&gtk::Label::builder().label(i18n::t("monitoring_desc")).css_classes(["os-section-desc"]).halign(gtk::Align::Start).build());
-    
-    let mon_content = gtk::Box::builder()
-        .orientation(gtk::Orientation::Vertical)
-        .spacing(16)
-        .margin_top(m)
-        .margin_start(m)
-        .margin_end(m)
-        .margin_bottom(m)
-        .build();
-    mon_content.append(&mon_hdr);
-    mon_content.append(&monitoring::build_page(false));
+    let mon_content = monitoring::build_monitor_page();
+    mon_content.set_margin_top(m);
+    mon_content.set_margin_start(m);
+    mon_content.set_margin_end(m);
+    mon_content.set_margin_bottom(m);
+    let scroll_mon = wrap_scrollable(&mon_content);
 
     let rgb_hdr = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
@@ -328,11 +337,11 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
         .build();
     page_rgb.append(&rgb_hdr);
     page_rgb.append(&page_rgb_content);
-    
     page_rgb.set_margin_top(m);
     page_rgb.set_margin_start(m);
     page_rgb.set_margin_end(m);
     page_rgb.set_margin_bottom(m);
+    let scroll_rgb = wrap_scrollable(&page_rgb);
 
     // Setup dynamic on_lang_changed callback that re-renders the UI instantly
     let win_clone = window.clone();
@@ -359,6 +368,8 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
     };
     let page_app_profiles = make_lazy_container();
     let page_settings = make_lazy_container();
+    let scroll_app_profiles = wrap_scrollable(&page_app_profiles);
+    let scroll_settings = wrap_scrollable(&page_settings);
 
     type LazyPageEntry = (gtk::Box, Box<dyn FnOnce() -> gtk::Widget>);
     let lazy_pages: Rc<RefCell<HashMap<&'static str, LazyPageEntry>>> =
@@ -392,13 +403,13 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
         );
     }
 
-    stack.add_named(&gen_box, Some("performance"));
-    stack.add_named(&page_undervolt, Some("undervolt"));
-    stack.add_named(&page_mux, Some("mux"));
-    stack.add_named(&mon_content, Some("monitoring"));
-    stack.add_named(&page_rgb, Some("rgb"));
-    stack.add_named(&page_app_profiles, Some("appprof"));
-    stack.add_named(&page_settings, Some("settings"));
+    stack.add_named(&perf_root, Some("performance"));
+    stack.add_named(&scroll_undervolt, Some("undervolt"));
+    stack.add_named(&scroll_mux, Some("mux"));
+    stack.add_named(&scroll_mon, Some("monitoring"));
+    stack.add_named(&scroll_rgb, Some("rgb"));
+    stack.add_named(&scroll_app_profiles, Some("appprof"));
+    stack.add_named(&scroll_settings, Some("settings"));
 
     let ensure_page: Rc<dyn Fn(&str)> = {
         let stack_c = stack.clone();
@@ -420,20 +431,12 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
         .active(true)
         .build();
 
-    let content_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
-    
-    let content_clamp = adw::Clamp::builder()
-        .maximum_size(1040)
-        .tightening_threshold(760)
-        .child(&stack)
-        .build();
-
-    let scroll = gtk::ScrolledWindow::builder()
+    let content_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
         .vexpand(true)
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .child(&content_clamp)
+        .hexpand(true)
         .build();
-    content_box.append(&scroll);
+    content_box.append(&stack);
 
     let tabs = [
         ("omen-performance-symbolic", i18n::t("nav_performance"), "performance"),
@@ -500,6 +503,7 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
     bottom_list.append(&settings_row);
 
     if target_page == "settings" {
+        sidebar_list.unselect_all();
         bottom_list.select_row(Some(&settings_row));
     } else {
         let mut selected = false;
@@ -585,4 +589,7 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
     });
 
     window.set_content(Some(&toolbar_view));
+    if target_page == "settings" {
+        gtk::prelude::GtkWindowExt::set_focus(window, Some(&settings_row));
+    }
 }

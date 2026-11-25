@@ -22,16 +22,16 @@ overlay-split-view > sidebar,
 /* ── Typography scale ─────────────────────────────────────── */
 .page-title {
     color: @window_fg_color;
-    font-size: 20px;
+    font-size: 22px;
     font-weight: 700;
-    letter-spacing: -0.3px;
+    letter-spacing: -0.4px;
 }
 
 .os-section-header {
     color: @window_fg_color;
     font-size: 14px;
     font-weight: 600;
-    letter-spacing: 0.1px;
+    letter-spacing: -0.1px;
 }
 
 .os-cat-label {
@@ -42,13 +42,300 @@ overlay-split-view > sidebar,
 }
 
 .os-section-desc {
-    color: alpha(@window_fg_color, 0.68);
+    color: alpha(@window_fg_color, 0.64);
     font-size: 12.5px;
-    line-height: 1.45;
 }
 
 .os-mono {
     font-family: "JetBrains Mono", "Fira Code", monospace;
+    font-feature-settings: "tnum" 1;
+}
+
+/* ── Unified panels (Performance curve studio & System Monitor) */
+.os-panel {
+    background-color: @card_bg_color;
+    background-image: none;
+    border: 1px solid alpha(@window_fg_color, 0.08);
+    border-radius: 14px;
+    padding: 14px 16px;
+}
+
+.os-panel-title {
+    color: @window_fg_color;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: -0.15px;
+}
+
+.os-panel-sub {
+    color: alpha(@window_fg_color, 0.58);
+    font-size: 11.5px;
+    font-weight: 500;
+}
+
+/* ── Redesigned Performance Mode Cards ────────────────────── */
+.os-mode-card {
+    background-color: @card_bg_color;
+    background-image: none;
+    border: 1px solid alpha(@window_fg_color, 0.08);
+    border-radius: 14px;
+    padding: 16px 18px;
+    transition: background-color 150ms ease, border-color 150ms ease;
+    box-shadow: none;
+    outline: none;
+}
+
+.os-mode-card:hover {
+    background-color: @popover_bg_color;
+    background-image: none;
+    border-color: alpha(@accent_bg_color, 0.42);
+}
+
+.os-mode-card:checked {
+    background-color: @accent_bg_color;
+    background-image: none;
+    border-color: transparent;
+}
+
+.os-mode-title {
+    color: @window_fg_color;
+    font-size: 14.5px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+}
+
+.os-mode-sub {
+    color: alpha(@window_fg_color, 0.60);
+    font-size: 11.5px;
+    font-weight: 500;
+}
+
+.os-mode-trait {
+    color: alpha(@window_fg_color, 0.56);
+    font-size: 11.5px;
+    font-weight: 400;
+}
+
+.os-mode-dot {
+    min-width: 10px;
+    min-height: 10px;
+    border-radius: 999px;
+    border: 1.5px solid alpha(@window_fg_color, 0.24);
+    background-color: transparent;
+}
+
+.os-mode-card:checked .os-mode-title {
+    color: @accent_fg_color;
+}
+
+.os-mode-card:checked .os-mode-sub {
+    color: alpha(@accent_fg_color, 0.88);
+}
+
+.os-mode-card:checked .os-mode-trait {
+    color: alpha(@accent_fg_color, 0.78);
+}
+
+.os-mode-card:checked .os-mode-dot {
+    border-color: @accent_fg_color;
+    background-color: @accent_fg_color;
+}
+
+/* ── Redesigned Fan Mode Tiles ────────────────────────────── */
+.os-fan-card {
+    background-color: @card_bg_color;
+    background-image: none;
+    border: 1px solid alpha(@window_fg_color, 0.08);
+    border-radius: 12px;
+    padding: 11px 12px;
+    min-height: 50px;
+    transition: background-color 150ms ease, border-color 150ms ease;
+    box-shadow: none;
+    outline: none;
+}
+
+.os-fan-card:hover {
+    background-color: @popover_bg_color;
+    background-image: none;
+    border-color: alpha(@accent_bg_color, 0.42);
+}
+
+.os-fan-card:checked {
+    background-color: @accent_bg_color;
+    background-image: none;
+    border-color: transparent;
+}
+
+.os-fan-title {
+    color: @window_fg_color;
+    font-size: 12.5px;
+    font-weight: 600;
+}
+
+.os-fan-sub {
+    color: alpha(@window_fg_color, 0.58);
+    font-size: 11px;
+    font-weight: 400;
+}
+
+.os-fan-card:checked .os-fan-title {
+    color: @accent_fg_color;
+}
+
+.os-fan-card:checked .os-fan-sub {
+    color: alpha(@accent_fg_color, 0.82);
+}
+
+/* ── Pinned Boxless Bottom Telemetry Dock ─────────────────── */
+.os-telemetry-dock {
+    background-color: alpha(@window_fg_color, 0.028);
+    border-top: 1px solid alpha(@window_fg_color, 0.08);
+}
+
+.os-dock-inner {
+    padding: 26px 24px 30px 24px;
+}
+
+.os-dock-col {
+    padding: 0 20px;
+}
+
+.os-dock-col:first-child {
+    padding-left: 0;
+}
+
+.os-dock-col:last-child {
+    padding-right: 0;
+}
+
+.os-dock-vsep {
+    background-color: alpha(@window_fg_color, 0.08);
+    min-width: 1px;
+    margin-top: 4px;
+    margin-bottom: 4px;
+}
+
+.os-dock-title {
+    color: @window_fg_color;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: -0.1px;
+}
+
+.os-dock-temp {
+    color: @window_fg_color;
+    font-size: 25px;
+    font-weight: 700;
+    letter-spacing: -0.6px;
+    font-feature-settings: "tnum" 1;
+}
+
+.os-dock-key {
+    color: alpha(@window_fg_color, 0.56);
+    font-size: 11.5px;
+    font-weight: 600;
+}
+
+.os-dock-val {
+    color: @window_fg_color;
+    font-size: 14.5px;
+    font-weight: 700;
+    font-feature-settings: "tnum" 1;
+}
+
+.os-dock-val-sm {
+    color: alpha(@window_fg_color, 0.86);
+    font-size: 12.5px;
+    font-weight: 600;
+    font-feature-settings: "tnum" 1;
+}
+
+progressbar.os-dock-bar > trough,
+progressbar.os-dock-bar > trough > progress {
+    min-height: 6px;
+    border-radius: 999px;
+}
+
+progressbar.os-dock-bar-thin > trough,
+progressbar.os-dock-bar-thin > trough > progress {
+    min-height: 5px;
+    border-radius: 999px;
+}
+
+/* ── Redesigned System Monitor Elements ───────────────────── */
+.os-summary-strip {
+    background-color: @card_bg_color;
+    border: 1px solid alpha(@window_fg_color, 0.08);
+    border-radius: 12px;
+    padding: 10px 4px;
+}
+
+.os-summary-cell {
+    padding: 2px 16px;
+}
+
+.os-summary-val {
+    color: @window_fg_color;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+    font-feature-settings: "tnum" 1;
+}
+
+.os-mon-hero-temp {
+    color: @window_fg_color;
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.6px;
+    font-feature-settings: "tnum" 1;
+}
+
+.os-mon-key {
+    color: alpha(@window_fg_color, 0.58);
+    font-size: 11.5px;
+    font-weight: 500;
+}
+
+.os-mon-stat {
+    color: @window_fg_color;
+    font-size: 14px;
+    font-weight: 700;
+    font-feature-settings: "tnum" 1;
+}
+
+.os-mon-kv-val {
+    color: @window_fg_color;
+    font-size: 12.5px;
+    font-weight: 600;
+    font-feature-settings: "tnum" 1;
+}
+
+.os-storage-title {
+    color: @window_fg_color;
+    font-size: 12.5px;
+    font-weight: 700;
+}
+
+progressbar.os-storage-bar > trough,
+progressbar.os-storage-bar > trough > progress {
+    min-height: 5px;
+    border-radius: 999px;
+}
+
+.os-hw-meta-strip {
+    padding: 4px 2px;
+}
+
+.os-hw-meta-key {
+    color: alpha(@window_fg_color, 0.46);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.os-hw-meta-val {
+    color: alpha(@window_fg_color, 0.68);
+    font-size: 11px;
+    font-weight: 500;
     font-feature-settings: "tnum" 1;
 }
 
@@ -299,40 +586,40 @@ overlay-split-view > sidebar,
 
 /* ── Progress bars ────────────────────────────────────────── */
 progressbar.os-prog-cpu > trough > progress {
-    background-color: #E03355;
+    background-color: #E04560;
     min-height: 4px;
-    border-radius: 2px;
+    border-radius: 999px;
 }
 progressbar.os-prog-gpu > trough > progress {
-    background-color: #0099EE;
+    background-color: #2B9AF3;
     min-height: 4px;
-    border-radius: 2px;
+    border-radius: 999px;
 }
 progressbar.os-prog-ram > trough > progress {
-    background-color: #8833EE;
+    background-color: #9B6BFF;
     min-height: 4px;
-    border-radius: 2px;
+    border-radius: 999px;
 }
 progressbar.os-prog-disk > trough > progress {
-    background-color: #EE7700;
+    background-color: #E68A2E;
     min-height: 4px;
-    border-radius: 2px;
+    border-radius: 999px;
 }
 progressbar.os-prog-bat > trough > progress {
     background-color: #2EC27E;
     min-height: 4px;
-    border-radius: 2px;
+    border-radius: 999px;
 }
 progressbar.os-prog-bat-low > trough > progress {
-    background-color: #E03355;
+    background-color: #E04560;
     min-height: 4px;
-    border-radius: 2px;
+    border-radius: 999px;
 }
 progressbar > trough {
     background-color: alpha(@window_fg_color, 0.08);
     min-height: 4px;
     min-width: 10px;
-    border-radius: 2px;
+    border-radius: 999px;
 }
 
 /* ── App profile cards ────────────────────────────────────── */

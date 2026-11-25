@@ -6,6 +6,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ---
 
+## [2.5.0] - 2026-11-25
+
+### Added
+- **Bespoke Performance & Fan Icon Set:** Added custom, crisp dual-tone SVG icons for every mode and control (`eco.svg`, `balanced.svg`, `performance.svg`, `fan_auto.svg`, `fan_max.svg`, `fan_custom.svg`, `fan_quiet.svg`, `fan_preset.svg`, `fan_ec.svg`, `fan_add_preset.svg`), with workspace-first dev resolution in `asset_resolver.rs` while preserving packaged `/usr/share/omen-space/assets` paths.
+- **One-Click `+ New Preset` Action:** Added a dedicated **New Preset** button in the **Fan Control** header that opens the custom fan curve editor and focuses the preset name input immediately.
+- **Interactive System Monitor Metric Switcher:** Added a **Power / Temp / Load** segmented toggle on the System Monitor page that switches both CPU and GPU 60-second live Cairo charts simultaneously while recording all three histories continuously.
+
+### Changed
+- **Redesigned Performance Landing & Pinned Telemetry Dock:** Replaced the three floating boxed telemetry cards with a full-width, boxless **CPU | GPU | Device Status** telemetry dock pinned flush to the bottom of the page; refreshed the Performance header with a concise hardware identity line, equal-height sculpted mode cards, a 4-column edge-aligned fan control row, and a full-width theme-adaptive custom fan curve editor.
+- **Redesigned System Monitor Page:** Replaced the legacy 8-card grid with a live top summary strip (**System Power · Power Profile · Fan Mode**), unified CPU & GPU telemetry panels with theme-adaptive Cairo area charts, split **Memory & Storage** + **Battery & Power** panels, and a compact hardware/firmware footer (`OS`, `BIOS`, `EC`, `NVIDIA`).
+- **Redesigned GNOME Quick Control Overlay & Cross-Device Hotkeys:** Rebuilt `omen-overlay` around native Libadwaita surfaces, keycap shortcut hints, and a live telemetry strip, with expanded cross-device evdev hotkey support.
+
+### Fixed
+- **RGB Studio Color Hydration:** Hydrated the interactive keyboard preview and color swatch directly from the current daemon state on startup with zero extra overhead.
+- **Bogus Chassis Sensor Filtering & Settings Focus:** Filtered invalid `< 15°C` dummy ACPI chassis readings from the System Monitor summary strip, fixed fan subtitle truncation on wide cards, and preserved Settings selection focus across runtime language changes.
+
+---
+
 ## [2.4.3] - 2026-11-24
 
 ### Added

@@ -8,7 +8,7 @@
 
   <p>
     <a href="https://github.com/yunusemreyl/omen-space/releases/latest">
-      <img src="https://img.shields.io/badge/Versi%C3%B3n-v2.4.3-e11d48?style=flat-square" alt="Versión v2.4.3" />
+      <img src="https://img.shields.io/badge/Versi%C3%B3n-v2.5.0-e11d48?style=flat-square" alt="Versión v2.5.0" />
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/Licencia-GPL--3.0-10b981?style=flat-square" alt="Licencia" />
@@ -22,7 +22,7 @@
   </p>
 
   <br />
-  <img src="images/perf.png" width="92%" alt="OMEN Space — Rendimiento y Telemetría" />
+  <img src="images/perf.png" width="92%" alt="OMEN Space — Rendimiento y Barra de Telemetría" />
 </div>
 
 ---
@@ -33,12 +33,13 @@
 
 | Módulo | Funciones principales |
 | :--- | :--- |
-| **Rendimiento y Refrigeración** | Perfiles térmicos `Eco`, `Balanced` y `Performance`; modos de ventilador `Auto`, `Max`, curvas independientes para CPU y GPU con preajustes guardados, delegación directa al **EC**, limpieza de polvo y protección térmica con rebote de 3 s (`>= 90 °C` / `95 °C`). |
-| **Energía Avanzada** | Límites de potencia Intel RAPL `PL1` / `PL2` (hasta 250 W / 300 W), límite térmico `TCC Offset`, undervolt por MSR (con detección de `UV_LOCK`), Dynamic Boost de GPU y ajustes para AMD Ryzen SMU. |
-| **Selector de Gráficos (MUX)** | Cambio entre **Hybrid (MSHybrid)**, **Discrete (dGPU)** y **Advanced Optimus** con estado de enrutamiento `eDP`, verificación de lectura y versión del controlador NVIDIA. |
-| **RGB Studio** | Iluminación RGB de 4 zonas, zona única (Victus), barra de luz frontal, Desktop RGB y teclado por tecla HID LampArray Darfon (`0d62:54bf` / `0d62:30bf`) con calibración física, selector de distribución EN/DE y animaciones de bajo consumo. |
-| **Superposición Rápida (`Shift+F2`, configurable)** | Panel flotante personalizable dentro del juego y applet de bandeja del sistema sincronizados en tiempo real. |
-| **Centro de Depuración y Actualizador** | Volcado completo del sistema con un clic para GitHub, reglas por aplicación (Wayland y X11) y **Centro de Actualizaciones** con soporte `systemd` / **OpenRC** y firma automática Secure Boot MOK. |
+| **Rendimiento y Refrigeración** | Perfiles térmicos `Eco`, `Balanced` y `Performance`; modos de ventilador `Auto`, `Max`, curvas independientes para CPU y GPU con botón rápido **Nuevo preajuste**, delegación al **EC**, limpieza de polvo y barra de telemetría inferior fija sin cajas (`CPU`, `GPU`, `RAM`, `NVMe`, `Batería`). |
+| **Monitor del Sistema** | Gráficos en tiempo real de 60 s con selector **Potencia / Temp / Carga** para CPU y GPU, barra resumen de potencia y modos activos, uso por disco, panel dedicado de **Batería y energía** y metadatos de firmware (`OS`, `BIOS`, `EC`, `NVIDIA`). |
+| **Energía y Batería** | Limitador de carga de batería HP WMI `0x2B` / nativo con histéresis (`stop`/`start`, protección apagado `hold` y bypass único al 100 %), límites Intel RAPL `PL1`/`PL2`, `TCC Offset`, undervolt por MSR (`UV_LOCK`), GPU Dynamic Boost y ajustes AMD Ryzen SMU. |
+| **Selector de Gráficos (MUX y PRIME)** | Cambio validado por hardware entre **Hybrid (MSHybrid)**, **Discrete (dGPU)**, **Advanced Optimus** e **Integrated**, enrutamiento de pantallas, estado pasivo `D3cold` y copia rápida de **PRIME Offload**. |
+| **RGB Studio** | Iluminación RGB de 4 zonas, zona única (Victus), barra de luz frontal, Desktop RGB y teclado por tecla HID (Darfon `0d62:54bf` / `0d62:30bf` y Primax `0xFF13`) con vista previa sincronizada con el daemon, calibración física y distribución EN/DE. |
+| **Control Rápido (`Shift+F2`, configurable)** | Superposición flotante nativa en Libadwaita con atajos de teclado (`1–3`, `Q/W/E`), soporte de teclas en múltiples dispositivos y telemetría en vivo. |
+| **Centro de Ajustes Unificado** | Pestañas **General \| Actualizaciones \| Diagnóstico** con volcado completo para GitHub, comprobación OTA + `fwupd` (LVFS) y perfiles automáticos por aplicación. |
 
 ---
 
@@ -59,31 +60,44 @@ curl -sSL https://raw.githubusercontent.com/yunusemreyl/omen-space/main/install.
 ## Galería
 
 <p align="center">
-  <img src="images/keyboard.png" width="49%" alt="RGB Studio" />
-  <img src="images/undervolt.png" width="49%" alt="Energía Avanzada" />
+  <img src="images/monitor.png" width="49%" alt="Monitor del Sistema" />
+  <img src="images/undervolt.png" width="49%" alt="Energía y Batería" />
 </p>
 <p align="center">
   <img src="images/mux.png" width="49%" alt="Selector de Gráficos (MUX)" />
-  <img src="images/appprofiles.png" width="49%" alt="Gestor de Perfiles" />
+  <img src="images/keyboard.png" width="49%" alt="RGB Studio" />
 </p>
 <p align="center">
-  <img src="images/updater.png" width="49%" alt="Centro de Actualizaciones" />
-  <img src="images/diagnostic.png" width="49%" alt="Monitor del Sistema" />
+  <img src="images/appprofiles.png" width="49%" alt="Gestor de Perfiles" />
+  <img src="images/settings.png" width="49%" alt="Ajustes" />
 </p>
+
+<details>
+<summary><b>Más vistas (Control Rápido, Actualizaciones, Diagnóstico y CLI)</b></summary>
+<br />
+<p align="center">
+  <img src="images/updater.png" width="49%" alt="Ajustes — Actualizaciones" />
+  <img src="images/diagnostic.png" width="49%" alt="Ajustes — Diagnóstico" />
+</p>
+<p align="center">
+  <img src="images/overlay.png" width="46%" alt="OMEN Quick Control" />
+  <img src="images/cli.png" width="49%" alt="CLI interactiva" />
+</p>
+</details>
 
 ---
 
-## Novedades en v2.4.3
+## Novedades en v2.5.0
 
-- **Centro de Ajustes unificado y Selector de Gráficos simplificado:** Agrupa **Actualizaciones** y **Diagnóstico** como subpestañas dentro de **Ajustes** (**General | Actualizaciones | Diagnóstico**) dejando 6 secciones principales en la barra lateral, y simplifica **Selector de gráficos** con tarjetas compactas y un único grupo **Hardware & Pantalla**.
-- **Limpieza, Seguridad y Gobernanza:** Eliminadas dependencias y recursos sin uso junto con todas las advertencias de Clippy (`-D warnings` en CI); añadidos [SECURITY.md](SECURITY.md), [CHANGELOG.md](CHANGELOG.md), `.github/dependabot.yml`, plantillas de Issues/PR y documentación técnica actualizada en `docs/`.
-- **Resumen v2.4.2 / v2.4.1:** MUX GPU validado por BIOS (`gpu_mux_supported_modes`) + guía PRIME, limitador de carga `0x2B` en **Energía y Batería**, corrección de `Shift+F2` / Quick Overlay en Wayland/X11, soporte Primax `0xFF13` (#385) y localización ES/EN/TR completa.
+- **Rediseño de Rendimiento y barra de telemetría fija:** Se eliminaron las tres tarjetas flotantes y se fijó una barra de telemetría unificada sin cajas (**CPU | GPU | Estado del dispositivo**) en la parte inferior; incluye iconos SVG exclusivos para cada modo y botón de ventilador, acceso directo **Nuevo preajuste** y un editor de curva a ancho completo adaptable al tema.
+- **Rediseño completo de Monitor del Sistema:** Nueva barra resumen superior (**Potencia total · Perfil · Ventilador**), paneles unificados de CPU y GPU con gráficos Cairo de 60 s conmutables (**Potencia / Temp / Carga**), paneles separados de **Memoria y almacenamiento** y **Batería y energía**, y pie discreto con datos de firmware.
+- **Rediseño de Control Rápido y sincronización RGB:** Nueva interfaz nativa en Libadwaita para `omen-overlay` con soporte de atajos entre dispositivos, hidratación instantánea de color en RGB Studio y dependencias actualizadas.
 
 ---
 
 ## Documentación y Seguridad
 
-- **[Registro de cambios](CHANGELOG.md)** · **[Política de seguridad](SECURITY.md)** · **[Problemas conocidos](knownissues.md)** · **[Guía de instalación](docs/INSTALACION.es.md)**
+- **[Registro de cambios](CHANGELOG.md)** · **[Política de seguridad](SECURITY.md)** · **[Guía de instalación](docs/INSTALACION.es.md)**
 
 ---
 

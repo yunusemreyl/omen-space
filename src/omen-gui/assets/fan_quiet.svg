@@ -1,0 +1,10 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="quietMoon" x1="6" y1="5" x2="25" y2="26" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#A5F3FC"/>
+      <stop offset="100%" stop-color="#2DD4BF"/>
+    </linearGradient>
+  </defs>
+  <path d="M23.5 18.8A9.5 9.5 0 0 1 13.2 8.5A9.5 9.5 0 1 0 23.5 18.8Z" fill="url(#quietMoon)" stroke="#F0FDFA" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="M18.5 9.5C20.2 8.6 22.3 8.8 24 10M20 13.2C21.5 12.6 23.2 12.8 24.8 13.7" stroke="#CCFBF1" stroke-width="1.8" stroke-linecap="round"/>
+</svg>

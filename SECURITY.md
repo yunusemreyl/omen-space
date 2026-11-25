@@ -4,8 +4,8 @@
 
 | Version | Supported |
 | :--- | :--- |
-| `2.4.x` (latest release on `main`) | Yes |
-| `< 2.4.0` | Security fixes only backported upon request; please upgrade to `2.4.x` |
+| `2.5.x` (latest release on `main`) | Yes |
+| `< 2.5.0` | Security fixes only backported upon request; please upgrade to `2.5.x` |
 
 ---
 
