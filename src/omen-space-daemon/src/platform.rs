@@ -849,30 +849,6 @@ impl PlatformService {
     }
 }
 
-pub fn set_thermal_policy_by_name(profile: &str) -> bool {
-    let mode_str = match profile.to_lowercase().as_str() {
-        "performance" | "gaming" | "max" => "1",
-        "quiet" | "cool" | "saver" => "2",
-        _ => "0",
-    };
-
-    let mut set = false;
-    // Both underscore and hyphen naming, both hp-wmi and hp-omen platform device paths
-    for node in [
-        "/sys/devices/platform/hp-wmi/thermal_profile",
-        "/sys/devices/platform/hp-wmi/thermal-profile",
-        "/sys/devices/platform/hp_wmi/thermal_profile",
-        "/sys/devices/platform/hp-omen/thermal_profile",
-        "/sys/devices/platform/hp-omen/thermal-profile",
-    ] {
-        if std::path::Path::new(node).exists()
-            && std::fs::write(node, mode_str).is_ok() {
-                set = true;
-            }
-    }
-    set
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

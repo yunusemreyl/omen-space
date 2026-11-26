@@ -1,9 +1,8 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[allow(dead_code)]
 pub enum LinuxCapabilityClass {
     FullControl,
     ProfileOnly,
@@ -21,6 +20,7 @@ pub struct LinuxCapabilityAssessment {
 }
 
 impl LinuxCapabilityAssessment {
+    #[allow(dead_code)]
     pub fn capability_key(&self) -> &str {
         match self.capability_class {
             LinuxCapabilityClass::FullControl => "full-control",
@@ -71,6 +71,10 @@ pub struct ModelCapabilities {
     /// detected from sysfs; None keeps the existing 4/8-zone logic.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rgb_zone_count: Option<u32>,
+    /// True when the board's backlight is non-WMI (e.g. USB HID only) and
+    /// probing/writing WMI 0x20009 (hp-omen-extra) shuts down the EC rail (#394).
+    #[serde(default)]
+    pub disable_wmi_rgb: bool,
     
     // Power / Undervolt
     pub supports_undervolt: bool,
@@ -117,6 +121,7 @@ impl Default for ModelCapabilities {
             has_per_key_rgb: false,
             has_light_bar: false,
             rgb_zone_count: None,
+            disable_wmi_rgb: false,
             
             supports_undervolt: true,
             supports_tcc_offset: true,
@@ -132,6 +137,7 @@ impl Default for ModelCapabilities {
 pub struct LinuxCapabilityClassifier;
 
 impl LinuxCapabilityClassifier {
+    #[allow(dead_code)]
     pub fn assess(is_root: bool, board_id: &str, _model: &str) -> LinuxCapabilityAssessment {
         let is_wmaa_abort_prone = Self::is_wmaa_abort_prone_board(board_id);
         
@@ -321,6 +327,21 @@ mod tests {
         assert!(cap.allow_decoupled_wmi_thermal_policy_fallback);
         assert!(!cap.supports_undervolt); // AMD should not have undervolt enabled
         assert!(LinuxCapabilityClassifier::is_wmaa_abort_prone_board("8786"));
+    }
+
+    #[test]
+    fn test_board_8edf_disables_wmi_rgb() {
+        let cap = detect("8EDF", "HyperX OMEN Gaming Laptop 15-ga0xxx", "Intel Core Ultra 7 251HX");
+        assert_eq!(cap.product_id, "8EDF");
+        assert!(cap.disable_wmi_rgb, "8EDF must disable WMI RGB probing (#394)");
+        assert!(!cap.has_four_zone_rgb);
+        assert!(!cap.has_per_key_rgb);
+        assert!(!cap.has_light_bar);
+        assert!(cap.has_mux_switch);
+        assert!(cap.supports_fan_control_wmi);
+        assert!(cap.supports_performance_modes);
+        assert!(LinuxCapabilityClassifier::is_board_verified("8EDF"));
+        assert!(LinuxCapabilityClassifier::is_board_verified("8D42"));
     }
 }
 

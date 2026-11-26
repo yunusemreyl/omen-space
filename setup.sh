@@ -522,7 +522,11 @@ EOF
     if /usr/bin/omen-cli system info; then
         echo -e "\n✅ SUCCESS: CLI successfully communicated with the daemon!"
     else
-        echo -e "\n❌ ERROR: CLI failed to communicate with the daemon. Check 'systemctl status omen-space-daemon'."
+        case "$INIT_SYSTEM" in
+            systemd) echo -e "\n❌ ERROR: CLI failed to communicate with the daemon. Check 'systemctl status omen-space-daemon'." ;;
+            openrc) echo -e "\n❌ ERROR: CLI failed to communicate with the daemon. Check 'rc-service omen-space-daemon status'." ;;
+            *) echo -e "\n❌ ERROR: CLI failed to communicate with the daemon. Check '/var/log/omen-space-daemon.log'." ;;
+        esac
     fi
 
     if [ -n "$SUDO_USER" ] && [ -x /usr/bin/omen-tray ]; then

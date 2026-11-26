@@ -1,51 +1,51 @@
-use log::info;
-use zbus::fdo::PropertiesProxy;
+use crate::notifier::DesktopNotifier;
+use crate::power::PowerService;
 use futures::StreamExt;
+use log::info;
 use std::fs;
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
-use crate::notifier::DesktopNotifier;
-use std::sync::OnceLock;
-use std::path::PathBuf;
+use zbus::fdo::PropertiesProxy;
 
 static AC_ONLINE_PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 #[derive(Clone)]
 pub struct PowerAutomationService {
     last_ac_state: Arc<Mutex<Option<bool>>>,
+    power_service: PowerService,
 }
 
 impl PowerAutomationService {
-    pub fn new() -> Self {
+    pub fn new(power_service: PowerService) -> Self {
         Self {
             last_ac_state: Arc::new(Mutex::new(None)),
+            power_service,
         }
     }
 
     pub fn start_monitor(&self) {
-        let last_state = self.last_ac_state.clone();
-
+        let power_ppd = self.power_service.clone();
         tokio::spawn(async move {
             if let Ok(conn) = zbus::Connection::system().await {
                 if let Ok(proxy) = PropertiesProxy::builder(&conn)
-                    .destination("net.hadess.PowerProfiles").unwrap()
-                    .path("/net/hadess/PowerProfiles").unwrap()
-                    .build().await {
-                    
+                    .destination("net.hadess.PowerProfiles")
+                    .unwrap()
+                    .path("/net/hadess/PowerProfiles")
+                    .unwrap()
+                    .build()
+                    .await
+                {
                     if let Ok(mut stream) = proxy.receive_properties_changed().await {
                         while let Some(signal) = stream.next().await {
                             if let Ok(args) = signal.args() {
                                 if args.interface_name() == "net.hadess.PowerProfiles" {
-                                    if let Some(val) = args.changed_properties().get("ActiveProfile") {
+                                    if let Some(val) = args.changed_properties().get("ActiveProfile")
+                                    {
                                         if let Ok(profile_str) = <&str>::try_from(val) {
                                             info!("PPD Profile changed to: {}", profile_str);
-                                            let mode = match profile_str {
-                                                "performance" => "Performance",
-                                                "power-saver" => "Quiet",
-                                                _ => "Default",
-                                            };
-                                            let _ = crate::platform::set_thermal_policy_by_name(mode);
+                                            let _ = power_ppd.set_profile_internal(profile_str).await;
                                         }
                                     }
                                 }
@@ -56,6 +56,8 @@ impl PowerAutomationService {
             }
         });
 
+        let last_state = self.last_ac_state.clone();
+        let power_ac = self.power_service.clone();
         tokio::spawn(async move {
             loop {
                 sleep(Duration::from_secs(4)).await;
@@ -65,22 +67,25 @@ impl PowerAutomationService {
                 if let Some(prev) = *state_lock {
                     if prev != current_ac {
                         *state_lock = Some(current_ac);
+                        drop(state_lock);
                         if current_ac {
                             info!("AC Power connected. Applying AC Performance Profile...");
                             DesktopNotifier::send_notification(
                                 "OMENSpace Power Automation",
                                 "AC Power connected. Switched to Performance mode.",
                                 0,
-                            ).await;
-                            let _ = crate::platform::set_thermal_policy_by_name("Performance");
+                            )
+                            .await;
+                            let _ = power_ac.set_profile_internal("performance").await;
                         } else {
                             info!("Battery Power connected. Applying Battery Saver Profile...");
                             DesktopNotifier::send_notification(
                                 "OMENSpace Power Automation",
                                 "Running on Battery. Switched to Quiet/Saver mode.",
                                 1,
-                            ).await;
-                            let _ = crate::platform::set_thermal_policy_by_name("Quiet");
+                            )
+                            .await;
+                            let _ = power_ac.set_profile_internal("power-saver").await;
                         }
                     }
                 } else {
@@ -111,5 +116,5 @@ fn is_ac_power_connected() -> bool {
             return val.trim() == "1";
         }
     }
-    true // default to AC if undetectable
+    true
 }

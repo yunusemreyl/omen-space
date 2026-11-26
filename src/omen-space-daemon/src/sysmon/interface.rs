@@ -259,6 +259,7 @@ fn build_unified_system_dump() -> String {
                 lo.contains("hp") || lo.contains("hewlett") || lo.contains("omen")
                     || lo.contains("03f0") || lo.contains("0d62") || lo.contains("darfon")
                     || lo.contains("0461") || lo.contains("primax") || lo.contains("1038")
+                    || lo.contains("0c45") || lo.contains("microdia") || lo.contains("sonix")
                     || lo.contains("keyboard")
             })
             .collect();

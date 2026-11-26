@@ -36,12 +36,18 @@ pub fn get_zone_for_key(name: &str) -> i32 {
     if name == "zone_2" || name == "c3_btn" { return 3; }
     if name == "zone_3" || name == "c4_btn" { return 4; }
     match name {
+        // Zone 4 (WASD) -> hardware zone 3
         "W" | "A" | "S" | "D" => 4,
-        "Esc" | "F1" | "F2" | "F3" | "F4" | "~" | "1" | "2" | "3" | "4" | 
-        "Tab" | "Q" | "E" | "R" | "Caps" | "F" | "Shift" | "Z" | "X" | "C" | "V" | 
-        "Ctrl" | "Fn" | "Win" => 1,
-        "F5" | "F6" | "F7" | "F8" | "5" | "6" | "7" | "8" | "T" | "Y" | "U" | "I" |
-        "G" | "H" | "J" | "K" | "B" | "N" | "M" | "," | "Alt" | "Space" => 2,
+        // Zone 1 (Left) -> hardware zone 2 on classic OMEN, zone 1 on HyperX 8EEF/8EDD/8EEC
+        "P1" | "P2" | "P3" | "P4" | "P5" | "P6" | "Esc" | "F1" | "F2" | "F3" | "F4" | "~"
+        | "1" | "2" | "3" | "4" | "5" | "Tab" | "Q" | "E" | "R" | "Caps" | "F" | "Shift"
+        | "Z" | "X" | "C" | "V" | "Ctrl" | "Fn" | "Win" | "Alt" => 1,
+        // Zone 2 (Middle) -> hardware zone 1 on classic OMEN, zone 2 on HyperX 8EEF/8EDD/8EEC
+        "F5" | "F6" | "F7" | "F8" | "F9" | "F10" | "F11" | "F12" | "6" | "7" | "8" | "9"
+        | "0" | "-" | "=" | "T" | "Y" | "U" | "I" | "O" | "P" | "[" | "]" | "G" | "H" | "J"
+        | "K" | "L" | ";" | "'" | "B" | "N" | "M" | "," | "." | "/" | "Space" | "Alt_R"
+        | "Menu" => 2,
+        // Zone 3 (Right: navigation/arrows/numpad/right-hand keys)
         _ => 3,
     }
 }
@@ -175,8 +181,29 @@ mod board_tests {
     #[test]
     fn capabilities_match_the_authoritative_board_database() {
         assert_eq!(super::board_per_key_rgb("8D41"),Some(true));
-        for board in ["8901","8A17","8BD4"] { assert_eq!(super::board_per_key_rgb(board),Some(false)); }
+        for board in ["8901","8A17","8BD4","8EDF"] { assert_eq!(super::board_per_key_rgb(board),Some(false)); }
         assert_eq!(super::board_per_key_rgb("unknown"),None);
+    }
+
+    #[test]
+    fn four_zone_boundaries_match_omen_hardware_zones() {
+        use super::get_zone_for_key;
+        // Zone 4: WASD
+        for k in ["W", "A", "S", "D"] {
+            assert_eq!(get_zone_for_key(k), 4, "{}", k);
+        }
+        // Zone 1: Left block (including 5 and Left Alt, #393)
+        for k in ["Esc", "F4", "5", "R", "F", "V", "Alt"] {
+            assert_eq!(get_zone_for_key(k), 1, "{}", k);
+        }
+        // Zone 2: Middle block (F5..F12, 6..=, T..], G..', B../, Space, Alt_R, Menu, #393)
+        for k in ["F5", "F9", "F12", "6", "0", "=", "O", "]", "L", "'", ".", "/", "Alt_R", "Menu", "Space"] {
+            assert_eq!(get_zone_for_key(k), 2, "{}", k);
+        }
+        // Zone 3: Right / Numpad block (including distinct numpad /_num and *_num, #393)
+        for k in ["Del", "Backspace", "\\", "Enter", "Shift_R", "Left", "/_num", "*_num", "+_num", "Enter_num"] {
+            assert_eq!(get_zone_for_key(k), 3, "{}", k);
+        }
     }
 }
 

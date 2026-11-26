@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
 /// MUX (GPU Switch) service - exposes hardware-validated GPU MUX switching & topology info.
 ///
 /// D-Bus interface: org.hp.omen.Mux
@@ -10,13 +8,13 @@
 ///                                        routing_mode, prime_offload_available, dgpu_power_state, displays)
 ///   SetMuxBackend(backend: s) -> result: s
 ///   Ping()               -> resp: s
+use glob::glob;
+use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use zbus::interface;
-use log::{info, warn};
-use glob::glob;
 
 const HP_WMI_GRAPHICS_MODE_PATH: &str = "/sys/devices/platform/hp-wmi/gpu_mux_mode";
 const HP_WMI_LEGACY_GRAPHICS_MODE_PATH: &str = "/sys/devices/platform/hp-wmi/graphics_mode";
@@ -150,6 +148,55 @@ pub fn compute_reboot_pending(
     )
 }
 
+/// Write `val` across candidate MUX sysfs paths (`gpu_mux_mode`, then legacy `graphics_mode`).
+/// Verifies readback against `target_mode`: if `gpu_mux_mode` accepts the syscall without
+/// changing its readback value, we also try `graphics_mode` before reporting (#369).
+pub(crate) async fn write_mux_sysfs_with_fallback(
+    paths: &[&Path],
+    target_mode: &str,
+    val: &str,
+) -> Result<(String, String, bool), String> {
+    let mut last_err = String::new();
+    let mut first_unverified: Option<(String, String)> = None;
+
+    for path in paths {
+        if !path.exists() {
+            continue;
+        }
+        match tokio::fs::write(path, val).await {
+            Ok(()) => {
+                let readback = tokio::fs::read_to_string(path)
+                    .await
+                    .map(|s| s.trim().to_string())
+                    .unwrap_or_else(|_| "unreadable".to_string());
+                let path_str = path.to_string_lossy().into_owned();
+                if normalize_mux_mode(&readback) == Some(target_mode) {
+                    return Ok((path_str, readback, true));
+                }
+                warn!(
+                    "SetGpuMode: '{}' readback '{}' on {} does not yet reflect '{}'; trying fallback path if present (#369)",
+                    val, readback, path_str, target_mode
+                );
+                if first_unverified.is_none() {
+                    first_unverified = Some((path_str, readback));
+                }
+            }
+            Err(e) => {
+                warn!("SetGpuMode: Failed to write '{}' to {:?}: {}", val, path, e);
+                last_err = format!("{}: {}", path.display(), e);
+            }
+        }
+    }
+
+    if let Some((path_str, readback)) = first_unverified {
+        Ok((path_str, readback, false))
+    } else if last_err.is_empty() {
+        Err("no writable MUX sysfs node found".to_string())
+    } else {
+        Err(last_err)
+    }
+}
+
 async fn read_connector_vendor(entry: &Path) -> Option<String> {
     for rel in ["device/device/vendor", "device/vendor"] {
         if let Ok(vendor) = tokio::fs::read_to_string(entry.join(rel)).await {
@@ -166,7 +213,6 @@ struct MuxInner {
     config: MuxConfig,
     boot_mode: Option<String>,
     cached_mode: Option<String>,
-    displays_cache: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Clone)]
@@ -183,7 +229,6 @@ impl MuxService {
             config,
             boot_mode,
             cached_mode: None,
-            displays_cache: None,
         }));
         Ok(Self { inner })
     }
@@ -397,38 +442,28 @@ impl MuxService {
             "integrated" => "3",
             _ => "0",
         };
-        let mut last_err = String::new();
-        for path in [HP_WMI_GRAPHICS_MODE_PATH, HP_WMI_LEGACY_GRAPHICS_MODE_PATH] {
-            if !Path::new(path).exists() {
-                continue;
-            }
-            match tokio::fs::write(path, val).await {
-                Ok(()) => {
-                    let readback = tokio::fs::read_to_string(path)
-                        .await
-                        .map(|s| s.trim().to_string())
-                        .unwrap_or_else(|_| "unreadable".to_string());
-                    {
-                        let mut g = self.inner.lock().await;
-                        if g.boot_mode.as_deref() == Some(mode.as_str()) {
-                            g.cached_mode = None;
-                        } else {
-                            g.cached_mode = Some(mode.clone());
-                        }
+        let paths = [
+            Path::new(HP_WMI_GRAPHICS_MODE_PATH),
+            Path::new(HP_WMI_LEGACY_GRAPHICS_MODE_PATH),
+        ];
+        match write_mux_sysfs_with_fallback(&paths, &mode, val).await {
+            Ok((used_path, readback, verified)) => {
+                {
+                    let mut g = self.inner.lock().await;
+                    if g.boot_mode.as_deref() == Some(mode.as_str()) {
+                        g.cached_mode = None;
+                    } else {
+                        g.cached_mode = Some(mode.clone());
                     }
-                    info!(
-                        "SetGpuMode: '{}' (val={}) written to {} (readback={})",
-                        mode, val, path, readback
-                    );
-                    return "OK_REBOOT_REQUIRED".to_string();
                 }
-                Err(e) => {
-                    warn!("SetGpuMode: Failed to write '{}' to {}: {}", val, path, e);
-                    last_err = format!("{}: {}", path, e);
-                }
+                info!(
+                    "SetGpuMode: '{}' (val={}) written to {} (readback={}, verified={})",
+                    mode, val, used_path, readback, verified
+                );
+                "OK_REBOOT_REQUIRED".to_string()
             }
+            Err(e) => format!("Error: Failed to write to WMI sysfs ({})", e),
         }
-        format!("Error: Failed to write to WMI sysfs ({})", last_err)
     }
 
     /// GetGpuInfo — returns current mode, supported modes, boot state, PRIME availability, and displays.
@@ -575,5 +610,36 @@ mod tests {
         // Even if daemon restarted and lost boot_mode, firmware=discrete vs routing=hybrid -> true
         assert!(compute_reboot_pending(None, "discrete", None, "hybrid"));
         assert!(compute_reboot_pending(None, "hybrid", None, "discrete"));
+    }
+
+    #[tokio::test]
+    async fn mux_write_tries_legacy_path_when_primary_absent_or_unverified() {
+        let dir = std::env::temp_dir().join(format!("omen-mux-fb-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let primary = dir.join("gpu_mux_mode");
+        let legacy = dir.join("graphics_mode");
+        std::fs::write(&primary, "0").unwrap();
+        std::fs::write(&legacy, "0").unwrap();
+
+        let (used, readback, verified) =
+            write_mux_sysfs_with_fallback(&[&primary, &legacy], "discrete", "1")
+                .await
+                .expect("write should succeed");
+        assert!(verified);
+        assert_eq!(readback, "1");
+        assert_eq!(used, primary.to_string_lossy());
+        assert_eq!(std::fs::read_to_string(&legacy).unwrap(), "0");
+
+        // When primary is missing, legacy path must still be written.
+        std::fs::remove_file(&primary).unwrap();
+        let (used2, readback2, verified2) =
+            write_mux_sysfs_with_fallback(&[&primary, &legacy], "discrete", "1")
+                .await
+                .expect("legacy fallback should succeed (#369)");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(verified2);
+        assert_eq!(readback2, "1");
+        assert_eq!(used2, legacy.to_string_lossy());
     }
 }

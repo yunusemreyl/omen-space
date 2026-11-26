@@ -277,10 +277,10 @@ pub fn build_interactive_keyboard(
     // 3. Canvas
     let layout_def = vec![
         vec![("Esc", 1.0), ("", 0.5), ("F1", 1.0), ("F2", 1.0), ("F3", 1.0), ("F4", 1.0), ("", 0.5), ("F5", 1.0), ("F6", 1.0), ("F7", 1.0), ("F8", 1.0), ("", 0.5), ("F9", 1.0), ("F10", 1.0), ("F11", 1.0), ("F12", 1.0), ("", 0.5), ("Del", 1.0), ("Omen", 1.0), ("Calc", 1.0), ("Power", 1.0)],
-        vec![("~", 1.0), ("1", 1.0), ("2", 1.0), ("3", 1.0), ("4", 1.0), ("5", 1.0), ("6", 1.0), ("7", 1.0), ("8", 1.0), ("9", 1.0), ("0", 1.0), ("-", 1.0), ("=", 1.0), ("Backspace", 2.0), ("Num", 1.0), ("/", 1.0), ("*", 1.0), ("-_num", 1.0)],
-        vec![("Tab", 1.5), ("Q", 1.0), ("W", 1.0), ("E", 1.0), ("R", 1.0), ("T", 1.0), ("Y", 1.0), ("U", 1.0), ("I", 1.0), ("O", 1.0), ("P", 1.0), ("[", 1.0), ("]", 1.0), ("\\", 1.5), ("7_num", 1.0), ("8_num", 1.0), ("9_num", 1.0), ("+", 1.0)],
+        vec![("~", 1.0), ("1", 1.0), ("2", 1.0), ("3", 1.0), ("4", 1.0), ("5", 1.0), ("6", 1.0), ("7", 1.0), ("8", 1.0), ("9", 1.0), ("0", 1.0), ("-", 1.0), ("=", 1.0), ("Backspace", 2.0), ("Num", 1.0), ("/_num", 1.0), ("*_num", 1.0), ("-_num", 1.0)],
+        vec![("Tab", 1.5), ("Q", 1.0), ("W", 1.0), ("E", 1.0), ("R", 1.0), ("T", 1.0), ("Y", 1.0), ("U", 1.0), ("I", 1.0), ("O", 1.0), ("P", 1.0), ("[", 1.0), ("]", 1.0), ("\\", 1.5), ("7_num", 1.0), ("8_num", 1.0), ("9_num", 1.0), ("+_num", 1.0)],
         vec![("Caps", 1.75), ("A", 1.0), ("S", 1.0), ("D", 1.0), ("F", 1.0), ("G", 1.0), ("H", 1.0), ("J", 1.0), ("K", 1.0), ("L", 1.0), (";", 1.0), ("'", 1.0), ("Enter", 2.25), ("4_num", 1.0), ("5_num", 1.0), ("6_num", 1.0), ("", 1.0)],
-        vec![("Shift", 2.25), ("Z", 1.0), ("X", 1.0), ("C", 1.0), ("V", 1.0), ("B", 1.0), ("N", 1.0), ("M", 1.0), (",", 1.0), (".", 1.0), ("/", 1.0), ("Shift_R", 1.75), ("Up", 1.0), ("1_num", 1.0), ("2_num", 1.0), ("3_num", 1.0), ("Ent", 1.0)],
+        vec![("Shift", 2.25), ("Z", 1.0), ("X", 1.0), ("C", 1.0), ("V", 1.0), ("B", 1.0), ("N", 1.0), ("M", 1.0), (",", 1.0), (".", 1.0), ("/", 1.0), ("Shift_R", 1.75), ("Up", 1.0), ("1_num", 1.0), ("2_num", 1.0), ("3_num", 1.0), ("Enter_num", 1.0)],
         vec![("Ctrl", 1.25), ("Fn", 1.25), ("Win", 1.25), ("Alt", 1.25), ("Space", 5.5), ("Alt_R", 1.25), ("Menu", 1.25), ("Left", 1.0), ("Down", 1.0), ("Right", 1.0), ("0_num", 1.0), ("._num", 1.0), ("", 1.0)]
     ];
     let unit_size = 38.0;
@@ -297,9 +297,15 @@ pub fn build_interactive_keyboard(
         for (name, size_mult) in row_keys {
             let width = unit_size * *size_mult;
             if !name.is_empty() {
-                let display_name = if let Some(stripped) = name.strip_suffix("_R") { stripped }
-                    else if let Some(stripped) = name.strip_suffix("_num") { stripped }
-                    else { name };
+                let display_name = if *name == "Enter_num" {
+                    "Ent"
+                } else if let Some(stripped) = name.strip_suffix("_R") {
+                    stripped
+                } else if let Some(stripped) = name.strip_suffix("_num") {
+                    stripped
+                } else {
+                    name
+                };
                 
                 let def_color = if detected_mode == KeyboardMode::Omen4Zone {
                     zone_colors.borrow()[(get_zone_for_key(name) - 1) as usize].clone()
@@ -312,7 +318,7 @@ pub fn build_interactive_keyboard(
                 };
                 key_colors.borrow_mut().insert(name.to_string(), def_color);
 
-                let k_height = if *name == "+" || *name == "Ent" { height * 2.0 + margin } else { height };
+                let k_height = if *name == "+_num" || *name == "Enter_num" { height * 2.0 + margin } else { height };
                 keys.push(KeyGeom {
                     id: global_idx,
                     name: name.to_string(),
@@ -405,6 +411,16 @@ pub fn build_interactive_keyboard(
                 let h = ((anim_time * anim_speed * 4.0) - offset * 8.0) % 360.0;
                 let (nr, ng, nb) = hsl_to_rgb(h, 1.0, 0.5);
                 r = nr; g = ng; b = nb;
+            } else if anim_mode == "blinking" {
+                let factor = if (anim_time * anim_speed * 0.12).sin() >= 0.0 { 1.0 } else { 0.08 };
+                r *= factor; g *= factor; b *= factor;
+            } else if anim_mode == "marquee" {
+                let norm_x = (k.x / 720.0).clamp(0.0, 1.0);
+                let head = (anim_time * anim_speed * 0.015).fract();
+                let d = (norm_x - head).abs();
+                let dist = d.min(1.0 - d);
+                let factor = (1.0 - (dist / 0.25)).clamp(0.06, 1.0);
+                r *= factor; g *= factor; b *= factor;
             }
 
             let active_sel = *sel_mode_draw.borrow();
@@ -509,6 +525,9 @@ pub fn build_interactive_keyboard(
     let pk_c = per_key_colors.clone();
     let zc_c = zone_colors.clone();
     
+    let msl_click = msl_c.clone();
+    let am_click = active_mode_idx.clone();
+
     click.connect_pressed(move |_g, _n_press, x, y| {
         let mode = *sm_click.borrow();
         let hex = p_color_c.borrow().clone();
@@ -570,8 +589,18 @@ pub fn build_interactive_keyboard(
             }
             
             if detected_mode == KeyboardMode::PerKey {
-                if mode == SelectionMode::All { fill_all_key_slots(&mut pk_mut,&hex); }
-                crate::daemon_client::set_per_key_colors_sync(pk_mut.clone());
+                if mode == SelectionMode::All {
+                    fill_all_key_slots(&mut pk_mut, &hex);
+                    zc_mut.iter_mut().take(4).for_each(|z| *z = hex.clone());
+                    let cur_m = msl_click.get(*am_click.borrow()).map(|s| s.as_str()).unwrap_or("static");
+                    if cur_m == "per_key_custom" {
+                        crate::daemon_client::set_per_key_colors_sync(pk_mut.clone());
+                    } else {
+                        crate::daemon_client::set_color_sync(8, hex.clone());
+                    }
+                } else {
+                    crate::daemon_client::set_per_key_colors_sync(pk_mut.clone());
+                }
             } else if detected_mode == KeyboardMode::Omen4Zone {
                 for z in zones_changed { crate::daemon_client::set_color_sync(z-1, hex.clone()); }
             } else if detected_mode == KeyboardMode::Victus1Zone && !zones_changed.is_empty() {
@@ -735,12 +764,52 @@ pub fn build_interactive_keyboard(
     
     let dyn_prov_clone = dyn_prov_g.clone();
     let paint_color_btn = paint_color.clone();
+    let msl_color = msl_c.clone();
+    let am_color = active_mode_idx.clone();
+    let zc_color = zone_colors.clone();
+    let pk_color = per_key_colors.clone();
+    let kc_color = key_colors.clone();
+    let keys_color = keys_rc.clone();
+    let da_color = drawing_area.clone();
     global_color_btn.connect_clicked(move |btn| {
         let dyn_local = dyn_prov_clone.clone();
         let pc_local = paint_color_btn.clone();
+        let msl_l = msl_color.clone();
+        let am_l = am_color.clone();
+        let zc_l = zc_color.clone();
+        let pk_l = pk_color.clone();
+        let kc_l = kc_color.clone();
+        let keys_l = keys_color.clone();
+        let da_l = da_color.clone();
         show_color_picker_popover(btn, Rc::new(move |hex| {
             *pc_local.borrow_mut() = hex.clone();
             dyn_local.load_from_string(&format!("#global_color_btn {{ background: {}; background-image: none; border: 1px solid rgba(255,255,255,0.4); }}", hex));
+            // When in static or an animated effect mode on PerKey/1-zone (or using the global color button),
+            // apply the chosen color uniformly to config.colors so Static/Marquee/Reactive/Ripple use it
+            // immediately instead of keeping a stale per-zone color (#385).
+            let cur_m = msl_l.get(*am_l.borrow()).map(|s| s.as_str()).unwrap_or("static");
+            if cur_m != "per_key_custom" && detected_mode == KeyboardMode::PerKey {
+                zc_l.borrow_mut().iter_mut().take(4).for_each(|z| *z = hex.clone());
+                fill_all_key_slots(&mut pk_l.borrow_mut(), &hex);
+                {
+                    let mut kc_mut = kc_l.borrow_mut();
+                    for k in keys_l.iter() {
+                        kc_mut.insert(k.name.clone(), hex.clone());
+                    }
+                }
+                crate::daemon_client::set_color_sync(8, hex);
+                da_l.queue_draw();
+            } else if detected_mode == KeyboardMode::Victus1Zone {
+                zc_l.borrow_mut()[0] = hex.clone();
+                {
+                    let mut kc_mut = kc_l.borrow_mut();
+                    for k in keys_l.iter() {
+                        kc_mut.insert(k.name.clone(), hex.clone());
+                    }
+                }
+                crate::daemon_client::set_color_sync(8, hex);
+                da_l.queue_draw();
+            }
         }));
     });
     color_container.append(&global_color_btn);

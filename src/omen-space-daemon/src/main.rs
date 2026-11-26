@@ -32,6 +32,32 @@ use log::info;
 use std::error::Error;
 use zbus::connection::Builder;
 
+#[allow(clippy::too_many_arguments)]
+fn attach_services<'a>(
+    builder: Builder<'a>,
+    fan_service: &fan::FanService,
+    sysmon_service: &sysmon::SysMonInterface,
+    power_service: &power::PowerService,
+    rgb_service: &rgb::RgbService,
+    mux_service: &mux::MuxService,
+    platform_service: &platform::PlatformService,
+    undervolt_service: &undervolt::UndervoltService,
+    ryzen_service: &ryzen::RyzenService,
+    game_auto: &game_automation::GameAutomationService,
+) -> zbus::Result<Builder<'a>> {
+    builder
+        .name("org.hp.omen")?
+        .serve_at("/org/hp/omen/Fan", fan_service.clone())?
+        .serve_at("/org/hp/omen/SysMon", sysmon_service.clone())?
+        .serve_at("/org/hp/omen/Power", power_service.clone())?
+        .serve_at("/org/hp/omen/Rgb", rgb_service.clone())?
+        .serve_at("/org/hp/omen/Mux", mux_service.clone())?
+        .serve_at("/org/hp/omen/Platform", platform_service.clone())?
+        .serve_at("/org/hp/omen/Undervolt", undervolt_service.clone())?
+        .serve_at("/org/hp/omen/Ryzen", ryzen_service.clone())?
+        .serve_at("/org/hp/omen/AppProfiles", game_auto.clone())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // Only the hotkey monitor is promoted to info: its "Detected Hotkey" line is the
@@ -68,12 +94,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let _ = auto_updater::AutoUpdateService::check_for_updates().await;
     });
 
-    let game_auto = game_automation::GameAutomationService::new();
-    game_auto.start_monitor();
-
-    let power_auto = power_automation::PowerAutomationService::new();
-    power_auto.start_monitor();
-
     let fan_service = fan::FanService::new().await?;
     let sysmon_service = sysmon::SysMonInterface::new();
     let power_service = power::PowerService::new().await?;
@@ -83,37 +103,47 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let undervolt_service = undervolt::UndervoltService::new().await?;
     let ryzen_service = ryzen::RyzenService::new().await?;
 
-    let conn_res = Builder::system()?
-        .name("org.hp.omen")?
-        .serve_at("/org/hp/omen/Fan", fan_service.clone())?
-        .serve_at("/org/hp/omen/SysMon", sysmon_service.clone())?
-        .serve_at("/org/hp/omen/Power", power_service.clone())?
-        .serve_at("/org/hp/omen/Rgb", rgb_service.clone())?
-        .serve_at("/org/hp/omen/Mux", mux_service.clone())?
-        .serve_at("/org/hp/omen/Platform", platform_service.clone())?
-        .serve_at("/org/hp/omen/Undervolt", undervolt_service.clone())?
-        .serve_at("/org/hp/omen/Ryzen", ryzen_service.clone())?
-        .serve_at("/org/hp/omen/AppProfiles", game_auto.clone())?
-        .build()
-        .await;
+    let game_auto = game_automation::GameAutomationService::new(power_service.clone(), fan_service.clone());
+    game_auto.start_monitor();
 
-    let _conn = match conn_res {
+    let power_auto = power_automation::PowerAutomationService::new(power_service.clone());
+    power_auto.start_monitor();
+
+    let _conn = match attach_services(
+        Builder::system()?,
+        &fan_service,
+        &sysmon_service,
+        &power_service,
+        &rgb_service,
+        &mux_service,
+        &platform_service,
+        &undervolt_service,
+        &ryzen_service,
+        &game_auto,
+    )?
+    .build()
+    .await
+    {
         Ok(c) => c,
         Err(e) => {
-            info!("System bus registration failed ({}), falling back to session bus...", e);
-            Builder::session()?
-                .name("org.hp.omen")?
-                .serve_at("/org/hp/omen/Fan", fan_service.clone())?
-                .serve_at("/org/hp/omen/SysMon", sysmon_service.clone())?
-                .serve_at("/org/hp/omen/Power", power_service.clone())?
-                .serve_at("/org/hp/omen/Rgb", rgb_service.clone())?
-                .serve_at("/org/hp/omen/Mux", mux_service.clone())?
-                .serve_at("/org/hp/omen/Platform", platform_service.clone())?
-                .serve_at("/org/hp/omen/Undervolt", undervolt_service.clone())?
-                .serve_at("/org/hp/omen/Ryzen", ryzen_service.clone())?
-                .serve_at("/org/hp/omen/AppProfiles", game_auto.clone())?
-                .build()
-                .await?
+            info!(
+                "System bus registration failed ({}), falling back to session bus...",
+                e
+            );
+            attach_services(
+                Builder::session()?,
+                &fan_service,
+                &sysmon_service,
+                &power_service,
+                &rgb_service,
+                &mux_service,
+                &platform_service,
+                &undervolt_service,
+                &ryzen_service,
+                &game_auto,
+            )?
+            .build()
+            .await?
         }
     };
 

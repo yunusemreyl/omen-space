@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
 /// Power management service - matches Python power_service.py feature-for-feature.
 ///
 /// D-Bus interface: com.yyl.hpmanager.power  (backward compat) +
@@ -114,23 +112,44 @@ impl PowerConfig {
 
 // ── Service state ─────────────────────────────────────────────────────────────
 
-struct AppState {
-    active_app: Option<String>,
-    pre_app_state: Option<(String, String)>,
-    /// Timestamp of last profile switch triggered by app-profile automation.
-    /// Used to throttle rapid WMI commands that cause ACPI buffer overflows
-    /// on Strix Point hardware (issue #282).
-    last_profile_switch: Option<std::time::Instant>,
-}
-
 #[derive(Clone)]
 pub struct PowerService {
     config: Arc<Mutex<PowerConfig>>,
-    app_state: Arc<Mutex<AppState>>,
     rapl_baseline: Option<(crate::rapl_baseline::Baseline, bool)>,
 }
 
 impl PowerService {
+    pub async fn check_acpi_healthy() -> bool {
+        acpi_is_healthy().await
+    }
+
+    pub async fn is_app_profiles_enabled(&self) -> bool {
+        self.config.lock().await.app_profiles_enabled
+    }
+
+    pub async fn current_profile(&self) -> String {
+        self.config.lock().await.power_profile.clone()
+    }
+
+    pub async fn set_profile_internal(&self, profile: &str) -> bool {
+        let normalized = Self::normalize_profile(profile);
+        let ok = Self::sync_omen_profile(&normalized).await;
+        if ok {
+            {
+                let mut cfg = self.config.lock().await;
+                cfg.power_profile = normalized.clone();
+                cfg.save();
+            }
+            let p = normalized.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                Self::sync_gpu_power(&p).await;
+            });
+            info!("Power profile set to '{}'", normalized);
+        }
+        ok
+    }
+
     async fn read_current_rapl_limits() -> (Option<u32>, Option<u32>) {
         let p1 = sysfs_read_async("/sys/class/powercap/intel-rapl/intel-rapl:0/constraint_0_power_limit_uw")
             .await
@@ -167,205 +186,20 @@ impl PowerService {
             if let Some((b,_)) = &rapl_baseline { config.pl1_w=b.pl1_w; config.pl2_w=b.pl2_w; }
         }
 
-        let app_state = Arc::new(Mutex::new(AppState {
-            active_app: None,
-            pre_app_state: None,
-            last_profile_switch: None,
-        }));
-
         let svc = Self {
             config: Arc::new(Mutex::new(config)),
-            app_state: app_state.clone(),
             rapl_baseline,
         };
 
-        // Re-apply saved limits on startup (mirrors Python _apply_power_tuning)
         svc.apply_startup_tuning().await;
-
-        let config_clone = svc.config.clone();
-        tokio::spawn(async move {
-            Self::app_monitor_loop(config_clone, app_state).await;
-        });
-
         Ok(svc)
     }
 
     async fn apply_startup_tuning(&self) {
         let cfg = self.config.lock().await.clone();
         if cfg.pl_enabled {
-            drop(cfg);
-            // Apply power limits — re-read config inside helper
-            let cfg2 = self.config.lock().await.clone();
-            Self::apply_rapl_limits(cfg2.pl1_w, cfg2.pl2_w).await;
+            Self::apply_rapl_limits(cfg.pl1_w, cfg.pl2_w).await;
         }
-    }
-
-    // ── App Monitor Loop ───────────────────────────────────────────────────────
-    
-    async fn app_monitor_loop(config: Arc<Mutex<PowerConfig>>, app_state: Arc<Mutex<AppState>>) {
-        let conn_res = zbus::Connection::system().await;
-        if let Err(e) = &conn_res {
-            warn!("app_monitor_loop failed to get zbus connection: {}", e);
-        }
-        let conn = conn_res.ok();
-
-        loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-
-            let (app_profiles_enabled, app_profiles, current_profile) = {
-                let g = config.lock().await;
-                (g.app_profiles_enabled, g.app_profiles.clone(), g.power_profile.clone())
-            };
-
-            let mut active_app = None;
-            
-            if app_profiles_enabled && !app_profiles.is_empty() {
-                let profiles_map = app_profiles.clone();
-                active_app = tokio::task::spawn_blocking(move || {
-                    if let Ok(entries) = std::fs::read_dir("/proc") {
-                        for entry in entries.filter_map(Result::ok) {
-                            let name = entry.file_name().to_string_lossy().into_owned();
-                            if !name.chars().all(|c| c.is_ascii_digit()) { continue; }
-                            
-                            if let Ok(env_data) = std::fs::read(entry.path().join("environ")) {
-                                let mut has_steam = false;
-                                let mut steam_id = String::new();
-                                let mut has_lutris = false;
-                                let mut lutris_id = String::new();
-                                let mut has_flatpak = false;
-                                let mut flatpak_id = String::new();
-
-                                for item in env_data.split(|&b| b == 0) {
-                                    let s = String::from_utf8_lossy(item);
-                                    if s.starts_with("STEAM_COMPAT_APP_ID=") || s.starts_with("SteamAppId=") {
-                                        has_steam = true;
-                                        steam_id = s.split('=').nth(1).unwrap_or("").to_string();
-                                    } else if s.starts_with("LUTRIS_GAME_UUID=") || s.starts_with("LUTRIS_GAME_SLUG=") {
-                                        has_lutris = true;
-                                        lutris_id = s.split('=').nth(1).unwrap_or("").to_string();
-                                    } else if s.starts_with("FLATPAK_ID=") {
-                                        has_flatpak = true;
-                                        flatpak_id = s.split('=').nth(1).unwrap_or("").to_string();
-                                    }
-                                }
-                                
-                                let mut detected_id = None;
-                                if has_steam && !steam_id.is_empty() {
-                                    detected_id = Some(format!("steam_{}", steam_id));
-                                } else if has_lutris && !lutris_id.is_empty() {
-                                    detected_id = Some(format!("lutris_{}", lutris_id));
-                                } else if has_flatpak && !flatpak_id.is_empty() {
-                                    detected_id = Some(format!("flatpak_{}", flatpak_id));
-                                }
-                                
-                                if let Some(id) = detected_id {
-                                    if profiles_map.contains_key(&id) {
-                                        return Some(id);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    None
-                }).await.unwrap_or(None);
-            }
-
-            let mut st = app_state.lock().await;
-
-            if !app_profiles_enabled || app_profiles.is_empty() {
-                if st.active_app.is_some() {
-                    Self::restore_pre_app_state(&mut st, &config, conn.as_ref()).await;
-                }
-                continue;
-            }
-
-            if let Some(app) = active_app {
-                if st.active_app.as_deref() != Some(&app) {
-                    info!("App Profiles: Detected game launch: {}", app);
-
-                    // ── Throttle guard (fix #282) ─────────────────────────────
-                    // Rapid WMI profile switches cause AE_AML_BUFFER_LIMIT storms
-                    // on Strix Point / Hawk Point OMEN systems.  Enforce a 30 s
-                    // cooldown between automation-triggered profile changes.
-                    const PROFILE_SWITCH_COOLDOWN: std::time::Duration =
-                        std::time::Duration::from_secs(30);
-                    let cooldown_ok = st.last_profile_switch
-                        .map(|t| t.elapsed() >= PROFILE_SWITCH_COOLDOWN)
-                        .unwrap_or(true);
-
-                    if !cooldown_ok {
-                        warn!("App Profiles: profile switch throttled (cooldown active), skipping WMI call for '{}'", app);
-                        // Still record active app so we don't loop.
-                        st.active_app = Some(app.clone());
-                    } else {
-                    // ── ACPI health check (fix #282) ──────────────────────────
-                    // Do NOT send WMI commands if ACPI is already in a broken
-                    // state — this prevents cascading AE_AML_LOOP_TIMEOUT /
-                    // amdgpu SMU freeze.
-                    if !acpi_is_healthy().await {
-                        warn!("App Profiles: ACPI platform_profile unresponsive — skipping WMI commands to avoid freeze (issue #282)");
-                        st.active_app = Some(app.clone());
-                    } else {
-
-                    // Save pre-app state
-                    if st.pre_app_state.is_none() {
-                        let current_fan = if let Some(c) = conn.as_ref() {
-                            if let Ok(reply) = c.call_method(Some("org.hp.omen"), "/org/hp/omen/Fan", Some("org.hp.omen.Fan"), "GetFanMode", &()).await {
-                                let body: String = reply.body().deserialize().unwrap_or_else(|_| "auto".to_string());
-                                body
-                            } else { "auto".to_string() }
-                        } else { "auto".to_string() };
-                        st.pre_app_state = Some((current_profile, current_fan));
-                    }
-
-                    st.active_app = Some(app.clone());
-                    st.last_profile_switch = Some(std::time::Instant::now());
-
-                    // Apply app profile
-                    if let Some(prof) = app_profiles.get(&app) {
-                        let p_prof = prof["power_profile"].as_str().unwrap_or("performance");
-                        let p_fan = prof["fan_mode"].as_str().unwrap_or("auto");
-
-                        let mut cfg = config.lock().await;
-                        cfg.power_profile = p_prof.to_string();
-                        cfg.save();
-                        drop(cfg);
-
-                        Self::sync_omen_profile(p_prof).await;
-                        Self::sync_gpu_power(p_prof).await;
-
-                        if let Some(c) = conn.as_ref() {
-                            let _ = c.call_method(Some("org.hp.omen"), "/org/hp/omen/Fan", Some("org.hp.omen.Fan"), "SetFanMode", &p_fan).await;
-                        }
-                    }
-
-                    } // end acpi_is_healthy
-                    } // end cooldown_ok
-                }
-            } else {
-                if st.active_app.is_some() {
-                    info!("App Profiles: Game closed. Restoring previous state.");
-                    Self::restore_pre_app_state(&mut st, &config, conn.as_ref()).await;
-                }
-            }
-        }
-    }
-
-    async fn restore_pre_app_state(st: &mut tokio::sync::MutexGuard<'_, AppState>, config: &Arc<Mutex<PowerConfig>>, conn: Option<&zbus::Connection>) {
-        if let Some((p_prof, p_fan)) = st.pre_app_state.take() {
-            let mut cfg = config.lock().await;
-            cfg.power_profile = p_prof.clone();
-            cfg.save();
-            drop(cfg);
-            
-            Self::sync_omen_profile(&p_prof).await;
-            Self::sync_gpu_power(&p_prof).await;
-            
-            if let Some(c) = conn {
-                let _ = c.call_method(Some("org.hp.omen"), "/org/hp/omen/Fan", Some("org.hp.omen.Fan"), "SetFanMode", &p_fan).await;
-            }
-        }
-        st.active_app = None;
     }
 
     // ── Profile detection ──────────────────────────────────────────────────────
@@ -821,23 +655,7 @@ impl PowerService {
 
     /// SetPowerProfile — mirrors Python SetPowerProfile().
     async fn set_power_profile(&self, profile: String) -> String {
-        let normalized = Self::normalize_profile(&profile);
-        let ok = Self::sync_omen_profile(&normalized).await;
-
-        if ok {
-            {
-                let mut cfg = self.config.lock().await;
-                cfg.power_profile = normalized.clone();
-                cfg.save();
-            }
-            // Async GPU sync (non-blocking, like Python threads)
-            let p = normalized.clone();
-            let _cfg_clone = self.config.clone();
-            tokio::spawn(async move {
-                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                Self::sync_gpu_power(&p).await;
-            });
-            info!("Power profile set to '{}'", normalized);
+        if self.set_profile_internal(&profile).await {
             "OK".to_string()
         } else {
             let is_tr = std::env::var("LANG").unwrap_or_default().starts_with("tr");

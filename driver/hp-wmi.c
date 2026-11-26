@@ -473,6 +473,11 @@ static const struct dmi_system_id victus_s_thermal_profile_boards[] __initconst 
 		.driver_data = (void *)&omen_v1_unknown_ec_thermal_params,
 	},
 	{
+		/* 8EDF: HyperX OMEN Gaming Laptop 15-ga0xxx (#394) */
+		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8EDF")},
+		.driver_data = (void *)&omen_v1_unknown_ec_thermal_params,
+	},
+	{
 		/* 8A4F: Victus by HP Gaming Laptop 15-fa0xxx (#356) */
 		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8A4F")},
 		.driver_data = (void *)&victus_s_thermal_params,
@@ -2719,8 +2724,8 @@ static int victus_s_gpu_thermal_profile_set(bool ctgp_enable,
 					    u8 dstate)
 {
 	struct victus_gpu_power_modes gpu_power_modes;
-	bool current_ctgp_state, current_ppab_state;
-	u8 current_dstate, current_gpu_slowdown_temp;
+	bool current_ctgp_state = false, current_ppab_state = false;
+	u8 current_dstate = 0, current_gpu_slowdown_temp = 0;
 	int ret;
 
 	/* Read current slowdown temperature so we do not change it */
@@ -2732,14 +2737,25 @@ static int victus_s_gpu_thermal_profile_set(bool ctgp_enable,
 		pr_warn("GPU modes not updated, unable to get slowdown temp\n");
 		return ret;
 	}
+	if (ret > 0) {
+		pr_debug("GPU thermal mode query unsupported on this board (0x%x), skipping\n",
+			 ret);
+		return 0;
+	}
 
 	gpu_power_modes.ctgp_enable      = ctgp_enable ? 0x01 : 0x00;
 	gpu_power_modes.ppab_enable      = ppab_enable ? 0x01 : 0x00;
 	gpu_power_modes.dstate           = dstate;
 	gpu_power_modes.gpu_slowdown_temp = current_gpu_slowdown_temp;
 
-	return hp_wmi_perform_query(HPWMI_SET_GPU_THERMAL_MODES_QUERY, HPWMI_GM,
-				    &gpu_power_modes, sizeof(gpu_power_modes), 0);
+	ret = hp_wmi_perform_query(HPWMI_SET_GPU_THERMAL_MODES_QUERY, HPWMI_GM,
+				   &gpu_power_modes, sizeof(gpu_power_modes), 0);
+	if (ret > 0) {
+		pr_debug("Set GPU thermal mode unsupported on this board (0x%x), skipping\n",
+			 ret);
+		return 0;
+	}
+	return ret;
 }
 
 /* Pass HP_POWER_LIMIT_DEFAULT to restore firmware defaults for PL1/PL2 */
@@ -3574,6 +3590,15 @@ static int hp_wmi_hwmon_write(struct device *dev, enum hwmon_sensor_types type,
 				break; /* already in MANUAL, preserve target_rpms */
 
 			/*
+			 * Leaving MAX boost straight to MANUAL leaves the EC's
+			 * hardware max-fan latch active on some OMEN boards
+			 * (e.g. 8C77, #395).  Clear it and restore thermal
+			 * policy before entering manual RPM control.
+			 */
+			if (priv->mode == PWM_MODE_MAX)
+				hp_wmi_fan_speed_max_reset(priv);
+
+			/*
 			 * Seed target RPMs from the current fan speed so the
 			 * transition to manual mode is smooth.
 			 */
@@ -4075,6 +4100,10 @@ static const struct dmi_system_id broken_omen_hpc_guid_boards[] __initconst = {
 	{
 		/* 8DCF: Victus by HP Gaming Laptop 15-fa2xxx (#360, #369) */
 		.matches = { DMI_MATCH(DMI_BOARD_NAME, "8DCF") },
+	},
+	{
+		/* 8EDF: HyperX OMEN Gaming Laptop 15-ga0xxx (#394) */
+		.matches = { DMI_MATCH(DMI_BOARD_NAME, "8EDF") },
 	},
 	{
 		/* 8A4F: Victus by HP Gaming Laptop 15-fa0xxx (#356) */

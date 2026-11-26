@@ -1,10 +1,8 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
+use log::{debug, info, warn};
 use std::fs::OpenOptions;
-use std::io::{Read, Write, Seek, SeekFrom};
+use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
 use std::process::Command;
-use log::{info, warn, debug};
 
 const EC_PATH: &str = "/sys/kernel/debug/ec/ec0/io";
 
@@ -12,23 +10,22 @@ const REG_FAN1_SPEED_PCT: u64 = 0x2E;
 const REG_FAN2_SPEED_PCT: u64 = 0x2F;
 const REG_FAN1_SPEED_SET: u64 = 0x34;
 const REG_FAN2_SPEED_SET: u64 = 0x35;
-const REG_CPU_TEMP: u64 = 0x57;
 const REG_BIOS_CONTROL: u64 = 0x62;
 const REG_TIMER: u64 = 0x63;
-const REG_PERF_MODE: u64 = 0x95;
-const REG_GPU_TEMP: u64 = 0xB7;
-const REG_THERMAL_POWER: u64 = 0xBA;
 const REG_FAN_BOOST: u64 = 0xEC;
 const REG_FAN_STATE: u64 = 0xF4;
 
-const UNSAFE_MODELS: &[&str] = &["16t-ah0", "16-ah0", "16-ap0", "17t-ah0", "17-ah0", "transcend 14"];
-const UNSAFE_BOARDS: &[&str] = &["8c58", "8d24"];
+/// Legacy 2021–2023 boards whose firmware lacks full hwmon / WMI thermal control
+/// and relies on `ec_sys` registers (`0x59`, `0x2E/0x2F`, `0x62`, `0xF4`).
+/// All other boards (including `8C77`, `8EDF`, Transcend, OMEN 16/17/MAX) MUST
+/// NOT receive raw EC writes because register offsets (e.g. `0x95`) collide with
+/// unrelated EC data such as battery part numbers (#395).
+const EC_FALLBACK_BOARDS: &[&str] = &["8E35", "8A43", "8A42"];
 
 pub struct LinuxEcController {
     has_ec_access: bool,
     board_id: String,
-    is_unsafe_ec_model: bool,
-    is_unsafe_model: bool,
+    allows_direct_writes: bool,
 }
 
 impl LinuxEcController {
@@ -38,42 +35,17 @@ impl LinuxEcController {
             .trim()
             .to_string();
 
-        let is_unsafe_model = Self::check_unsafe_model();
-        if is_unsafe_model {
-            static LOGGED_UNSAFE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-            if !LOGGED_UNSAFE.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                warn!("LinuxEcController: UNSAFE MODEL DETECTED! Legacy EC writes will be blocked to prevent Caps Lock panic.");
-            }
-        }
-
+        let allows_direct_writes = Self::allows_direct_ec_writes(&board_id);
         let mut ec = LinuxEcController {
             has_ec_access: false,
             board_id,
-            is_unsafe_ec_model: false,
-            is_unsafe_model,
+            allows_direct_writes,
         };
-        if !is_unsafe_model {
+        if ec.allows_direct_writes {
             ec.ensure_ec_sys();
-            ec.has_ec_access = Path::new(EC_PATH).exists();
         }
+        ec.has_ec_access = Path::new(EC_PATH).exists();
         ec
-    }
-
-    fn check_unsafe_model() -> bool {
-        let product_name = std::fs::read_to_string("/sys/class/dmi/id/product_name").unwrap_or_default().to_lowercase();
-        let board_name = std::fs::read_to_string("/sys/class/dmi/id/board_name").unwrap_or_default().to_lowercase();
-
-        for model in UNSAFE_MODELS {
-            if product_name.contains(model) {
-                return true;
-            }
-        }
-        for board in UNSAFE_BOARDS {
-            if board_name.contains(board) {
-                return true;
-            }
-        }
-        false
     }
 
     pub fn needs_ec_fallback(&self) -> bool {
@@ -84,7 +56,13 @@ impl LinuxEcController {
     /// Board 8A42, 8A43, and 8E35 have no hwmon fan_input paths; EC registers
     /// 0x2E/0x2F carry duty-cycle % that we use as an approximate RPM source.
     pub fn needs_ec_fallback_for_board(board_id: &str) -> bool {
-        matches!(board_id.trim().to_uppercase().as_str(), "8E35" | "8A43" | "8A42")
+        let upper = board_id.trim().to_uppercase();
+        EC_FALLBACK_BOARDS.iter().any(|&b| b == upper)
+    }
+
+    /// Only allow raw `ec_sys` writes on vetted legacy EC-fallback boards (#395).
+    pub fn allows_direct_ec_writes(board_id: &str) -> bool {
+        Self::needs_ec_fallback_for_board(board_id)
     }
 
     pub fn has_ec_access(&self) -> bool {
@@ -92,7 +70,7 @@ impl LinuxEcController {
     }
 
     fn ensure_ec_sys(&self) {
-        if Path::new(EC_PATH).exists() {
+        if !self.allows_direct_writes || Path::new(EC_PATH).exists() {
             return;
         }
 
@@ -108,65 +86,18 @@ impl LinuxEcController {
             .output();
     }
 
-    pub fn try_lazy_ec_load(&mut self) -> bool {
-        if self.has_ec_access {
-            return true;
-        }
-        self.ensure_ec_sys();
-        self.has_ec_access = Path::new(EC_PATH).exists();
-        if self.has_ec_access {
-            info!("Lazy EC load succeeded for board {}", self.board_id);
-        }
-        self.has_ec_access
-    }
-
-    pub fn read_byte(&mut self, reg: u64) -> u8 {
-        if !self.has_ec_access {
-            return 0;
-        }
-        if self.is_unsafe_ec_model && reg != 0x59 && reg != REG_PERF_MODE {
-            return 0;
-        }
-
-        match OpenOptions::new().read(true).open(EC_PATH) {
-            Ok(mut file) => {
-                if file.seek(SeekFrom::Start(reg)).is_ok() {
-                    let mut buf = [0u8; 1];
-                    if let Ok(n) = file.read(&mut buf) {
-                        if n > 0 {
-                            return buf[0];
-                        }
-                    }
-                }
-            }
-            Err(_) => {
-                debug!("EC read_byte failed at 0x{:02X}. Kernel lockdown?", reg);
-                self.has_ec_access = false;
-            }
-        }
-        0
-    }
-
-    pub fn write_byte(&mut self, reg: u64, value: u8) -> bool {
-        if self.is_unsafe_model {
-            warn!("EC Blocked: Attempted to write 0x{:X} to register 0x{:X} on an unsafe model (2025/Transcend)", value, reg);
-            return false;
-        }
-        if !self.has_ec_access {
-            return false;
-        }
-        if self.is_unsafe_ec_model && reg != 0x59 && reg != REG_PERF_MODE {
+    fn write_byte(&mut self, reg: u64, value: u8) -> bool {
+        if !self.allows_direct_writes || !self.has_ec_access {
             return false;
         }
 
         match OpenOptions::new().read(true).write(true).open(EC_PATH) {
             Ok(mut file) => {
-                if file.seek(SeekFrom::Start(reg)).is_ok()
-                    && file.write(&[value]).is_ok() {
-                        let _ = file.flush();
-                        debug!("EC write_byte success at 0x{:02X} = 0x{:02X}", reg, value);
-                        return true;
-                    }
+                if file.seek(SeekFrom::Start(reg)).is_ok() && file.write(&[value]).is_ok() {
+                    let _ = file.flush();
+                    debug!("EC write_byte success at 0x{:02X} = 0x{:02X}", reg, value);
+                    return true;
+                }
             }
             Err(_) => {
                 warn!("EC access lost on write. Kernel lockdown?");
@@ -176,36 +107,8 @@ impl LinuxEcController {
         false
     }
 
-    pub fn get_cpu_temp(&mut self) -> f64 {
-        // Read from hwmon instead of EC to prevent conflicts
-        // See sysmon.rs for proper HWMon reading. This is deprecated.
-        50.0
-    }
-
-    pub fn get_gpu_temp(&mut self) -> f64 {
-        // Deprecated EC read
-        50.0
-    }
-
-    pub fn set_fan_speed_pct(&mut self, fan_idx: u32, pct: u32) -> bool {
-        if self.is_unsafe_ec_model || self.is_unsafe_model || !self.has_ec_access {
-            return false;
-        }
-        let pct = pct.clamp(0, 100) as u8;
-        let reg = if fan_idx == 1 { REG_FAN1_SPEED_PCT } else { REG_FAN2_SPEED_PCT };
-        self.write_byte(reg, pct)
-    }
-
-    pub fn set_fan_boost(&mut self, enable: bool) -> bool {
-        if self.is_unsafe_ec_model || !self.has_ec_access {
-            return false;
-        }
-        let val = if enable { 0x0C } else { 0x00 };
-        self.write_byte(REG_FAN_BOOST, val)
-    }
-
     pub async fn restore_auto_mode(&mut self) -> bool {
-        if !self.has_ec_access {
+        if !self.allows_direct_writes || !self.has_ec_access {
             return false;
         }
 
@@ -213,56 +116,24 @@ impl LinuxEcController {
         self.write_byte(REG_FAN2_SPEED_SET, 0x00);
         self.write_byte(REG_FAN1_SPEED_PCT, 0x00);
         self.write_byte(REG_FAN2_SPEED_PCT, 0x00);
-        
         self.write_byte(REG_FAN_BOOST, 0x00);
-        
+
         if !self.write_byte(REG_FAN_STATE, 0x00) {
             return false;
         }
-            
         if !self.write_byte(REG_BIOS_CONTROL, 0x00) {
             return false;
         }
-        
+
         self.write_byte(REG_TIMER, 0x78);
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         self.write_byte(REG_FAN_STATE, 0x00);
-        
-        true
-    }
 
-    pub fn set_manual_fan_speed(&mut self, pct: u8) -> bool {
-        if !self.has_ec_access {
-            return false;
-        }
-        
-        self.write_byte(REG_BIOS_CONTROL, 0x06);
-        self.write_byte(REG_FAN_STATE, 0x02);
-        
-        let pct = pct.clamp(0, 100);
-        self.write_byte(REG_FAN1_SPEED_PCT, pct);
-        self.write_byte(REG_FAN2_SPEED_PCT, pct);
-        
         true
     }
 
     pub fn set_perf_mode(&mut self, mode: &str) -> bool {
-        if !self.has_ec_access {
-            return false;
-        }
-
-        // EC Fallback for older boards that don't fully support WMI platform_profile
-        if self.board_id == "8E35" || self.board_id == "8A43" || self.board_id == "8A42" {
-            let val = match mode.to_lowercase().as_str() {
-                "performance" | "max" => 0x31,
-                "cool" | "eco" => 0x50,
-                _ => 0x30,
-            };
-            info!("Using EC Fallback for {} to set thermal profile: 0x{:02X} at 0x59", self.board_id, val);
-            return self.write_byte(0x59, val);
-        }
-
-        if self.is_unsafe_ec_model {
+        if !self.allows_direct_writes || !self.has_ec_access {
             return false;
         }
 
@@ -271,6 +142,33 @@ impl LinuxEcController {
             "cool" | "eco" => 0x50,
             _ => 0x30,
         };
-        self.write_byte(REG_PERF_MODE, val)
+        info!(
+            "Using EC Fallback for {} to set thermal profile: 0x{:02X} at 0x59",
+            self.board_id, val
+        );
+        self.write_byte(0x59, val)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LinuxEcController;
+
+    #[test]
+    fn direct_ec_writes_only_allowed_on_legacy_fallback_boards() {
+        for allowed in ["8E35", "8a43", " 8A42 "] {
+            assert!(
+                LinuxEcController::allows_direct_ec_writes(allowed),
+                "legacy EC board '{}' should be allowed",
+                allowed
+            );
+        }
+        for blocked in ["8C77", "8EDF", "8D42", "8D88", "8DCF", "8A4C", "8A17", "UNKNOWN", ""] {
+            assert!(
+                !LinuxEcController::allows_direct_ec_writes(blocked),
+                "modern/non-legacy board '{}' must NEVER get raw EC writes (#395)",
+                blocked
+            );
+        }
     }
 }

@@ -15,6 +15,7 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/acpi.h>
+#include <linux/dmi.h>
 #include <linux/errno.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -146,8 +147,14 @@ static int hp_wmi_perform_query(int query, enum hp_wmi_command command,
 	ret = bios_return->return_code;
 
 	if (ret) {
-		/* Don't spam dmesg for unknown commands during probing (e.g. win_lock on Victus) */
-		if (ret != 0x3 || query != 0x0)
+		/*
+		 * Don't spam dmesg for firmware-unsupported commands during
+		 * sysfs probing (0x02 unknown cmdtype, 0x03 unknown command,
+		 * 0x05 invalid/unsupported on newer boards).
+		 */
+		if (ret == 0x02 || ret == 0x03 || ret == 0x05)
+			pr_debug("query 0x%x unsupported (code 0x%x)\n", query, ret);
+		else
 			pr_warn("query 0x%x returned error 0x%x\n", query, ret);
 		goto out_free;
 	}
@@ -339,12 +346,8 @@ static ssize_t lightbar_show(struct device *dev, struct device_attribute *attr,
   memset(tbl, 0, sizeof(tbl));
   ret = hp_wmi_perform_query(HPWMI_LIGHTBAR_GET_QUERY, HPWMI_BACKLIGHT, tbl,
                              sizeof(tbl), sizeof(tbl));
-  if (ret) {
-    ret = hp_wmi_perform_query(HPWMI_COLOR_GET_QUERY, HPWMI_BACKLIGHT, tbl,
-                               sizeof(tbl), sizeof(tbl));
-  }
   if (ret)
-    return -EIO;
+    return -EOPNOTSUPP;
 
   return sysfs_emit(buf, "%02X%02X%02X %02X%02X%02X %02X%02X%02X %02X%02X%02X\n",
                     tbl[COLOR_OFFSET + 0], tbl[COLOR_OFFSET + 1], tbl[COLOR_OFFSET + 2],
@@ -363,12 +366,8 @@ static ssize_t lightbar_store(struct device *dev, struct device_attribute *attr,
   memset(tbl, 0, sizeof(tbl));
   ret = hp_wmi_perform_query(HPWMI_LIGHTBAR_GET_QUERY, HPWMI_BACKLIGHT, tbl,
                              sizeof(tbl), sizeof(tbl));
-  if (ret) {
-    ret = hp_wmi_perform_query(HPWMI_COLOR_GET_QUERY, HPWMI_BACKLIGHT, tbl,
-                               sizeof(tbl), sizeof(tbl));
-  }
   if (ret)
-    return -EIO;
+    return -EOPNOTSUPP;
 
   while (*cur && z < 4) {
     while (*cur == ' ' || *cur == '\t' || *cur == ',' || *cur == '\n') cur++;
@@ -394,10 +393,6 @@ static ssize_t lightbar_store(struct device *dev, struct device_attribute *attr,
 
   ret = hp_wmi_perform_query(HPWMI_LIGHTBAR_SET_QUERY, HPWMI_BACKLIGHT, tbl,
                              sizeof(tbl), sizeof(tbl));
-  if (ret) {
-    ret = hp_wmi_perform_query(HPWMI_COLOR_SET_QUERY, HPWMI_BACKLIGHT, tbl,
-                               sizeof(tbl), sizeof(tbl));
-  }
   return ret ? -EIO : count;
 }
 
@@ -508,6 +503,19 @@ static struct attribute *hp_omen_extra_attrs[] = {
 };
 ATTRIBUTE_GROUPS(hp_omen_extra);
 
+/*
+ * Boards whose keyboard backlight is driven over USB HID and whose EC shuts
+ * down the backlight power rail if WMI 0x20009 (HPWMI_BACKLIGHT) is probed
+ * or written (#394).
+ */
+static const struct dmi_system_id no_wmi_rgb_boards[] __initconst = {
+  {
+    /* 8EDF: HyperX OMEN Gaming Laptop 15-ga0xxx (0C45:7D18 USB HID) */
+    .matches = { DMI_MATCH(DMI_BOARD_NAME, "8EDF") },
+  },
+  {}
+};
+
 /* ══════════════════════════════════════════════════════════════════
  * PLATFORM DEVICE
  * ══════════════════════════════════════════════════════════════════ */
@@ -517,6 +525,11 @@ static int __init hp_omen_extra_init(void) {
   int ret;
 
   pr_info("hp-omen-extra: init starting...\n");
+
+  if (dmi_check_system(no_wmi_rgb_boards)) {
+    pr_info("Board uses non-WMI keyboard backlight; skipping hp-omen-extra\n");
+    return -ENODEV;
+  }
 
   if (!wmi_has_guid(HPWMI_BIOS_GUID)) {
     pr_info("HP WMI BIOS GUID not found — not an HP system?\n");
