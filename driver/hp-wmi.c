@@ -314,16 +314,19 @@ static const struct dmi_system_id victus_s_thermal_profile_boards[] __initconst 
 		.driver_data = (void *)&victus_s_thermal_params,
 	},
 	{
+		/* 8C76 / 8C77 / 8C78: OMEN 16-wf1xxx / 17-db0xxx. EC offset 0x58..0x5B holds
+		 * the ASCII board revision string ("C0-A", i.e. 0x59 == '0'), not a readable
+		 * thermal profile byte (#395). */
 		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8C76")},
-		.driver_data = (void *)&omen_v1_thermal_params,
+		.driver_data = (void *)&omen_v1_unknown_ec_thermal_params,
 	},
 	{
 		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8C77")},
-		.driver_data = (void *)&omen_v1_thermal_params,
+		.driver_data = (void *)&omen_v1_unknown_ec_thermal_params,
 	},
 	{
 		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8C78")},
-		.driver_data = (void *)&omen_v1_thermal_params,
+		.driver_data = (void *)&omen_v1_unknown_ec_thermal_params,
 	},
 	{
 		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8E35")},
@@ -3737,6 +3740,21 @@ static void hp_wmi_hwmon_keep_alive_handler(struct work_struct *work)
 		}
 		mutex_unlock(&priv->hwmon_lock);
 		return;
+	}
+
+	/*
+	 * Refresh the active thermal profile (WMI 0x1A) alongside the 90s manual
+	 * fan keep-alive on Victus-S / modern OMEN boards so firmware's 120s
+	 * thermal-profile timer stays alive and transient EC fan-guard latches
+	 * do not outlive a high-load episode (#395).
+	 */
+	if (is_victus_s_thermal_profile() &&
+	    active_thermal_profile_params &&
+	    active_thermal_profile_params->ec_tp_offset != HP_NO_THERMAL_PROFILE_OFFSET &&
+	    (active_platform_profile == PLATFORM_PROFILE_PERFORMANCE ||
+	     platform_profile_written ||
+	     priv->prev_mode != -1)) {
+		platform_profile_victus_s_set_ec(active_platform_profile);
 	}
 
 	/*

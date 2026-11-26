@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ---
 
+## [2.5.2] - 2026-11-26
+
+### Fixed
+- **Settings Heartbeat GUI Crash (`#395`):** Fixed `settings.rs` invoking blocking `ping_daemon_sync()` from inside a Tokio worker thread (`Cannot start a runtime from within a runtime` abort every ~20–30s after opening Settings while `omen-tray` stayed running) by adding `ping_daemon_async()`, and hardened `daemon_client::block_with_timeout()` to offload cleanly whenever an active Tokio context is present on the calling thread.
+- **Board `8C77` EC Max-Fan Latch, Temperature Sensor Selection & Thermal-Protection Restore (`#395`):**
+  - Switched fan monitor temperature sampling (`fan/mod.rs` / `curves.rs`) to prefer real CPU package `temp1_input` sensors (`coretemp`, `k10temp`, `zenpower`) instead of transient per-core HX junction or noisy ACPI/PCH/DIMM nodes.
+  - Added automatic EC max-fan latch recovery (`should_recover_ec_max_latch` + `handle_ec_override_recovery`): when actual fan speed remains >=90% max well after cooling down (<80°C) despite <=75% commanded duty, the daemon refreshes the active `platform_profile` (`WMI 0x1A`) and pulses `pwm1_enable` to release firmware VRM/chassis guard latches without user intervention.
+  - Updated `set_thermal_protection(false)` to immediately restore `pre_protection_mode` if Thermal Protection was actively forcing Max Fan.
+  - Moved `8C76`/`8C77`/`8C78` in `driver/hp-wmi.c` to `omen_v1_unknown_ec_thermal_params` (avoiding invalid EC `0x59` `'0'` board-revision readback) and extended `hp_wmi_hwmon_keep_alive_handler()` to refresh `platform_profile_victus_s_set_ec()` in `PWM_MODE_MANUAL` as well as `PWM_MODE_AUTO`.
+
+---
+
 ## [2.5.1] - 2026-11-26
 
 ### Added

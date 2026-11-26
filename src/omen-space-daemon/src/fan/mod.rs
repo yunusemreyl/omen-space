@@ -4,10 +4,10 @@ mod hwmon;
 use crate::notifier::DesktopNotifier;
 pub use curves::{
     curve_mode_delegates_to_firmware, curve_target_pct, default_auto_step_curve,
-    default_perf_step_curve, evaluate_step, is_ignored_sensor_device,
+    default_perf_step_curve, evaluate_step, select_cpu_temp_paths, should_recover_ec_max_latch,
     should_trigger_thermal_protection, update_advisory_thermal_warn_state, CurvePoint,
-    AUTO_PEAK_HOLD_SECS, NOTICE_PERSIST_TICKS, THERMAL_PROTECTION_RECOVER_TEMP,
-    THERMAL_PROTECTION_TRIGGER_TEMP,
+    AUTO_PEAK_HOLD_SECS, EC_OVERRIDE_RECOVERY_COOLDOWN_SECS, NOTICE_PERSIST_TICKS,
+    THERMAL_PROTECTION_RECOVER_TEMP, THERMAL_PROTECTION_TRIGGER_TEMP,
 };
 use glob::glob;
 use hwmon::{
@@ -175,31 +175,29 @@ impl FanService {
         elapsed >= std::time::Duration::from_secs(5) && (!hwmon_available || fan_count == 0)
     }
 
-    /// (CPU/board temperature, dGPU temperature). The first is the hottest hwmon sensor
-    /// (at least 45°C); the second is 0.0 while the dGPU sleeps.
+    /// (CPU/board temperature, dGPU temperature). Prefers CPU package `temp1_input`
+    /// sensors so single-core spikes or noisy ACPI/PCH nodes do not saturate fan curves (#395).
     async fn get_temps() -> (f64, f64) {
         tokio::task::spawn_blocking(|| {
             let paths = SENSOR_TEMP_PATHS.get_or_init(|| {
-                let mut p = Vec::new();
+                let mut candidates = Vec::new();
                 if let Ok(entries) = glob("/sys/class/hwmon/hwmon*/temp*_input") {
                     for entry in entries.filter_map(Result::ok) {
-                        let should_ignore = if let Some(parent) = entry.parent() {
-                            let name = std::fs::read_to_string(parent.join("name")).unwrap_or_default();
-                            let vendor =
-                                std::fs::read_to_string(parent.join("device/vendor")).unwrap_or_default();
-                            let class =
-                                std::fs::read_to_string(parent.join("device/class")).unwrap_or_default();
-                            is_ignored_sensor_device(&name, &vendor, &class)
+                        let (name, vendor, class) = if let Some(parent) = entry.parent() {
+                            (
+                                std::fs::read_to_string(parent.join("name")).unwrap_or_default(),
+                                std::fs::read_to_string(parent.join("device/vendor"))
+                                    .unwrap_or_default(),
+                                std::fs::read_to_string(parent.join("device/class"))
+                                    .unwrap_or_default(),
+                            )
                         } else {
-                            false
+                            Default::default()
                         };
-
-                        if !should_ignore {
-                            p.push(entry);
-                        }
+                        candidates.push((name, vendor, class, entry));
                     }
                 }
-                p
+                select_cpu_temp_paths(&candidates)
             });
 
             let mut max_temp = 45.0;
@@ -327,13 +325,94 @@ impl FanService {
         }
     }
 
+    /// Detect when EC thermal-guard leaves fans latched near max speed well after
+    /// cooling down (<80°C) even though daemon targets are low, and clear the latch by
+    /// re-applying the active platform_profile (WMI 0x1A) + bouncing pwm1_enable (#395).
+    async fn handle_ec_override_recovery(
+        state: &mut FanState,
+        temp: f64,
+        override_ticks: &mut u32,
+        last_reset: &mut Option<std::time::Instant>,
+    ) {
+        let Some(ref hwmon) = state.hwmon_path.clone() else {
+            *override_ticks = 0;
+            return;
+        };
+        let Some(commanded_duty) = state.last_written_duty else {
+            *override_ticks = 0;
+            return;
+        };
+
+        let mut max_actual_rpm = 0u32;
+        for &idx in &state.found_fans {
+            if let Ok(s) = std::fs::read_to_string(hwmon.join(format!("fan{}_input", idx))) {
+                if let Ok(rpm) = s.trim().parse::<u32>() {
+                    max_actual_rpm = max_actual_rpm.max(rpm);
+                }
+            }
+        }
+        let target_rpm = state.last_targets.values().copied().max().unwrap_or(0);
+        let max_rpm = state.max_speeds.values().copied().max().unwrap_or(6000);
+
+        if !should_recover_ec_max_latch(
+            &state.mode,
+            state.thermal_protection_active,
+            temp,
+            commanded_duty,
+            max_actual_rpm,
+            target_rpm,
+            max_rpm,
+            override_ticks,
+        ) {
+            return;
+        }
+
+        let cooldown_ok = last_reset
+            .map(|t| t.elapsed().as_secs() >= EC_OVERRIDE_RECOVERY_COOLDOWN_SECS)
+            .unwrap_or(true);
+        if !cooldown_ok {
+            return;
+        }
+
+        *override_ticks = 0;
+        *last_reset = Some(std::time::Instant::now());
+        warn!(
+            "Detected persistent EC max-fan latch ({} RPM actual vs {} RPM target at {:.1}°C); refreshing platform_profile and resetting pwm1_enable (#395).",
+            max_actual_rpm, target_rpm, temp
+        );
+
+        let pwm_enable = hwmon.join("pwm1_enable");
+        if sysfs_exists(&pwm_enable).await {
+            let _ = sysfs_write(&pwm_enable, "2").await;
+        }
+        for p in [
+            "/sys/firmware/acpi/platform_profile",
+            "/sys/devices/platform/hp-wmi/platform_profile",
+        ] {
+            if let Ok(active) = tokio::fs::read_to_string(p).await {
+                let trimmed = active.trim();
+                if !trimmed.is_empty() && sysfs_write(p, trimmed).await {
+                    break;
+                }
+            }
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(80)).await;
+        if sysfs_exists(hwmon.join("pwm1")).await && sysfs_exists(&pwm_enable).await {
+            let _ = sysfs_write(&pwm_enable, "1").await;
+        }
+        state.last_written_duty = None;
+        state.last_targets.clear();
+    }
+
     async fn run_monitor_loop(&self) {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
         let mut stall_ticks: u32 = 0;
+        let mut ec_override_ticks: u32 = 0;
         let mut overheat_ticks: u32 = 0;
         let mut cpu_fan_history: std::collections::VecDeque<f64> = std::collections::VecDeque::new();
         let mut gpu_fan_history: std::collections::VecDeque<f64> = std::collections::VecDeque::new();
         let mut last_stall_alert: Option<std::time::Instant> = None;
+        let mut last_ec_override_reset: Option<std::time::Instant> = None;
         let mut last_unreadable_warn: Option<std::time::Instant> = None;
         let mut last_thermal_alert: Option<std::time::Instant> = None;
         let mut warn_hot_since: Option<std::time::Instant> = None;
@@ -397,6 +476,14 @@ impl FanService {
                     &mut stall_ticks,
                     &mut last_unreadable_warn,
                     &mut last_stall_alert,
+                )
+                .await;
+
+                Self::handle_ec_override_recovery(
+                    &mut state,
+                    temp,
+                    &mut ec_override_ticks,
+                    &mut last_ec_override_reset,
                 )
                 .await;
 
@@ -839,6 +926,27 @@ impl FanService {
         config.custom_curve_gpu = custom_curve_gpu_json;
         config_manager.save(&config).await;
     }
+
+    async fn apply_thermal_protection_toggle(
+        state: &mut FanState,
+        enabled: bool,
+    ) -> Option<zbus::SignalContext<'static>> {
+        state.thermal_protection_enabled = enabled;
+        if !enabled && state.thermal_protection_active {
+            state.thermal_protection_active = false;
+            let restore = state
+                .pre_protection_mode
+                .take()
+                .unwrap_or_else(|| "auto".to_string());
+            state.last_written_duty = None;
+            state.last_auto_pct = 0;
+            state.suppress_ec_notice = true;
+            Self::set_mode_internal(state, &restore).await;
+            state.suppress_ec_notice = false;
+            return state.signal_ctx.clone();
+        }
+        None
+    }
 }
 
 #[interface(name = "org.hp.omen.Fan")]
@@ -996,10 +1104,12 @@ impl FanService {
     }
 
     async fn set_thermal_protection(&mut self, enabled: bool) -> String {
-        let mut state = self.state.lock().await;
-        state.thermal_protection_enabled = enabled;
-        if !enabled {
-            state.thermal_protection_active = false;
+        let signal_ctx = {
+            let mut state = self.state.lock().await;
+            Self::apply_thermal_protection_toggle(&mut state, enabled).await
+        };
+        if let Some(ctx) = signal_ctx {
+            let _ = Self::thermal_protection_alert(&ctx, false).await;
         }
 
         let mut config = crate::config::ConfigManager::new().load().await;
@@ -1026,7 +1136,7 @@ impl FanService {
 
 #[cfg(test)]
 mod tests {
-    use super::curves::{evaluate_spline, pct_to_pwm};
+    use super::curves::{evaluate_spline, is_ignored_sensor_device, pct_to_pwm};
     use super::*;
 
     #[test]
@@ -1412,5 +1522,52 @@ mod regression_fan {
 
         assert_eq!(f1, "3000");
         assert_eq!(f2, "4800");
+    }
+
+    #[test]
+    fn select_cpu_temp_paths_prefers_package_sensor_over_core_and_acpi_spikes() {
+        let candidates = vec![
+            ("acpitz".into(), "".into(), "".into(), PathBuf::from("/sys/class/hwmon/hwmon0/temp1_input")),
+            ("coretemp".into(), "".into(), "".into(), PathBuf::from("/sys/class/hwmon/hwmon3/temp1_input")),
+            ("coretemp".into(), "".into(), "".into(), PathBuf::from("/sys/class/hwmon/hwmon3/temp2_input")),
+            ("spd5118".into(), "".into(), "".into(), PathBuf::from("/sys/class/hwmon/hwmon4/temp1_input")),
+            ("nvme".into(), "".into(), "".into(), PathBuf::from("/sys/class/hwmon/hwmon1/temp1_input")),
+        ];
+        let picked = select_cpu_temp_paths(&candidates);
+        assert_eq!(picked, vec![PathBuf::from("/sys/class/hwmon/hwmon3/temp1_input")]);
+    }
+
+    #[test]
+    fn ec_max_latch_detector_triggers_on_8c77_cool_idle_mismatch_and_ignores_real_load() {
+        let mut ticks = 0;
+        for _ in 0..7 {
+            assert!(!should_recover_ec_max_latch("auto", false, 58.0, 85, 5700, 2000, 6000, &mut ticks));
+        }
+        assert!(should_recover_ec_max_latch("auto", false, 58.0, 85, 5700, 2000, 6000, &mut ticks));
+
+        // Must reset immediately under high load/temp or high commanded PWM
+        assert!(!should_recover_ec_max_latch("auto", false, 84.0, 85, 5700, 2000, 6000, &mut ticks));
+        assert_eq!(ticks, 0);
+        assert!(!should_recover_ec_max_latch("auto", false, 58.0, 220, 5700, 5200, 6000, &mut ticks));
+    }
+
+    #[tokio::test]
+    async fn disabling_thermal_protection_restores_previous_fan_mode() {
+        let dir = std::env::temp_dir().join(format!("omen-fan-tprestore-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("pwm1_enable"), "0").unwrap();
+        std::fs::write(dir.join("pwm1"), "255").unwrap();
+        let mut state = test_state(dir.clone());
+        state.mode = "max".to_string();
+        state.thermal_protection_active = true;
+        state.pre_protection_mode = Some("auto".to_string());
+
+        FanService::apply_thermal_protection_toggle(&mut state, false).await;
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(!state.thermal_protection_enabled);
+        assert!(!state.thermal_protection_active);
+        assert_eq!(state.mode, "auto");
     }
 }

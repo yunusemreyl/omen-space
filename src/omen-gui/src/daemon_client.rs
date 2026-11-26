@@ -21,14 +21,25 @@ pub fn get_runtime() -> &'static Runtime {
 
 fn block_with_timeout<T, E, F>(timeout_ms: u64, default: T, fut: F) -> T
 where
-    F: Future<Output = Result<T, E>>,
+    F: Future<Output = Result<T, E>> + Send + 'static,
+    T: Send + 'static,
+    E: 'static,
 {
-    get_runtime().block_on(async move {
-        match tokio::time::timeout(Duration::from_millis(timeout_ms), fut).await {
-            Ok(Ok(val)) => val,
-            _ => default,
-        }
-    })
+    let run = move || {
+        get_runtime().block_on(async move {
+            tokio::time::timeout(Duration::from_millis(timeout_ms), fut)
+                .await
+                .ok()
+                .and_then(Result::ok)
+        })
+    };
+    // Avoid entering Runtime::block_on directly from any active Tokio context (both
+    // main()'s Runtime::enter guard and worker tasks spawned onto get_runtime()).
+    if tokio::runtime::Handle::try_current().is_ok() {
+        std::thread::spawn(run).join().ok().flatten().unwrap_or(default)
+    } else {
+        run().unwrap_or(default)
+    }
 }
 
 // ── Shared D-Bus Connection ──────────────────────────────────────────────────
@@ -301,7 +312,8 @@ pub async fn run_fan_cleaning_async() -> Result<String, Box<dyn std::error::Erro
 }
 
 #[allow(dead_code)]
-pub async fn get_diagnostics_async() -> Result<String, Box<dyn std::error::Error>> {
+pub async fn get_diagnostics_async(
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let conn = get_conn().await?;
     let proxy = SysMonProxy::new(&conn).await?;
     Ok(proxy.get_diagnostics().await?)
@@ -429,7 +441,8 @@ where
     }
 }
 
-pub async fn get_hardware_specs_async() -> Result<String, Box<dyn std::error::Error>> {
+pub async fn get_hardware_specs_async(
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let conn = get_conn().await?;
     let proxy = SysMonProxy::new(&conn).await?;
     Ok(proxy.get_hardware_specs().await?)
@@ -495,7 +508,8 @@ pub fn set_color_sync(zone_val: i32, hex_color: String) {
     });
 }
 
-pub async fn get_power_profile_async() -> Result<String, Box<dyn std::error::Error>> {
+pub async fn get_power_profile_async(
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let res = get_power_profile_raw_async().await?;
     if let Ok(val) = serde_json::from_str::<serde_json::Value>(&res) {
         if let Some(active) = val.get("active").and_then(|v| v.as_str()) {
@@ -505,7 +519,8 @@ pub async fn get_power_profile_async() -> Result<String, Box<dyn std::error::Err
     Ok(res)
 }
 
-pub async fn get_power_profile_raw_async() -> Result<String, Box<dyn std::error::Error>> {
+pub async fn get_power_profile_raw_async(
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let conn = get_conn().await?;
     let proxy = PowerProxy::new(&conn).await?;
     Ok(proxy.get_power_profile().await?)
@@ -515,7 +530,7 @@ pub fn get_power_profile_sync() -> String {
     block_with_timeout(500, "balanced".to_string(), get_power_profile_async())
 }
 
-pub async fn get_fan_mode_async() -> Result<String, Box<dyn std::error::Error>> {
+pub async fn get_fan_mode_async() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let conn = get_conn().await?;
     let proxy = FanProxy::new(&conn).await?;
     Ok(proxy.get_fan_mode().await?)
@@ -662,7 +677,7 @@ pub async fn get_undervolt_state_async() -> Result<String, Box<dyn std::error::E
     Ok(proxy.get_state().await?)
 }
 
-pub async fn get_rgb_state_async() -> Result<String, Box<dyn std::error::Error>> {
+pub async fn get_rgb_state_async() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let conn = get_conn().await?;
     let proxy = RgbProxy::new(&conn).await?;
     Ok(proxy.get_state().await?)
@@ -670,6 +685,13 @@ pub async fn get_rgb_state_async() -> Result<String, Box<dyn std::error::Error>>
 
 pub fn get_rgb_state_sync() -> String {
     block_with_timeout(500, "{}".to_string(), get_rgb_state_async())
+}
+
+pub async fn ping_daemon_async() -> bool {
+    matches!(
+        tokio::time::timeout(Duration::from_millis(500), get_fan_mode_async()).await,
+        Ok(Ok(_))
+    )
 }
 
 pub fn ping_daemon_sync() -> bool {
@@ -737,4 +759,28 @@ pub async fn get_battery_limit_state_async() -> Result<String, String> {
     });
     rx.await
         .unwrap_or_else(|_| Err(crate::i18n::t("dbus_err_daemon_aborted").to_string()))
+}
+
+#[cfg(test)]
+mod runtime_safety_tests {
+    use super::*;
+
+    #[test]
+    fn block_with_timeout_is_panic_free_from_plain_entered_and_worker_threads() {
+        assert_eq!(block_with_timeout(100, 0, async { Ok::<i32, ()>(11) }), 11);
+
+        {
+            let _guard = get_runtime().enter();
+            assert_eq!(block_with_timeout(100, 0, async { Ok::<i32, ()>(22) }), 22);
+        }
+
+        let res = get_runtime()
+            .block_on(async {
+                get_runtime()
+                    .spawn(async { block_with_timeout(100, 0, async { Ok::<i32, ()>(33) }) })
+                    .await
+                    .unwrap()
+            });
+        assert_eq!(res, 33);
+    }
 }

@@ -6,6 +6,10 @@ pub const THERMAL_PROTECTION_RECOVER_TEMP: f64 = 82.0;
 /// Seconds (1 Hz samples) a thermal condition must persist before a desktop notice is shown (#327).
 pub const NOTICE_PERSIST_TICKS: u32 = 3;
 pub const AUTO_PEAK_HOLD_SECS: u64 = 15;
+/// Consecutive cool-idle ticks at >=90% max RPM with a low commanded target before
+/// pulsing platform_profile + pwm1_enable to clear an EC max-fan latch (#395).
+pub const EC_OVERRIDE_RECOVERY_TICKS: u32 = 8;
+pub const EC_OVERRIDE_RECOVERY_COOLDOWN_SECS: u64 = 60;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct CurvePoint(pub f64, pub f64); // [Temp, Pct]
@@ -171,6 +175,66 @@ pub fn is_ignored_sensor_device(name: &str, vendor: &str, class: &str) -> bool {
     let v = vendor.trim();
     let c = class.trim();
     v.eq_ignore_ascii_case("0x10de") && c.starts_with("0x03")
+}
+
+pub fn is_cpu_package_sensor(hwmon_name: &str, file_name: &str) -> bool {
+    file_name == "temp1_input"
+        && matches!(
+            hwmon_name.trim(),
+            "coretemp" | "k10temp" | "zenpower" | "zenergy" | "cpu_thermal" | "fam15h_power"
+        )
+}
+
+/// Prefer real CPU package `temp1_input` hwmon nodes so per-core HX peaks or noisy ACPI/PCH/DIMM
+/// sensors do not artificially peg curves or thermal protection (#395).
+pub fn select_cpu_temp_paths(candidates: &[(String, String, String, std::path::PathBuf)]) -> Vec<std::path::PathBuf> {
+    let mut primary = Vec::new();
+    let mut fallback = Vec::new();
+    for (name, vendor, class, path) in candidates {
+        if is_ignored_sensor_device(name, vendor, class) {
+            continue;
+        }
+        let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or_default();
+        if is_cpu_package_sensor(name, file_name) {
+            primary.push(path.clone());
+        } else if file_name == "temp1_input" && !name.trim().eq_ignore_ascii_case("spd5118") {
+            fallback.push(path.clone());
+        }
+    }
+    if !primary.is_empty() {
+        primary
+    } else {
+        fallback
+    }
+}
+
+/// Returns `true` when firmware appears stuck at >=90% max RPM well after cooling down (<80°C)
+/// despite the daemon commanding <=75% PWM in a curve mode (`auto`, `performance`, `custom`) (#395).
+#[allow(clippy::too_many_arguments)]
+pub fn should_recover_ec_max_latch(
+    mode: &str,
+    thermal_protection_active: bool,
+    temp: f64,
+    commanded_duty: u32,
+    actual_rpm: u32,
+    target_rpm: u32,
+    max_rpm: u32,
+    override_ticks: &mut u32,
+) -> bool {
+    let latched = matches!(mode, "auto" | "performance" | "custom")
+        && !thermal_protection_active
+        && temp < 80.0
+        && commanded_duty <= 191
+        && max_rpm >= 3000
+        && actual_rpm >= (max_rpm * 90) / 100
+        && actual_rpm >= target_rpm.saturating_add(1500);
+    if latched {
+        *override_ticks = override_ticks.saturating_add(1);
+        *override_ticks >= EC_OVERRIDE_RECOVERY_TICKS
+    } else {
+        *override_ticks = 0;
+        false
+    }
 }
 
 /// Evaluate and update advisory >=90°C thermal warning debounce and episode hysteresis (#338).

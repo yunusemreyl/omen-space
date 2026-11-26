@@ -419,7 +419,7 @@ fn build_general_page(
                 glib::timeout_future_seconds(secs as u32).await;
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 crate::daemon_client::get_runtime().spawn(async move {
-                    let alive = crate::daemon_client::ping_daemon_sync();
+                    let alive = crate::daemon_client::ping_daemon_async().await;
                     let _ = tx.send(alive);
                 });
                 if let Ok(alive) = rx.await {

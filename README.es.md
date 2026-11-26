@@ -8,7 +8,7 @@
 
   <p>
     <a href="https://github.com/yunusemreyl/omen-space/releases/latest">
-      <img src="https://img.shields.io/badge/Versi%C3%B3n-v2.5.1-e11d48?style=flat-square" alt="Versión v2.5.1" />
+      <img src="https://img.shields.io/badge/Versi%C3%B3n-v2.5.2-e11d48?style=flat-square" alt="Versión v2.5.2" />
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/Licencia-GPL--3.0-10b981?style=flat-square" alt="Licencia" />
@@ -87,11 +87,11 @@ curl -sSL https://raw.githubusercontent.com/yunusemreyl/omen-space/main/install.
 
 ---
 
-## Novedades en v2.5.1
+## Novedades en v2.5.2
 
-- **Soporte verificado para placas `8EDF` y `8D42` (`#394`, `#358`):** Compatibilidad completa en `verified_boards` para **HyperX OMEN 15-ga0xxx (`8EDF`)** (corrigiendo el error `-22` de perfil térmico y evitando apagar la retroiluminación USB mediante `no_wmi_rgb_boards` / `disable_wmi_rgb`) y **OMEN MAX 16-ah0xxx (`8D42`)** (calibración de 120 LEDs `LampArray`).
-- **Corrección de ventiladores al máximo y seguridad EC (`#395`, `#364`):** Reinicio por kernel `hp_wmi_fan_speed_max_reset()` al salir de `PWM_MODE_MAX`, curva `Auto` equilibrada refinada (`88°C -> 88%`, `93°C -> 100%`), salida limpia tras la limpieza de polvo, restricción estricta de escrituras `ec_sys` y deduplicación del aviso `No HP hwmon device found`.
-- **RGB Primax `0xFF13` y 4 zonas, fallback MUX y refactorización (`#385`, `#393`, `#369`, `#361`):** Transmisión por software para `Marquee`, `Reactive`, `Ripple`, `Wave` y `Blinking` en Primax `0461:4F03`, corrección del tinte residual en zona 4, límites corregidos de 4 zonas en `8A17`, fallback automático a `graphics_mode` en el MUX de `8DCF`, mejoras de diagnóstico OpenRC y modularización de `fan/`, `rgb/`, automatización y cliente D-Bus de la GUI.
+- **Corrección de cierre inesperado en Ajustes (`#395`):** Se eliminó el cierre de `omen-gui` cada ~20–30 s tras abrir Ajustes (`settings.rs` ahora usa `ping_daemon_async().await` y `daemon_client::block_with_timeout()` evita entrar al runtime Tokio activo desde hilos con contexto activo).
+- **Corrección de bloqueo máximo EC en `8C77` y lectura de sensor CPU (`#395`):** El monitor de ventiladores ahora prioriza los sensores de paquete CPU `temp1_input` frente a picos de un solo núcleo o nodos ACPI/PCH, añade recuperación automática ante bloqueos máximos del EC (`should_recover_ec_max_latch` + refresco de `platform_profile` y reinicio de `pwm1_enable`), restaura el modo anterior al desactivar Protección Térmica, asigna `omen_v1_unknown_ec_thermal_params` a `8C76`/`8C77`/`8C78` y refresca WMI `0x1A` durante el keep-alive de `PWM_MODE_MANUAL` en `driver/hp-wmi.c`.
+- **Incluye todas las mejoras de `v2.5.1`:** Soporte verificado para `8EDF` y `8D42`, animaciones Primax `0461:4F03`, límites de 4 zonas en `8A17`, fallback MUX en `8DCF` y refactorización modular.
 
 ---
 

@@ -8,7 +8,7 @@
 
   <p>
     <a href="https://github.com/yunusemreyl/omen-space/releases/latest">
-      <img src="https://img.shields.io/badge/Release-v2.5.1-e11d48?style=flat-square" alt="Release v2.5.1" />
+      <img src="https://img.shields.io/badge/Release-v2.5.2-e11d48?style=flat-square" alt="Release v2.5.2" />
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/License-GPL--3.0-10b981?style=flat-square" alt="License" />
@@ -131,11 +131,11 @@ sudo ./setup.sh uninstall   # Remove daemon, UI, and DKMS modules cleanly
 
 ---
 
-## What's New in v2.5.1
+## What's New in v2.5.2
 
-- **Board `8EDF` & `8D42` Hardware Verification (`#394`, `#358`):** Added full support and `verified_boards` promotion for **HyperX OMEN Gaming Laptop 15-ga0xxx (`8EDF`)** (fixing `-22` thermal profile initialization and preserving USB keyboard backlighting with `no_wmi_rgb_boards` / `disable_wmi_rgb`) and **OMEN MAX 16-ah0xxx (`8D42`)** (120-lamp `LampArray` calibration).
-- **Fan Latch, Sub-90°C Ramp & EC Safety Fixes (`#395`, `#364`):** Added kernel `hp_wmi_fan_speed_max_reset()` when transitioning out of `PWM_MODE_MAX`, refined the Balanced `Auto` fan step curve (`88°C -> 88%`, `93°C -> 100%`), fixed Fan Dust Cleaning max-latch recovery, restricted raw `ec_sys` writes to legacy EC-fallback boards, and deduplicated `No HP hwmon device found` logs.
-- **Primax `0xFF13`, 4-Zone RGB, MUX Fallback & Refactoring (`#385`, `#393`, `#369`, `#361`):** Fixed `Marquee`, `Reactive`, `Ripple`, `Wave`, and `Blinking` software animation streaming on Primax `0461:4F03`, eliminated stale Zone 4 `#00FFAA` tinting, corrected `8A17` 4-zone key boundaries, added `graphics_mode` readback fallback on `8DCF` MUX switches, improved OpenRC diagnostics, and modularized the `fan/`, `rgb/`, automation, and GUI D-Bus client layers.
+- **Settings Heartbeat Crash Fix (`#395`):** Eliminated the ~20–30 s `omen-gui` abort triggered after opening Settings (`settings.rs` now uses async `ping_daemon_async().await`, and `daemon_client::block_with_timeout()` safely offloads whenever an active Tokio context is present).
+- **`8C77` EC Max-Fan Latch & CPU Package Sensor Fix (`#395`):** Switched fan temperature monitoring to prefer real CPU package `temp1_input` sensors over single-core/ACPI spikes, added automatic EC max-fan latch recovery (`should_recover_ec_max_latch` + `platform_profile` refresh & `pwm1_enable` reset), restored prior fan modes immediately when disabling Thermal Protection, moved `8C76`/`8C77`/`8C78` to `omen_v1_unknown_ec_thermal_params`, and refreshed WMI `0x1A` during `PWM_MODE_MANUAL` keep-alives in `driver/hp-wmi.c`.
+- **Includes all `v2.5.1` fixes:** Verified `8EDF` (`hp_omen_extra` backlight preservation + `-22` fix), `8D42`, Primax `0461:4F03` `Marquee`/`Reactive`/`Ripple` + Zone 4 fix, `8A17` 4-zone boundaries, `8DCF` MUX readback fallback, and modular daemon/GUI refactoring.
 
 ---
 
