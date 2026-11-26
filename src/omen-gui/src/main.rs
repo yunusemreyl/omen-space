@@ -1,27 +1,27 @@
-use libadwaita as adw;
 use gtk::prelude::*;
+use libadwaita as adw;
 use libadwaita::prelude::AdwApplicationWindowExt;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-mod i18n;
-mod monitoring;
-mod performance_control;
 mod appprofiles;
-mod fan_presets;
+mod asset_resolver;
+mod daemon_client;
+mod daemon_status_ui;
+mod debug_center;
+mod desktop_rgb_gui;
 mod fan_curve_editor;
-mod undervolt;
-mod mux;
+mod fan_presets;
+mod i18n;
 mod keyboardrgb;
+mod monitoring;
+mod mux;
+mod performance_control;
 mod settings;
 mod ui_scale;
-mod desktop_rgb_gui;
+mod undervolt;
 mod updater;
-mod daemon_client;
-mod asset_resolver;
-mod debug_center;
-mod daemon_status_ui;
 const APP_ID: &str = "org.hp.OmenSpace";
 
 fn ensure_tray_running() {
@@ -93,12 +93,12 @@ fn main() {
         ensure_tray_running();
         adw::init().expect("Failed to initialize libadwaita");
         i18n::init();
-        
+
         let display = gtk::gdk::Display::default().unwrap();
         let icon_theme = gtk::IconTheme::for_display(&display);
         icon_theme.add_search_path("assets");
         icon_theme.add_search_path("/usr/share/omen-space/assets");
-        
+
         let provider = gtk::CssProvider::new();
         provider.load_from_string(include_str!("style.css"));
         let custom_provider = gtk::CssProvider::new();
@@ -162,7 +162,10 @@ fn build_ui(app: &adw::Application) {
     apply_appearance_mode();
     ensure_tray_running();
 
-    if let Some(window) = app.active_window().or_else(|| app.windows().first().cloned()) {
+    if let Some(window) = app
+        .active_window()
+        .or_else(|| app.windows().first().cloned())
+    {
         window.set_visible(false);
         window.set_visible(true);
         window.present();
@@ -200,8 +203,7 @@ fn build_ui(app: &adw::Application) {
     // We read board_name directly (same source as the daemon) so the check is
     // instant and requires no D-Bus round-trip at startup.
     {
-        let board_id = std::fs::read_to_string("/sys/class/dmi/id/board_name")
-            .unwrap_or_default();
+        let board_id = std::fs::read_to_string("/sys/class/dmi/id/board_name").unwrap_or_default();
         let board_id = board_id.trim().to_uppercase();
 
         // Persist the "user dismissed" state in a flag file.
@@ -327,8 +329,20 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
         .spacing(4)
         .margin_bottom(6)
         .build();
-    rgb_hdr.append(&gtk::Label::builder().label(i18n::t("title_lighting")).css_classes(["page-title"]).halign(gtk::Align::Start).build());
-    rgb_hdr.append(&gtk::Label::builder().label(i18n::t("lighting_desc")).css_classes(["os-section-desc"]).halign(gtk::Align::Start).build());
+    rgb_hdr.append(
+        &gtk::Label::builder()
+            .label(i18n::t("title_lighting"))
+            .css_classes(["page-title"])
+            .halign(gtk::Align::Start)
+            .build(),
+    );
+    rgb_hdr.append(
+        &gtk::Label::builder()
+            .label(i18n::t("lighting_desc"))
+            .css_classes(["os-section-desc"])
+            .halign(gtk::Align::Start)
+            .build(),
+    );
 
     let (page_rgb_content, lb_group_opt, lb_preview_group_opt) = keyboardrgb::build_page();
     let page_rgb = gtk::Box::builder()
@@ -439,16 +453,28 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
     content_box.append(&stack);
 
     let tabs = [
-        ("omen-performance-symbolic", i18n::t("nav_performance"), "performance"),
+        (
+            "omen-performance-symbolic",
+            i18n::t("nav_performance"),
+            "performance",
+        ),
         ("omen-power-symbolic", i18n::t("nav_undervolt"), "undervolt"),
         ("omen-gpu-symbolic", i18n::t("nav_mux"), "mux"),
-        ("omen-monitor-symbolic", i18n::t("nav_monitoring"), "monitoring"),
+        (
+            "omen-monitor-symbolic",
+            i18n::t("nav_monitoring"),
+            "monitoring",
+        ),
         ("omen-lighting-symbolic", i18n::t("nav_lighting"), "rgb"),
-        ("omen-profiles-symbolic", i18n::t("nav_app_profiles"), "appprof"),
+        (
+            "omen-profiles-symbolic",
+            i18n::t("nav_app_profiles"),
+            "appprof",
+        ),
     ];
 
     let mut sidebar_labels = Vec::new();
-    
+
     for (icon_name, tab_name, page_name) in tabs.iter() {
         let row = gtk::ListBoxRow::builder().build();
         let box_ = gtk::Box::builder()
@@ -459,8 +485,16 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
             .margin_top(11)
             .margin_bottom(11)
             .build();
-        box_.append(&gtk::Image::builder().icon_name(*icon_name).pixel_size(18).build());
-        let label = gtk::Label::builder().label(*tab_name).margin_start(12).build();
+        box_.append(
+            &gtk::Image::builder()
+                .icon_name(*icon_name)
+                .pixel_size(18)
+                .build(),
+        );
+        let label = gtk::Label::builder()
+            .label(*tab_name)
+            .margin_start(12)
+            .build();
         let revealer = gtk::Revealer::builder()
             .transition_type(gtk::RevealerTransitionType::SlideRight)
             .reveal_child(true)
@@ -488,8 +522,16 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
         .margin_top(11)
         .margin_bottom(11)
         .build();
-    s_box.append(&gtk::Image::builder().icon_name("omen-settings-symbolic").pixel_size(18).build());
-    let settings_label = gtk::Label::builder().label(i18n::t("nav_settings")).margin_start(12).build();
+    s_box.append(
+        &gtk::Image::builder()
+            .icon_name("omen-settings-symbolic")
+            .pixel_size(18)
+            .build(),
+    );
+    let settings_label = gtk::Label::builder()
+        .label(i18n::t("nav_settings"))
+        .margin_start(12)
+        .build();
     let s_revealer = gtk::Revealer::builder()
         .transition_type(gtk::RevealerTransitionType::SlideRight)
         .reveal_child(true)
@@ -550,10 +592,22 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
         .spacing(8)
         .build();
     window.set_icon_name(Some("omenspace"));
-    header_logo_box.append(&gtk::Image::builder().icon_name("omenspace").pixel_size(24).build());
-    header_logo_box.append(&gtk::Label::builder().label("OMEN SPACE").css_classes(["title"]).build());
+    header_logo_box.append(
+        &gtk::Image::builder()
+            .icon_name("omenspace")
+            .pixel_size(24)
+            .build(),
+    );
+    header_logo_box.append(
+        &gtk::Label::builder()
+            .label("OMEN SPACE")
+            .css_classes(["title"])
+            .build(),
+    );
 
-    let global_header = adw::HeaderBar::builder().title_widget(&header_logo_box).build();
+    let global_header = adw::HeaderBar::builder()
+        .title_widget(&header_logo_box)
+        .build();
     global_header.pack_start(&toggle_sidebar_btn);
 
     let sidebar_box = gtk::Box::builder()
@@ -561,21 +615,21 @@ fn render_ui(window: &adw::ApplicationWindow, initial_page: &str) {
         .css_classes(["os-sidebar-box"])
         .build();
     sidebar_box.append(&sidebar_list);
-    
+
     let spacer = gtk::Box::builder().vexpand(true).build();
     sidebar_box.append(&spacer);
     sidebar_box.append(&bottom_list);
 
-    let main_hbox = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).build();
+    let main_hbox = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .build();
     main_hbox.append(&sidebar_box);
     main_hbox.append(&gtk::Separator::new(gtk::Orientation::Vertical));
-    
+
     content_box.set_hexpand(true);
     main_hbox.append(&content_box);
 
-    let toolbar_view = adw::ToolbarView::builder()
-        .content(&main_hbox)
-        .build();
+    let toolbar_view = adw::ToolbarView::builder().content(&main_hbox).build();
     toolbar_view.add_top_bar(&global_header);
 
     toggle_sidebar_btn.connect_toggled({

@@ -1,6 +1,6 @@
-use serde::{Serialize, Deserialize};
-use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
 use std::fs;
+use std::path::PathBuf;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FanPreset {
@@ -23,7 +23,13 @@ pub fn load_presets() -> Vec<FanPreset> {
     } else {
         let default_quiet = FanPreset {
             name: "Quiet".to_string(),
-            points: vec![(40.0, 0.0), (55.0, 15.0), (70.0, 35.0), (85.0, 60.0), (100.0, 100.0)],
+            points: vec![
+                (40.0, 0.0),
+                (55.0, 15.0),
+                (70.0, 35.0),
+                (85.0, 60.0),
+                (100.0, 100.0),
+            ],
         };
         let defaults = vec![default_quiet];
         // Don't auto-save here to avoid permission issues if dir doesn't exist,

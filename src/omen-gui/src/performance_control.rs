@@ -336,7 +336,8 @@ pub fn build_page() -> gtk::Box {
                 return glib::ControlFlow::Continue;
             }
             #[allow(deprecated)]
-            let (tx, rx) = glib::MainContext::channel::<(String, String)>(glib::Priority::default());
+            let (tx, rx) =
+                glib::MainContext::channel::<(String, String)>(glib::Priority::default());
             let eco_c2 = eco_c.clone();
             let bal_c2 = bal_c.clone();
             let perf_c2 = perf_c.clone();
@@ -530,7 +531,11 @@ pub fn build_page() -> gtk::Box {
     let show_d = show_gpu.clone();
     da.set_draw_func(move |widget, cr, w, h| {
         let is_gpu = *show_d.borrow();
-        let pts = if is_gpu { gpu_d.borrow() } else { cpu_d.borrow() };
+        let pts = if is_gpu {
+            gpu_d.borrow()
+        } else {
+            cpu_d.borrow()
+        };
         let (r, g, b) = if is_gpu {
             (0.17, 0.60, 0.95)
         } else {
@@ -582,7 +587,10 @@ pub fn build_page() -> gtk::Box {
             let x = PAD_L + aw * i as f64 / 4.0;
             let text = format!("{}°C", temp);
             let tw = cr.text_extents(&text).map(|e| e.width()).unwrap_or(20.0);
-            cr.move_to((x - tw / 2.0).clamp(PAD_L - 6.0, w as f64 - tw - 2.0), PAD_T + ah + 17.0);
+            cr.move_to(
+                (x - tw / 2.0).clamp(PAD_L - 6.0, w as f64 - tw - 2.0),
+                PAD_T + ah + 17.0,
+            );
             let _ = cr.show_text(&text);
         }
         for (i, pct) in ["100%", "75%", "50%", "25%", "0%"].iter().enumerate() {
@@ -675,7 +683,11 @@ pub fn build_page() -> gtk::Box {
     let da_p = da.clone();
     gesture.connect_drag_begin(move |_, x, y| {
         let is_gpu = *show_p.borrow();
-        let pts = if is_gpu { gpu_p.borrow() } else { cpu_p.borrow() };
+        let pts = if is_gpu {
+            gpu_p.borrow()
+        } else {
+            cpu_p.borrow()
+        };
         let aw = (da_p.width() as f64 - PAD_L - PAD_R).max(1.0);
         let ah = (da_p.height() as f64 - PAD_T - PAD_B).max(1.0);
         for (i, p) in pts.iter().enumerate() {

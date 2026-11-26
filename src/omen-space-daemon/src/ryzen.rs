@@ -141,7 +141,11 @@ fn smn_write(addr: u32, data: u32) -> bool {
 }
 
 fn smn_read(addr: u32) -> Option<u32> {
-    if let Ok(mut f) = OpenOptions::new().read(true).write(true).open(PCI_CONFIG_PATH) {
+    if let Ok(mut f) = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(PCI_CONFIG_PATH)
+    {
         let _ = f.seek(SeekFrom::Start(SMN_INDEX));
         if f.write_all(&addr.to_le_bytes()).is_ok() {
             let _ = f.seek(SeekFrom::Start(SMN_DATA));
@@ -169,32 +173,69 @@ impl SmuAddresses {
     fn configure(family: RyzenFamily) -> Self {
         match family {
             RyzenFamily::Zen1Plus => Self {
-                mp1_msg: 0x3B10528, mp1_rsp: 0x3B10564, mp1_arg: 0x3B10598,
-                psmu_msg: 0x3B1051C, psmu_rsp: 0x3B10568, psmu_arg: 0x3B10590,
+                mp1_msg: 0x3B10528,
+                mp1_rsp: 0x3B10564,
+                mp1_arg: 0x3B10598,
+                psmu_msg: 0x3B1051C,
+                psmu_rsp: 0x3B10568,
+                psmu_arg: 0x3B10590,
             },
-            RyzenFamily::Raven | RyzenFamily::Picasso | RyzenFamily::Dali | RyzenFamily::RenoirLucienne | RyzenFamily::CezanneBarcelo => Self {
-                mp1_msg: 0x3B10528, mp1_rsp: 0x3B10564, mp1_arg: 0x3B10998,
-                psmu_msg: 0x3B10A20, psmu_rsp: 0x3B10A80, psmu_arg: 0x3B10A88,
+            RyzenFamily::Raven
+            | RyzenFamily::Picasso
+            | RyzenFamily::Dali
+            | RyzenFamily::RenoirLucienne
+            | RyzenFamily::CezanneBarcelo => Self {
+                mp1_msg: 0x3B10528,
+                mp1_rsp: 0x3B10564,
+                mp1_arg: 0x3B10998,
+                psmu_msg: 0x3B10A20,
+                psmu_rsp: 0x3B10A80,
+                psmu_arg: 0x3B10A88,
             },
-            RyzenFamily::VanGogh | RyzenFamily::Rembrandt | RyzenFamily::Phoenix | RyzenFamily::Mendocino | RyzenFamily::HawkPoint | RyzenFamily::StrixHalo => Self {
-                mp1_msg: 0x3B10528, mp1_rsp: 0x3B10578, mp1_arg: 0x3B10998,
-                psmu_msg: 0x3B10A20, psmu_rsp: 0x3B10A80, psmu_arg: 0x3B10A88,
+            RyzenFamily::VanGogh
+            | RyzenFamily::Rembrandt
+            | RyzenFamily::Phoenix
+            | RyzenFamily::Mendocino
+            | RyzenFamily::HawkPoint
+            | RyzenFamily::StrixHalo => Self {
+                mp1_msg: 0x3B10528,
+                mp1_rsp: 0x3B10578,
+                mp1_arg: 0x3B10998,
+                psmu_msg: 0x3B10A20,
+                psmu_rsp: 0x3B10A80,
+                psmu_arg: 0x3B10A88,
             },
             RyzenFamily::StrixPoint => Self {
-                mp1_msg: 0x3B10928, mp1_rsp: 0x3B10978, mp1_arg: 0x3B10998,
-                psmu_msg: 0x3B10A20, psmu_rsp: 0x3B10A80, psmu_arg: 0x3B10A88,
+                mp1_msg: 0x3B10928,
+                mp1_rsp: 0x3B10978,
+                mp1_arg: 0x3B10998,
+                psmu_msg: 0x3B10A20,
+                psmu_rsp: 0x3B10A80,
+                psmu_arg: 0x3B10A88,
             },
             RyzenFamily::Matisse | RyzenFamily::Vermeer => Self {
-                mp1_msg: 0x3B10530, mp1_rsp: 0x3B1057C, mp1_arg: 0x3B109C4,
-                psmu_msg: 0x3B10524, psmu_rsp: 0x3B10570, psmu_arg: 0x3B10A40,
+                mp1_msg: 0x3B10530,
+                mp1_rsp: 0x3B1057C,
+                mp1_arg: 0x3B109C4,
+                psmu_msg: 0x3B10524,
+                psmu_rsp: 0x3B10570,
+                psmu_arg: 0x3B10A40,
             },
             RyzenFamily::RaphaelDragonRange | RyzenFamily::FireRange => Self {
-                mp1_msg: 0x3B10530, mp1_rsp: 0x3B1057C, mp1_arg: 0x3B109C4,
-                psmu_msg: 0x03B10524, psmu_rsp: 0x03B10570, psmu_arg: 0x03B10A40,
+                mp1_msg: 0x3B10530,
+                mp1_rsp: 0x3B1057C,
+                mp1_arg: 0x3B109C4,
+                psmu_msg: 0x03B10524,
+                psmu_rsp: 0x03B10570,
+                psmu_arg: 0x03B10A40,
             },
             _ => Self {
-                mp1_msg: 0, mp1_rsp: 0, mp1_arg: 0,
-                psmu_msg: 0, psmu_rsp: 0, psmu_arg: 0,
+                mp1_msg: 0,
+                mp1_rsp: 0,
+                mp1_arg: 0,
+                psmu_msg: 0,
+                psmu_rsp: 0,
+                psmu_arg: 0,
             },
         }
     }
@@ -213,7 +254,9 @@ struct RyzenSmu {
 
 impl RyzenSmu {
     fn new(family: RyzenFamily) -> Self {
-        Self { addrs: SmuAddresses::configure(family) }
+        Self {
+            addrs: SmuAddresses::configure(family),
+        }
     }
 
     fn wait_for_response(&self, addr_rsp: u32) -> Option<u32> {
@@ -230,7 +273,14 @@ impl RyzenSmu {
         None
     }
 
-    fn send_msg(&self, addr_msg: u32, addr_rsp: u32, addr_arg: u32, msg: u32, args: &[u32]) -> SmuStatus {
+    fn send_msg(
+        &self,
+        addr_msg: u32,
+        addr_rsp: u32,
+        addr_arg: u32,
+        msg: u32,
+        args: &[u32],
+    ) -> SmuStatus {
         if addr_msg == 0 || addr_rsp == 0 || addr_arg == 0 {
             return SmuStatus::Failed;
         }
@@ -265,11 +315,23 @@ impl RyzenSmu {
     }
 
     fn send_mp1(&self, msg: u32, args: &[u32]) -> SmuStatus {
-        self.send_msg(self.addrs.mp1_msg, self.addrs.mp1_rsp, self.addrs.mp1_arg, msg, args)
+        self.send_msg(
+            self.addrs.mp1_msg,
+            self.addrs.mp1_rsp,
+            self.addrs.mp1_arg,
+            msg,
+            args,
+        )
     }
 
     fn send_psmu(&self, msg: u32, args: &[u32]) -> SmuStatus {
-        self.send_msg(self.addrs.psmu_msg, self.addrs.psmu_rsp, self.addrs.psmu_arg, msg, args)
+        self.send_msg(
+            self.addrs.psmu_msg,
+            self.addrs.psmu_rsp,
+            self.addrs.psmu_arg,
+            msg,
+            args,
+        )
     }
 }
 
@@ -279,7 +341,12 @@ fn clamp_limit(val_mw: u32, family: RyzenFamily) -> u32 {
     let max_mw = match family {
         RyzenFamily::VanGogh | RyzenFamily::Mendocino => 30_000,
         RyzenFamily::StrixHalo => 150_000,
-        RyzenFamily::RenoirLucienne | RyzenFamily::CezanneBarcelo | RyzenFamily::Rembrandt | RyzenFamily::Phoenix | RyzenFamily::HawkPoint | RyzenFamily::StrixPoint => 100_000,
+        RyzenFamily::RenoirLucienne
+        | RyzenFamily::CezanneBarcelo
+        | RyzenFamily::Rembrandt
+        | RyzenFamily::Phoenix
+        | RyzenFamily::HawkPoint
+        | RyzenFamily::StrixPoint => 100_000,
         _ => 54_000,
     };
     val_mw.clamp(15_000, max_mw)
@@ -292,7 +359,11 @@ fn send_with_psmu_fallback(smu: &RyzenSmu, mp1_msg: u32, psmu_msg: u32, val: u32
         return res;
     }
     let fallback = smu.send_psmu(psmu_msg, &args);
-    if fallback == SmuStatus::Ok { fallback } else { res }
+    if fallback == SmuStatus::Ok {
+        fallback
+    } else {
+        res
+    }
 }
 
 // Apply power limit (STAPM/Fast/Slow) based on family logic
@@ -302,7 +373,14 @@ fn apply_stapm(smu: &RyzenSmu, family: RyzenFamily, val_mw: u32) {
         RyzenFamily::Raven | RyzenFamily::Picasso | RyzenFamily::Dali => {
             smu.send_mp1(0x1A, &[clamped]);
         }
-        RyzenFamily::RenoirLucienne | RyzenFamily::VanGogh | RyzenFamily::CezanneBarcelo | RyzenFamily::Rembrandt | RyzenFamily::Phoenix | RyzenFamily::Mendocino | RyzenFamily::HawkPoint | RyzenFamily::StrixPoint => {
+        RyzenFamily::RenoirLucienne
+        | RyzenFamily::VanGogh
+        | RyzenFamily::CezanneBarcelo
+        | RyzenFamily::Rembrandt
+        | RyzenFamily::Phoenix
+        | RyzenFamily::Mendocino
+        | RyzenFamily::HawkPoint
+        | RyzenFamily::StrixPoint => {
             send_with_psmu_fallback(smu, 0x14, 0x31, clamped);
         }
         _ => {}
@@ -346,7 +424,11 @@ fn apply_curve_optimizer(smu: &RyzenSmu, family: RyzenFamily, val: i32) {
                 smu.send_psmu(0xB, &args);
             }
         }
-        RyzenFamily::VanGogh | RyzenFamily::Rembrandt | RyzenFamily::Phoenix | RyzenFamily::Mendocino | RyzenFamily::HawkPoint => {
+        RyzenFamily::VanGogh
+        | RyzenFamily::Rembrandt
+        | RyzenFamily::Phoenix
+        | RyzenFamily::Mendocino
+        | RyzenFamily::HawkPoint => {
             if smu.send_psmu(0x5D, &args) != SmuStatus::Ok {
                 smu.send_mp1(0x5D, &args);
             }
@@ -381,10 +463,13 @@ impl RyzenService {
     pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let family = detect_ryzen_family();
         let config = RyzenConfig::load();
-        
+
         let available = family != RyzenFamily::Unknown;
         if available {
-            info!("AMD Ryzen CPU detected (Family: {:?}). SMN Mailbox ready.", family);
+            info!(
+                "AMD Ryzen CPU detected (Family: {:?}). SMN Mailbox ready.",
+                family
+            );
         } else {
             info!("No supported AMD Ryzen CPU detected.");
         }
@@ -406,11 +491,21 @@ impl RyzenService {
 
     async fn apply_all_saved(&self) {
         let cfg = self.config.lock().await.clone();
-        if cfg.stapm_limit > 0 { apply_stapm(&self.smu, self.family, cfg.stapm_limit); }
-        if cfg.fast_limit > 0  { apply_fast(&self.smu, self.family, cfg.fast_limit); }
-        if cfg.slow_limit > 0  { apply_slow(&self.smu, self.family, cfg.slow_limit); }
-        if cfg.tctl_temp > 0   { apply_tctl(&self.smu, self.family, cfg.tctl_temp); }
-        if cfg.all_core_co != 0 { apply_curve_optimizer(&self.smu, self.family, cfg.all_core_co); }
+        if cfg.stapm_limit > 0 {
+            apply_stapm(&self.smu, self.family, cfg.stapm_limit);
+        }
+        if cfg.fast_limit > 0 {
+            apply_fast(&self.smu, self.family, cfg.fast_limit);
+        }
+        if cfg.slow_limit > 0 {
+            apply_slow(&self.smu, self.family, cfg.slow_limit);
+        }
+        if cfg.tctl_temp > 0 {
+            apply_tctl(&self.smu, self.family, cfg.tctl_temp);
+        }
+        if cfg.all_core_co != 0 {
+            apply_curve_optimizer(&self.smu, self.family, cfg.all_core_co);
+        }
     }
 }
 
@@ -424,14 +519,29 @@ impl RyzenService {
 
         {
             let mut cfg = self.config.lock().await;
-            if stapm > 0 { cfg.stapm_limit = stapm; apply_stapm(&self.smu, self.family, stapm); }
-            if fast > 0  { cfg.fast_limit = fast;   apply_fast(&self.smu, self.family, fast); }
-            if slow > 0  { cfg.slow_limit = slow;   apply_slow(&self.smu, self.family, slow); }
-            if tctl > 0  { cfg.tctl_temp = tctl;    apply_tctl(&self.smu, self.family, tctl); }
+            if stapm > 0 {
+                cfg.stapm_limit = stapm;
+                apply_stapm(&self.smu, self.family, stapm);
+            }
+            if fast > 0 {
+                cfg.fast_limit = fast;
+                apply_fast(&self.smu, self.family, fast);
+            }
+            if slow > 0 {
+                cfg.slow_limit = slow;
+                apply_slow(&self.smu, self.family, slow);
+            }
+            if tctl > 0 {
+                cfg.tctl_temp = tctl;
+                apply_tctl(&self.smu, self.family, tctl);
+            }
             cfg.save();
         }
-        
-        info!("RyzenService: set_limits applied (stapm={}, fast={}, slow={}, tctl={})", stapm, fast, slow, tctl);
+
+        info!(
+            "RyzenService: set_limits applied (stapm={}, fast={}, slow={}, tctl={})",
+            stapm, fast, slow, tctl
+        );
         "OK".to_string()
     }
 
@@ -456,7 +566,7 @@ impl RyzenService {
     async fn get_state(&self) -> String {
         let cfg = self.config.lock().await.clone();
         let available = self.family != RyzenFamily::Unknown;
-        
+
         // Quick SMN read check to see if PCI access works
         let root_access = smn_read(0).is_some();
 

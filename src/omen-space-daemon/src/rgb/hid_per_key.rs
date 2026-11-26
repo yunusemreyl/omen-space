@@ -59,8 +59,9 @@ impl HidPerKeyBackend {
     }
 
     pub fn is_primax_cmd_allowed(cmd: u8) -> bool {
-        // Strict whitelist matching McuSDK2 safety boundary: never send 0x0A (flash) or 0x10 (restore/fw update).
-        matches!(cmd, 0x80 | 0x83 | 0x09 | 0x0C | 0x05 | 0x06 | 0x07 | 0x03)
+        // Strict whitelist matching McuSDK2 safety boundary: never send 0x0A (flash), 0x10 (restore/fw update),
+        // 0x0C, or 0x03.
+        matches!(cmd, 0x80 | 0x83 | 0x09 | 0x05 | 0x06 | 0x07)
     }
 
     pub fn build_primax_report(
@@ -288,20 +289,8 @@ impl HidPerKeyBackend {
         let on_pkt = Self::build_primax_report(0x09, 0x00, 0x01, &[0x01]);
         let _ = self.write_primax_report(&on_pkt);
 
-        let mut r_leds = [0u8; Self::PRIMAX_LED_COUNT];
-        let mut g_leds = [0u8; Self::PRIMAX_LED_COUNT];
-        let mut b_leds = [0u8; Self::PRIMAX_LED_COUNT];
-
-        let total_keys = key_colors.len().max(1);
-        for (i, &(r, g, b)) in key_colors.iter().enumerate().take(Self::TOTAL_KEY_COUNT) {
-            let base_led = (i * Self::PRIMAX_LED_COUNT) / total_keys;
-            let end_led = ((i + 1) * Self::PRIMAX_LED_COUNT) / total_keys;
-            for led in base_led..end_led.min(Self::PRIMAX_LED_COUNT) {
-                r_leds[led] = r;
-                g_leds[led] = g;
-                b_leds[led] = b;
-            }
-        }
+        let (r_leds, g_leds, b_leds) =
+            super::primax_map::encode_primax_channels(self.device_pid, key_colors);
 
         let channels = [(0x05u8, &r_leds), (0x06u8, &g_leds), (0x07u8, &b_leds)];
         for (cmd, leds) in channels {
@@ -370,15 +359,47 @@ impl HidPerKeyBackend {
         packet
     }
 
+    fn drain_hidraw_input(file: &mut std::fs::File) {
+        use std::io::Read;
+        use std::os::fd::AsRawFd;
+        let fd = file.as_raw_fd();
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFL);
+            if flags >= 0 {
+                let _ = libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+            }
+        }
+        let mut drain = [0u8; 64];
+        while file.read(&mut drain).is_ok() {}
+    }
+
     fn write_packet(&self, packet: &[u8]) -> bool {
+        use std::io::Write;
+        use std::os::unix::fs::FileTypeExt;
         let mut any_ok = false;
         for path in &self.hidraw_paths {
-            match std::fs::OpenOptions::new().write(true).open(path) {
+            let is_char_dev = std::fs::metadata(path)
+                .map(|m| m.file_type().is_char_device())
+                .unwrap_or(false);
+            let open_res = if is_char_dev {
+                std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(path)
+            } else {
+                std::fs::OpenOptions::new().write(true).open(path)
+            };
+            match open_res {
                 Ok(mut file) => {
-                    use std::io::Write;
+                    if is_char_dev {
+                        Self::drain_hidraw_input(&mut file);
+                    }
                     if let Err(e) = file.write_all(packet) {
                         warn!("Failed to write to {}: {}", path, e);
                     } else {
+                        if is_char_dev {
+                            Self::drain_hidraw_input(&mut file);
+                        }
                         any_ok = true;
                     }
                 }
@@ -395,15 +416,9 @@ impl HidPerKeyBackend {
             return true;
         }
         if self.is_primax_mcu {
-            if brightness == 0 {
-                let off_pkt = Self::build_primax_report(0x09, 0x00, 0x01, &[0x00]);
-                return self.write_primax_report(&off_pkt);
-            }
-            let on_pkt = Self::build_primax_report(0x09, 0x00, 0x01, &[0x01]);
-            let ok = self.write_primax_report(&on_pkt);
-            let br_pkt = Self::build_primax_report(0x0C, 0x00, 0x01, &[200]);
-            let _ = self.write_primax_report(&br_pkt);
-            return ok;
+            let val = if brightness == 0 { 0x00 } else { 0x01 };
+            let pkt = Self::build_primax_report(0x09, 0x00, 0x01, &[val]);
+            return self.write_primax_report(&pkt);
         }
         let mut packet = self.build_packet(Self::SUB_ENTER_EFFECT);
         packet[3] = Self::STATIC_MODE_ID;
@@ -450,9 +465,9 @@ impl HidPerKeyBackend {
         self.send_commit()
     }
 
-    /// Map an OMEN Space mode to the closest built-in effect of the Darfon/Primax MCU
-    /// (opcode 0x03). Returns `None` for modes streamed from software (`marquee`, `reactive`,
-    /// `ripple`, `wave`, `blinking`, `per_key_custom`, etc.).
+    /// Map an OMEN Space mode to the closest built-in effect of the Darfon MCU
+    /// (opcode 0x03). Returns `None` for Primax McuSDK2 devices and for modes streamed
+    /// from software (`marquee`, `reactive`, `ripple`, `wave`, `blinking`, `per_key_custom`, etc.).
     pub fn mcu_effect_for(
         &self,
         mode: &str,
@@ -460,7 +475,7 @@ impl HidPerKeyBackend {
         direction: &str,
         colors: &[String],
     ) -> Option<[u8; Self::MCU_RECORD_LEN]> {
-        if self.device_pid != Some(0x54BF) && !self.is_primax_mcu {
+        if self.is_primax_mcu || self.device_pid != Some(0x54BF) {
             return None;
         }
         let parse =
@@ -516,21 +531,10 @@ impl HidPerKeyBackend {
     pub fn send_mcu_effect_with_brightness(
         &self,
         record: &[u8; Self::MCU_RECORD_LEN],
-        brightness: u32,
+        _brightness: u32,
     ) -> bool {
         if self.is_primax_mcu {
-            let on = Self::build_primax_report(0x09, 0x00, 0x01, &[0x01]);
-            let _ = self.write_primax_report(&on);
-            let br_val = 100 + brightness.clamp(1, 100) as u8;
-            let br = Self::build_primax_report(0x0C, 0x00, 0x01, &[br_val]);
-            let _ = self.write_primax_report(&br);
-            let packet = Self::build_primax_report(
-                Self::MCU_OP_SET_EFFECT,
-                0,
-                Self::MCU_RECORD_LEN as u8,
-                record,
-            );
-            return self.write_primax_report(&packet);
+            return false;
         }
         self.release_lamparray();
         let mut on = [0u8; 64];
@@ -555,7 +559,8 @@ impl HidPerKeyBackend {
 
         if let Some(ref la) = self.lamparray {
             if colors.len() >= Self::TOTAL_KEY_COUNT {
-                let key_colors = la.key_colors(&colors[..Self::TOTAL_KEY_COUNT], Self::TOTAL_KEY_COUNT);
+                let key_colors =
+                    la.key_colors(&colors[..Self::TOTAL_KEY_COUNT], Self::TOTAL_KEY_COUNT);
                 return la.set_frame(&key_colors);
             }
             let lamp_colors = la.zone_colors(&colors[..4]);

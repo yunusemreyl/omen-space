@@ -1,6 +1,6 @@
 [package]
 name = "omen-gui"
-version = "2.5.2"
+version = "2.5.3"
 edition = "2021"
 
 [dependencies]
@@ -12,6 +12,5 @@ zbus = "4.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 glob = "0.3.4"
-libc = "0.2"
 urlencoding = "2.1.3"
-omen-types = { version = "2.5.2", path = "../omen-types" }
+omen-types = { version = "2.5.3", path = "../omen-types" }

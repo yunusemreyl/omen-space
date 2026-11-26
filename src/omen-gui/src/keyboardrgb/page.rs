@@ -1,12 +1,16 @@
-use gtk::prelude::*;
-use libadwaita as adw;
-use adw::prelude::*;
-use std::rc::Rc;
-use std::cell::RefCell;
 use crate::keyboardrgb::helpers::*;
 use crate::keyboardrgb::keyboard::*;
 use crate::keyboardrgb::lightbar::*;
-pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Option<adw::PreferencesGroup>) {
+use adw::prelude::*;
+use gtk::prelude::*;
+use libadwaita as adw;
+use std::cell::RefCell;
+use std::rc::Rc;
+pub fn build_page() -> (
+    adw::PreferencesPage,
+    Option<adw::PreferencesGroup>,
+    Option<adw::PreferencesGroup>,
+) {
     let page = adw::PreferencesPage::builder().build();
     let specs = crate::daemon_client::get_hardware_specs_sync();
 
@@ -46,7 +50,9 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
         2 => KeyboardMode::Victus1Zone,
         1 => KeyboardMode::Omen4Zone,
         _ => {
-            if specs.product_name.to_lowercase().contains("desktop") || specs.product_name.to_lowercase().contains("tower") {
+            if specs.product_name.to_lowercase().contains("desktop")
+                || specs.product_name.to_lowercase().contains("tower")
+            {
                 KeyboardMode::DesktopRgb
             } else if is_per_key {
                 KeyboardMode::PerKey
@@ -73,7 +79,12 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
     let (std_kb_grid, apply_anim, _) = if detected_mode == KeyboardMode::DesktopRgb {
         crate::desktop_rgb_gui::build_desktop_rgb_card(zone_colors.clone())
     } else {
-        build_interactive_keyboard(detected_mode, zone_colors.clone(), per_key_colors.clone(), &state_json_opt)
+        build_interactive_keyboard(
+            detected_mode,
+            zone_colors.clone(),
+            per_key_colors.clone(),
+            &state_json_opt,
+        )
     };
     std_kb_group.add(&std_kb_grid);
     page.add(&std_kb_group);
@@ -100,78 +111,149 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
             .build();
 
         let lb_prod_lower = specs.product_name.to_lowercase();
-        let has_lightbar_hardware = detected_mode == KeyboardMode::DesktopRgb || lb_prod_lower.contains("desktop") || lb_prod_lower.contains("transcend") || lb_prod_lower.contains("max");
-        let initial = state_json_opt.as_ref().and_then(LightbarSettings::from_snapshot);
+        let has_lightbar_hardware = detected_mode == KeyboardMode::DesktopRgb
+            || lb_prod_lower.contains("desktop")
+            || lb_prod_lower.contains("transcend")
+            || lb_prod_lower.contains("max");
+        let initial = state_json_opt
+            .as_ref()
+            .and_then(LightbarSettings::from_snapshot);
         let lb_state = Rc::new(RefCell::new(initial.clone().unwrap_or_default()));
         let syncing = Rc::new(std::cell::Cell::new(false));
         let enabled = lb_state.borrow().power;
         let lb_enable_row = adw::SwitchRow::builder()
             .title(crate::i18n::t("lightbar_enable"))
             .subtitle(crate::i18n::t("lightbar_enable_sub"))
-            .active(enabled).build();
+            .active(enabled)
+            .build();
         lb_group.add(&lb_enable_row);
 
         let modes = ["static", "wave", "breathing", "cycle"];
         let lb_effect_model = gtk::StringList::new(&[
-            crate::i18n::t("effect_static"), crate::i18n::t("effect_wave"),
-            crate::i18n::t("effect_breathing"), crate::i18n::t("effect_cycle"),
+            crate::i18n::t("effect_static"),
+            crate::i18n::t("effect_wave"),
+            crate::i18n::t("effect_breathing"),
+            crate::i18n::t("effect_cycle"),
         ]);
         let lb_effect_row = adw::ComboRow::builder()
-            .title(crate::i18n::t("lightbar_effect")).model(&lb_effect_model)
-            .selected(modes.iter().position(|m| *m == lb_state.borrow().mode).unwrap_or(0) as u32)
-            .visible(enabled).build();
+            .title(crate::i18n::t("lightbar_effect"))
+            .model(&lb_effect_model)
+            .selected(
+                modes
+                    .iter()
+                    .position(|m| *m == lb_state.borrow().mode)
+                    .unwrap_or(0) as u32,
+            )
+            .visible(enabled)
+            .build();
         lb_group.add(&lb_effect_row);
-        let lb_speed_row = adw::ActionRow::builder().title(crate::i18n::t("kb_effect_speed")).visible(enabled).build();
-        let lb_speed_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal,1.0,100.0,1.0);
+        let lb_speed_row = adw::ActionRow::builder()
+            .title(crate::i18n::t("kb_effect_speed"))
+            .visible(enabled)
+            .build();
+        let lb_speed_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 1.0, 100.0, 1.0);
         lb_speed_scale.set_value(lb_state.borrow().speed as f64);
-        lb_speed_scale.set_size_request(250,-1);
-        lb_speed_row.add_suffix(&lb_speed_scale);lb_group.add(&lb_speed_row);
-        let lb_bright_row = adw::ActionRow::builder().title(crate::i18n::t("lightbar_brightness")).visible(enabled).build();
-        let lb_bright_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal,0.0,100.0,1.0);
+        lb_speed_scale.set_size_request(250, -1);
+        lb_speed_row.add_suffix(&lb_speed_scale);
+        lb_group.add(&lb_speed_row);
+        let lb_bright_row = adw::ActionRow::builder()
+            .title(crate::i18n::t("lightbar_brightness"))
+            .visible(enabled)
+            .build();
+        let lb_bright_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
         lb_bright_scale.set_value(lb_state.borrow().brightness as f64);
-        lb_bright_scale.set_size_request(250,-1);
-        lb_bright_row.add_suffix(&lb_bright_scale);lb_group.add(&lb_bright_row);
+        lb_bright_scale.set_size_request(250, -1);
+        lb_bright_row.add_suffix(&lb_bright_scale);
+        lb_group.add(&lb_bright_row);
         page.add(&lb_group);
-        let lb_preview_group = adw::PreferencesGroup::builder().title(crate::i18n::t("lightbar_segments")).visible(enabled).build();
-        lb_preview_group.add(&build_interactive_lightbar(&state_json_opt));page.add(&lb_preview_group);
+        let lb_preview_group = adw::PreferencesGroup::builder()
+            .title(crate::i18n::t("lightbar_segments"))
+            .visible(enabled)
+            .build();
+        lb_preview_group.add(&build_interactive_lightbar(&state_json_opt));
+        page.add(&lb_preview_group);
 
-        let state=lb_state.clone();let guard=syncing.clone();
+        let state = lb_state.clone();
+        let guard = syncing.clone();
         lb_effect_row.connect_selected_notify(move |row| {
-            if guard.get() {return;}
-            let mut state=state.borrow_mut();state.mode=modes.get(row.selected() as usize).unwrap_or(&"static").to_string();state.send();
+            if guard.get() {
+                return;
+            }
+            let mut state = state.borrow_mut();
+            state.mode = modes
+                .get(row.selected() as usize)
+                .unwrap_or(&"static")
+                .to_string();
+            state.send();
         });
-        let state=lb_state.clone();let guard=syncing.clone();
+        let state = lb_state.clone();
+        let guard = syncing.clone();
         lb_speed_scale.connect_value_changed(move |scale| {
-            if guard.get() {return;}
-            let mut state=state.borrow_mut();state.speed=scale.value() as i32;state.send();
+            if guard.get() {
+                return;
+            }
+            let mut state = state.borrow_mut();
+            state.speed = scale.value() as i32;
+            state.send();
         });
-        let state=lb_state.clone();let guard=syncing.clone();
+        let state = lb_state.clone();
+        let guard = syncing.clone();
         lb_bright_scale.connect_value_changed(move |scale| {
-            if guard.get() {return;}
-            let mut state=state.borrow_mut();state.brightness=scale.value() as i32;state.send();
+            if guard.get() {
+                return;
+            }
+            let mut state = state.borrow_mut();
+            state.brightness = scale.value() as i32;
+            state.send();
         });
-        let state=lb_state.clone();let guard=syncing.clone();
-        let effect=lb_effect_row.clone();let speed=lb_speed_row.clone();let brightness=lb_bright_row.clone();let preview=lb_preview_group.clone();
+        let state = lb_state.clone();
+        let guard = syncing.clone();
+        let effect = lb_effect_row.clone();
+        let speed = lb_speed_row.clone();
+        let brightness = lb_bright_row.clone();
+        let preview = lb_preview_group.clone();
         lb_enable_row.connect_active_notify(move |row| {
-            if guard.get() {return;}
-            let active=row.is_active();effect.set_visible(active);speed.set_visible(active);brightness.set_visible(active);preview.set_visible(active);
-            let mut state=state.borrow_mut();state.power=active;state.send();
+            if guard.get() {
+                return;
+            }
+            let active = row.is_active();
+            effect.set_visible(active);
+            speed.set_visible(active);
+            brightness.set_visible(active);
+            preview.set_visible(active);
+            let mut state = state.borrow_mut();
+            state.power = active;
+            state.send();
         });
         if initial.is_none() {
             // Do not let an initial timeout become an accidental write of guessed defaults.
-            lb_group.set_sensitive(false);lb_preview_group.set_sensitive(false);
-            let group=lb_group.clone();let preview=lb_preview_group.clone();
-            let enable=lb_enable_row.clone();let effect=lb_effect_row.clone();
-            let speed_row=lb_speed_row.clone();let bright_row=lb_bright_row.clone();
+            lb_group.set_sensitive(false);
+            lb_preview_group.set_sensitive(false);
+            let group = lb_group.clone();
+            let preview = lb_preview_group.clone();
+            let enable = lb_enable_row.clone();
+            let effect = lb_effect_row.clone();
+            let speed_row = lb_speed_row.clone();
+            let bright_row = lb_bright_row.clone();
             glib::spawn_future_local(async move {
-                if let Ok(raw)=crate::daemon_client::get_rgb_state_async().await {
-                    if let Ok(v)=serde_json::from_str::<serde_json::Value>(&raw) {
-                        if let Some(state)=LightbarSettings::from_snapshot(&v) {
-                            syncing.set(true);*lb_state.borrow_mut()=state.clone();
-                            enable.set_active(state.power);effect.set_selected(modes.iter().position(|m|*m==state.mode).unwrap_or(0) as u32);
-                            lb_speed_scale.set_value(state.speed as f64);lb_bright_scale.set_value(state.brightness as f64);
-                            effect.set_visible(state.power);speed_row.set_visible(state.power);bright_row.set_visible(state.power);preview.set_visible(state.power);
-                            group.set_sensitive(has_lightbar_hardware);preview.set_sensitive(has_lightbar_hardware);syncing.set(false);
+                if let Ok(raw) = crate::daemon_client::get_rgb_state_async().await {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                        if let Some(state) = LightbarSettings::from_snapshot(&v) {
+                            syncing.set(true);
+                            *lb_state.borrow_mut() = state.clone();
+                            enable.set_active(state.power);
+                            effect.set_selected(
+                                modes.iter().position(|m| *m == state.mode).unwrap_or(0) as u32,
+                            );
+                            lb_speed_scale.set_value(state.speed as f64);
+                            lb_bright_scale.set_value(state.brightness as f64);
+                            effect.set_visible(state.power);
+                            speed_row.set_visible(state.power);
+                            bright_row.set_visible(state.power);
+                            preview.set_visible(state.power);
+                            group.set_sensitive(has_lightbar_hardware);
+                            preview.set_sensitive(has_lightbar_hardware);
+                            syncing.set(false);
                         }
                     }
                 }
@@ -188,7 +270,7 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
                 }
             }
         }
-        
+
         // Force show if hardware is not supported so the user can explicitly see the "Unsupported" message.
         if !has_lightbar_hardware {
             show_lightbar = true;
@@ -209,4 +291,3 @@ pub fn build_page() -> (adw::PreferencesPage, Option<adw::PreferencesGroup>, Opt
 
     (page, lb_group_ret, lb_preview_group_ret)
 }
-

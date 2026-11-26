@@ -1,16 +1,16 @@
+use crate::i18n::{self, Language};
+use adw::prelude::*;
+use gtk::gdk;
 use gtk::prelude::*;
 use libadwaita as adw;
-use adw::prelude::*;
+use omen_types::hotkey::{HotkeyModifiers, HotkeySpec};
 use std::cell::RefCell;
 use std::rc::Rc;
-use gtk::gdk;
-use omen_types::hotkey::{HotkeyModifiers, HotkeySpec};
-use crate::i18n::{self, Language};
 
 /* ─────────────────────────────────────────────────────────────
-   settings.rs — Clean application & daemon configuration
-   (All diagnostics, triage, and hardware testing live in Debug Center)
-   ───────────────────────────────────────────────────────────── */
+settings.rs — Clean application & daemon configuration
+(All diagnostics, triage, and hardware testing live in Debug Center)
+───────────────────────────────────────────────────────────── */
 
 pub fn build_page(
     window: &adw::ApplicationWindow,
@@ -36,16 +36,20 @@ pub fn build_page(
         .spacing(4)
         .hexpand(true)
         .build();
-    hdr_txt.append(&gtk::Label::builder()
-        .label(i18n::t("title_settings"))
-        .css_classes(["page-title"])
-        .halign(gtk::Align::Start)
-        .build());
-    hdr_txt.append(&gtk::Label::builder()
-        .label(i18n::t("settings_desc"))
-        .css_classes(["os-section-desc"])
-        .halign(gtk::Align::Start)
-        .build());
+    hdr_txt.append(
+        &gtk::Label::builder()
+            .label(i18n::t("title_settings"))
+            .css_classes(["page-title"])
+            .halign(gtk::Align::Start)
+            .build(),
+    );
+    hdr_txt.append(
+        &gtk::Label::builder()
+            .label(i18n::t("settings_desc"))
+            .css_classes(["os-section-desc"])
+            .halign(gtk::Align::Start)
+            .build(),
+    );
     hdr_row.append(&hdr_txt);
 
     let pill = gtk::Box::builder()
@@ -82,9 +86,14 @@ pub fn build_page(
         .vhomogeneous(false)
         .build();
 
-    let general_page = build_general_page(window, on_lang_changed, lb_group_opt, lb_preview_group_opt);
-    let updates_container = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
-    let debug_container = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+    let general_page =
+        build_general_page(window, on_lang_changed, lb_group_opt, lb_preview_group_opt);
+    let updates_container = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .build();
+    let debug_container = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .build();
 
     sub_stack.add_named(&general_page, Some("general"));
     sub_stack.add_named(&updates_container, Some("updates"));
@@ -167,14 +176,30 @@ fn build_general_page(
         let path = format!("{}/.config/omenspace/settings.json", home);
         if let Ok(json_str) = std::fs::read_to_string(&path) {
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                if let Some(hb) = json.get("heartbeat_interval").and_then(|v| v.as_f64()) { init_hb = hb; }
-                if let Some(auto) = json.get("autostart").and_then(|v| v.as_bool()) { init_auto = auto; }
-                if let Some(sp) = json.get("startup_profile").and_then(|v| v.as_u64()) { init_startup_profile = sp as u32; }
-                if let Some(ta) = json.get("thermal_alerts").and_then(|v| v.as_bool()) { init_thermal_alerts = ta; }
-                if let Some(tp) = json.get("thermal_protection").and_then(|v| v.as_bool()) { init_thermal_prot = tp; }
-                if let Some(zo) = json.get("zone_override").and_then(|v| v.as_u64()) { init_zone_override = zo as u32; }
-                if let Some(am) = json.get("appearance_mode").and_then(|v| v.as_u64()) { init_appearance_mode = am as u32; }
-                if let Some(lb) = json.get("lightbar_enabled").and_then(|v| v.as_bool()) { init_lightbar = lb; }
+                if let Some(hb) = json.get("heartbeat_interval").and_then(|v| v.as_f64()) {
+                    init_hb = hb;
+                }
+                if let Some(auto) = json.get("autostart").and_then(|v| v.as_bool()) {
+                    init_auto = auto;
+                }
+                if let Some(sp) = json.get("startup_profile").and_then(|v| v.as_u64()) {
+                    init_startup_profile = sp as u32;
+                }
+                if let Some(ta) = json.get("thermal_alerts").and_then(|v| v.as_bool()) {
+                    init_thermal_alerts = ta;
+                }
+                if let Some(tp) = json.get("thermal_protection").and_then(|v| v.as_bool()) {
+                    init_thermal_prot = tp;
+                }
+                if let Some(zo) = json.get("zone_override").and_then(|v| v.as_u64()) {
+                    init_zone_override = zo as u32;
+                }
+                if let Some(am) = json.get("appearance_mode").and_then(|v| v.as_u64()) {
+                    init_appearance_mode = am as u32;
+                }
+                if let Some(lb) = json.get("lightbar_enabled").and_then(|v| v.as_bool()) {
+                    init_lightbar = lb;
+                }
                 init_hotkey = HotkeySpec::from_settings(&json);
             }
         }
@@ -217,10 +242,15 @@ fn build_general_page(
             let path = format!("{}/settings.json", dir);
             let mut json = serde_json::json!({});
             if let Ok(js) = std::fs::read_to_string(&path) {
-                if let Ok(j) = serde_json::from_str::<serde_json::Value>(&js) { json = j; }
+                if let Ok(j) = serde_json::from_str::<serde_json::Value>(&js) {
+                    json = j;
+                }
             }
             json["appearance_mode"] = serde_json::json!(idx);
-            let _ = std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap_or_default());
+            let _ = std::fs::write(
+                &path,
+                serde_json::to_string_pretty(&json).unwrap_or_default(),
+            );
         }
     });
     app_lang_group.add(&appearance_row);
@@ -385,8 +415,16 @@ fn build_general_page(
         .subtitle(i18n::t("daemon_status_sub"))
         .build();
     let status_badge = gtk::Label::builder()
-        .label(if daemon_alive { i18n::t("connected") } else { i18n::t("disconnected") })
-        .css_classes(if daemon_alive { ["badge-ok"] } else { ["badge-warn"] })
+        .label(if daemon_alive {
+            i18n::t("connected")
+        } else {
+            i18n::t("disconnected")
+        })
+        .css_classes(if daemon_alive {
+            ["badge-ok"]
+        } else {
+            ["badge-warn"]
+        })
         .valign(gtk::Align::Center)
         .build();
     daemon_row.add_suffix(&status_badge);
@@ -407,8 +445,16 @@ fn build_general_page(
         crate::daemon_client::subscribe_daemon_status(move |status| {
             use crate::daemon_client::DaemonStatus;
             let alive = status == DaemonStatus::Online;
-            badge_sub.set_label(if alive { i18n::t("connected") } else { i18n::t("disconnected") });
-            badge_sub.set_css_classes(if alive { &["badge-ok"] } else { &["badge-warn"] });
+            badge_sub.set_label(if alive {
+                i18n::t("connected")
+            } else {
+                i18n::t("disconnected")
+            });
+            badge_sub.set_css_classes(if alive {
+                &["badge-ok"]
+            } else {
+                &["badge-warn"]
+            });
         });
 
         let badge_hb = status_badge.clone();
@@ -423,8 +469,16 @@ fn build_general_page(
                     let _ = tx.send(alive);
                 });
                 if let Ok(alive) = rx.await {
-                    badge_hb.set_label(if alive { i18n::t("connected") } else { i18n::t("disconnected") });
-                    badge_hb.set_css_classes(if alive { &["badge-ok"] } else { &["badge-warn"] });
+                    badge_hb.set_label(if alive {
+                        i18n::t("connected")
+                    } else {
+                        i18n::t("disconnected")
+                    });
+                    badge_hb.set_css_classes(if alive {
+                        &["badge-ok"]
+                    } else {
+                        &["badge-warn"]
+                    });
                 }
             }
         });
@@ -463,7 +517,9 @@ fn build_general_page(
             let path = format!("{}/settings.json", dir);
             let mut json = serde_json::json!({});
             if let Ok(js) = std::fs::read_to_string(&path) {
-                if let Ok(j) = serde_json::from_str::<serde_json::Value>(&js) { json = j; }
+                if let Ok(j) = serde_json::from_str::<serde_json::Value>(&js) {
+                    json = j;
+                }
             }
             json["heartbeat_interval"] = serde_json::json!(hb);
             json["autostart"] = serde_json::json!(auto);
@@ -473,7 +529,10 @@ fn build_general_page(
             json["zone_override"] = serde_json::json!(zo);
             json["lightbar_enabled"] = serde_json::json!(lb);
             hk_spec_clone.borrow().write_settings(&mut json);
-            let _ = std::fs::write(path, serde_json::to_string_pretty(&json).unwrap_or_default());
+            let _ = std::fs::write(
+                path,
+                serde_json::to_string_pretty(&json).unwrap_or_default(),
+            );
         }
     };
 
@@ -491,11 +550,15 @@ fn build_general_page(
             let spec_cb = spec.clone();
             let value_cb = value_label.clone();
             let save_cb = save.clone();
-            open_hotkey_dialog(&parent, &current, Rc::new(move |new_spec| {
-                *spec_cb.borrow_mut() = new_spec;
-                value_cb.set_label(&spec_cb.borrow().display());
-                save_cb();
-            }));
+            open_hotkey_dialog(
+                &parent,
+                &current,
+                Rc::new(move |new_spec| {
+                    *spec_cb.borrow_mut() = new_spec;
+                    value_cb.set_label(&spec_cb.borrow().display());
+                    save_cb();
+                }),
+            );
         });
     }
     {
@@ -536,7 +599,10 @@ fn build_general_page(
     glib::spawn_future_local(async move {
         if let Ok(fan_json) = crate::daemon_client::get_fan_info_async().await {
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(&fan_json) {
-                if let Some(enabled) = val.get("thermal_protection_enabled").and_then(|v| v.as_bool()) {
+                if let Some(enabled) = val
+                    .get("thermal_protection_enabled")
+                    .and_then(|v| v.as_bool())
+                {
                     if tp_row_sync.is_active() != enabled {
                         syncing_tp_load.set(true);
                         tp_row_sync.set_active(enabled);
@@ -584,11 +650,13 @@ fn build_general_page(
 
     for (title, val) in about_items {
         let row = adw::ActionRow::builder().title(title).build();
-        row.add_suffix(&gtk::Label::builder()
-            .label(val)
-            .css_classes(["os-section-desc"])
-            .valign(gtk::Align::Center)
-            .build());
+        row.add_suffix(
+            &gtk::Label::builder()
+                .label(val)
+                .css_classes(["os-section-desc"])
+                .valign(gtk::Align::Center)
+                .build(),
+        );
         about_group.add(&row);
     }
     page.append(&about_group);
@@ -618,10 +686,12 @@ fn open_hotkey_dialog(
         .margin_end(24)
         .build();
 
-    content.append(&gtk::Label::builder()
-        .label(i18n::t("overlay_hotkey_recording"))
-        .css_classes(["title-3"])
-        .build());
+    content.append(
+        &gtk::Label::builder()
+            .label(i18n::t("overlay_hotkey_recording"))
+            .css_classes(["title-3"])
+            .build(),
+    );
 
     let combo = gtk::Label::builder()
         .label(current)

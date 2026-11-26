@@ -2,8 +2,8 @@ use gtk::prelude::*;
 use libadwaita as adw;
 
 mod daemon_client;
-mod overlay_window;
 mod i18n;
+mod overlay_window;
 
 const APP_ID: &str = "org.hp.omen.Overlay";
 
@@ -82,9 +82,8 @@ fn main() {
     });
 
     app.connect_activate(|app| {
-
         let overlay = overlay_window::OverlayWindow::new(app);
-        
+
         let key_controller = gtk::EventControllerKey::new();
         let app_c = app.clone();
         key_controller.connect_key_pressed(move |_, key, _keycode, _state| {
@@ -128,7 +127,11 @@ mod tests {
     #[test]
     fn legacy_daemon_flag_is_detected() {
         assert!(is_legacy_daemon_launch(["omen-overlay", "--daemon"]));
-        assert!(is_legacy_daemon_launch(["/usr/bin/omen-overlay", "--other", "--daemon"]));
+        assert!(is_legacy_daemon_launch([
+            "/usr/bin/omen-overlay",
+            "--other",
+            "--daemon"
+        ]));
     }
 
     #[test]

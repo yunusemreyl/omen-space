@@ -9,8 +9,6 @@ use tokio::sync::Mutex;
 
 #[derive(Clone, Debug)]
 pub struct KeyEventInfo {
-    #[allow(dead_code)]
-    pub key_code: u16,
     pub x: f64,
     pub y: f64,
     pub timestamp: std::time::Instant,
@@ -142,7 +140,6 @@ impl EvdevMonitor {
                                                 if let Some((x, y)) = crate::rgb::key_layout::evdev_code_to_coords(key_code) {
                                                     let mut lock = keys_c.lock().await;
                                                     lock.push(KeyEventInfo {
-                                                        key_code,
                                                         x,
                                                         y,
                                                         timestamp: std::time::Instant::now(),

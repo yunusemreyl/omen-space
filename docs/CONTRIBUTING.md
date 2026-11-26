@@ -11,6 +11,7 @@ Thank you for contributing to **OMEN Space**! From board verification reports to
 
 2. **Local Build, Test & Lint:**
    ```bash
+   cargo fmt --all -- --check
    cargo check --workspace --locked
    cargo test --workspace
    cargo clippy --workspace --all-targets -- -D warnings
@@ -28,7 +29,7 @@ Thank you for contributing to **OMEN Space**! From board verification reports to
 3. **Never Block GTK Main Thread:**
    - Dispatch D-Bus/process work via `glib::spawn_future_local` + `tokio` runtime handles instead of blocking GTK threads.
 4. **Localization:**
-   - Update **TR**, **EN**, and **ES** strings in `src/omen-gui/src/i18n.rs`, escaping literal `&` as `&amp;` for Adwaita markup rows/groups.
+   - Update **TR**, **EN**, and **ES** strings in `src/omen-gui/src/i18n/{en,tr,es}.rs`, escaping literal `&` as `&amp;` for Adwaita markup rows/groups.
 
 ## Submitting a Pull Request
 

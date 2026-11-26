@@ -1,6 +1,6 @@
-use tokio::runtime::Runtime;
-use std::sync::OnceLock;
 pub use omen_types::*;
+use std::sync::OnceLock;
+use tokio::runtime::Runtime;
 
 // ── Runtime Management ───────────────────────────────────────────────────────
 
@@ -85,7 +85,8 @@ pub async fn get_fan_mode() -> String {
 
 // ── Telemetry and Hotkey Subscribers ─────────────────────────────────────────
 
-static TELEMETRY_SENDERS: std::sync::OnceLock<std::sync::Mutex<Vec<glib::Sender<SystemStats>>>> = std::sync::OnceLock::new();
+static TELEMETRY_SENDERS: std::sync::OnceLock<std::sync::Mutex<Vec<glib::Sender<SystemStats>>>> =
+    std::sync::OnceLock::new();
 static TELEMETRY_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[allow(deprecated)]
@@ -113,9 +114,11 @@ where
                             while let Some(signal) = stream.next().await {
                                 if let Ok(args) = signal.args() {
                                     let json_str = args.json_stats();
-                                    if let Ok(stats) = serde_json::from_str::<SystemStats>(json_str) {
+                                    if let Ok(stats) = serde_json::from_str::<SystemStats>(json_str)
+                                    {
                                         if let Some(mutex) = TELEMETRY_SENDERS.get() {
-                                            let senders = mutex.lock().unwrap_or_else(|e| e.into_inner());
+                                            let senders =
+                                                mutex.lock().unwrap_or_else(|e| e.into_inner());
                                             for tx in senders.iter() {
                                                 let _ = tx.send(stats.clone());
                                             }
@@ -138,10 +141,25 @@ mod tests {
 
     #[test]
     fn normalizes_power_profiles_across_languages() {
-        for s in ["power-saver", "quiet", "eco", "low-power", "Sessiz", "Eko", "Silencioso"] {
+        for s in [
+            "power-saver",
+            "quiet",
+            "eco",
+            "low-power",
+            "Sessiz",
+            "Eko",
+            "Silencioso",
+        ] {
             assert_eq!(normalize_power_profile(s), "power-saver", "failed for {s}");
         }
-        for s in ["balanced", "default", "Varsayılan", "Dengeli", "Predeterminado", "Equilibrado"] {
+        for s in [
+            "balanced",
+            "default",
+            "Varsayılan",
+            "Dengeli",
+            "Predeterminado",
+            "Equilibrado",
+        ] {
             assert_eq!(normalize_power_profile(s), "balanced", "failed for {s}");
         }
         for s in ["performance", "perf", "max", "Performans", "Rendimiento"] {
@@ -162,4 +180,3 @@ mod tests {
         }
     }
 }
-

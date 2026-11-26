@@ -1,7 +1,7 @@
-use gtk::prelude::*;
-use std::rc::Rc;
-use std::cell::RefCell;
 use crate::i18n;
+use gtk::prelude::*;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 pub fn show_fan_curve_editor(
     parent: &impl IsA<gtk::Window>,
@@ -29,17 +29,21 @@ pub fn show_fan_curve_editor(
         .margin_end(12)
         .build();
 
-    vbox.append(&gtk::Label::builder()
-        .label(i18n::t("editing_preset").replace("{}", preset_name))
-        .css_classes(["os-section-header"])
-        .halign(gtk::Align::Start)
-        .build());
+    vbox.append(
+        &gtk::Label::builder()
+            .label(i18n::t("editing_preset").replace("{}", preset_name))
+            .css_classes(["os-section-header"])
+            .halign(gtk::Align::Start)
+            .build(),
+    );
 
-    vbox.append(&gtk::Label::builder()
-        .label(i18n::t("custom_curve_hint"))
-        .css_classes(["os-section-desc"])
-        .halign(gtk::Align::Start)
-        .build());
+    vbox.append(
+        &gtk::Label::builder()
+            .label(i18n::t("custom_curve_hint"))
+            .css_classes(["os-section-desc"])
+            .halign(gtk::Align::Start)
+            .build(),
+    );
 
     let pts = Rc::new(RefCell::new(points));
 
@@ -57,12 +61,14 @@ pub fn show_fan_curve_editor(
         let (r, g, b) = (1.0, 0.25, 0.4);
 
         let pad = 36.0_f64;
-        let aw  = w as f64 - 2.0 * pad;
-        let ah  = h as f64 - 2.0 * pad;
+        let aw = w as f64 - 2.0 * pad;
+        let ah = h as f64 - 2.0 * pad;
 
         let to_canvas = |temp: f64, speed: f64| -> (f64, f64) {
-            (pad + (temp - 40.0) / 60.0 * aw,
-             pad + (1.0 - speed / 100.0) * ah)
+            (
+                pad + (temp - 40.0) / 60.0 * aw,
+                pad + (1.0 - speed / 100.0) * ah,
+            )
         };
 
         cr.set_operator(gtk::cairo::Operator::Clear);
@@ -73,9 +79,13 @@ pub fn show_fan_curve_editor(
         cr.set_source_rgba(0.5, 0.5, 0.5, 0.15);
         for i in 1..=4 {
             let x = pad + aw * i as f64 / 4.0;
-            cr.move_to(x, pad); cr.line_to(x, pad + ah); let _ = cr.stroke();
+            cr.move_to(x, pad);
+            cr.line_to(x, pad + ah);
+            let _ = cr.stroke();
             let y = pad + ah * i as f64 / 4.0;
-            cr.move_to(pad, y); cr.line_to(pad + aw, y); let _ = cr.stroke();
+            cr.move_to(pad, y);
+            cr.line_to(pad + aw, y);
+            let _ = cr.stroke();
         }
 
         cr.set_source_rgba(0.5, 0.5, 0.5, 0.3);
@@ -83,7 +93,11 @@ pub fn show_fan_curve_editor(
         cr.rectangle(pad, pad, aw, ah);
         let _ = cr.stroke();
 
-        cr.select_font_face("Sans", gtk::cairo::FontSlant::Normal, gtk::cairo::FontWeight::Normal);
+        cr.select_font_face(
+            "Sans",
+            gtk::cairo::FontSlant::Normal,
+            gtk::cairo::FontWeight::Normal,
+        );
         cr.set_font_size(9.0);
         cr.set_source_rgba(0.5, 0.5, 0.5, 1.0);
         for (i, temp) in [40, 55, 70, 85, 100].iter().enumerate() {
@@ -108,7 +122,9 @@ pub fn show_fan_curve_editor(
         cr.move_to(pad + aw / 2.0 - 22.0, pad + ah + 26.0);
         let _ = cr.show_text("TEMP °C");
 
-        if pts.is_empty() { return; }
+        if pts.is_empty() {
+            return;
+        }
 
         let (x0, y0) = to_canvas(pts[0].0, pts[0].1);
         cr.move_to(x0, pad + ah);
@@ -134,7 +150,7 @@ pub fn show_fan_curve_editor(
             cr.line_to(x, y);
         }
         let _ = cr.stroke();
-        
+
         cr.set_source_rgba(1.0, 1.0, 1.0, 1.0);
         for p in pts.iter() {
             let (x, y) = to_canvas(p.0, p.1);
@@ -149,20 +165,20 @@ pub fn show_fan_curve_editor(
     let pts_m = pts.clone();
     let hover_idx = Rc::new(RefCell::new(None));
     let hover_clone = hover_idx.clone();
-    
+
     motion.connect_motion(move |_, x, y| {
         let pad = 36.0_f64;
         let aw = da_m.width() as f64 - 2.0 * pad;
         let ah = da_m.height() as f64 - 2.0 * pad;
         let temp = 40.0 + (x - pad) / aw * 60.0;
         let speed = 100.0 - (y - pad) / ah * 100.0;
-        
+
         let mut closest = None;
         let mut min_dist = 9999.0;
         for (i, p) in pts_m.borrow().iter().enumerate() {
             let dx = p.0 - temp;
             let dy = p.1 - speed;
-            let dist = dx*dx + dy*dy;
+            let dist = dx * dx + dy * dy;
             if dist < 400.0 && dist < min_dist {
                 min_dist = dist;
                 closest = Some(i);
@@ -184,16 +200,18 @@ pub fn show_fan_curve_editor(
                 let pad = 36.0_f64;
                 let aw = da_d.width() as f64 - 2.0 * pad;
                 let ah = da_d.height() as f64 - 2.0 * pad;
-                
+
                 let mut temp = (40.0 + (x - pad) / aw * 60.0).clamp(40.0, 100.0);
                 let speed = (100.0 - (y - pad) / ah * 100.0).clamp(0.0, 100.0);
-                
+
                 let mut p = pts_d.borrow_mut();
-                if idx > 0
-                    && temp <= p[idx-1].0 { temp = p[idx-1].0 + 1.0; }
-                if idx < p.len() - 1
-                    && temp >= p[idx+1].0 { temp = p[idx+1].0 - 1.0; }
-                
+                if idx > 0 && temp <= p[idx - 1].0 {
+                    temp = p[idx - 1].0 + 1.0;
+                }
+                if idx < p.len() - 1 && temp >= p[idx + 1].0 {
+                    temp = p[idx + 1].0 - 1.0;
+                }
+
                 p[idx] = (temp, speed);
                 da_d.queue_draw();
             }

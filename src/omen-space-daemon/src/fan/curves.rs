@@ -128,7 +128,11 @@ pub fn curve_mode_delegates_to_firmware(mode: &str, has_hwmon: bool, has_pwm_nod
 /// `pwm1_enable` value to request on boards whose hwmon has no `pwm1` node, i.e. where
 /// only max boost (0) and firmware control (2) exist. Manual mode (1) is never valid there.
 pub fn pwm_enable_without_pwm_node(pct: u32) -> i64 {
-    if pct >= 100 { 0 } else { 2 }
+    if pct >= 100 {
+        0
+    } else {
+        2
+    }
 }
 
 /// Returns `true` only when hardware `pwm1_enable = 0` (`PWM_MODE_MAX`) should be latched:
@@ -187,14 +191,19 @@ pub fn is_cpu_package_sensor(hwmon_name: &str, file_name: &str) -> bool {
 
 /// Prefer real CPU package `temp1_input` hwmon nodes so per-core HX peaks or noisy ACPI/PCH/DIMM
 /// sensors do not artificially peg curves or thermal protection (#395).
-pub fn select_cpu_temp_paths(candidates: &[(String, String, String, std::path::PathBuf)]) -> Vec<std::path::PathBuf> {
+pub fn select_cpu_temp_paths(
+    candidates: &[(String, String, String, std::path::PathBuf)],
+) -> Vec<std::path::PathBuf> {
     let mut primary = Vec::new();
     let mut fallback = Vec::new();
     for (name, vendor, class, path) in candidates {
         if is_ignored_sensor_device(name, vendor, class) {
             continue;
         }
-        let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or_default();
+        let file_name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
         if is_cpu_package_sensor(name, file_name) {
             primary.push(path.clone());
         } else if file_name == "temp1_input" && !name.trim().eq_ignore_ascii_case("spd5118") {
@@ -247,8 +256,8 @@ pub fn update_advisory_thermal_warn_state(
     last_thermal_alert: &mut Option<Instant>,
     alerts_enabled: bool,
 ) -> bool {
-    let eligible = temp >= 90.0
-        && (temp <= THERMAL_PROTECTION_TRIGGER_TEMP || !thermal_protection_enabled);
+    let eligible =
+        temp >= 90.0 && (temp <= THERMAL_PROTECTION_TRIGGER_TEMP || !thermal_protection_enabled);
     if !eligible {
         *warn_hot_since = None;
         if temp < 85.0 {
@@ -270,8 +279,7 @@ pub fn update_advisory_thermal_warn_state(
         .map(|t| now.saturating_duration_since(t) >= Duration::from_secs(120))
         .unwrap_or(true);
 
-    let sustained_reminder =
-        now.saturating_duration_since(since) >= Duration::from_secs(120);
+    let sustained_reminder = now.saturating_duration_since(since) >= Duration::from_secs(120);
 
     if cooldown_ok && (!*warn_episode_notified || sustained_reminder) {
         *warn_episode_notified = true;
@@ -279,5 +287,79 @@ pub fn update_advisory_thermal_warn_state(
         true
     } else {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_golden_vectors() {
+        let vectors = serde_json::from_str::<serde_json::Value>(include_str!(
+            "../../tests/fixtures/vectors.json"
+        ))
+        .unwrap();
+        for test_case in vectors.as_array().unwrap() {
+            let mut points = Vec::new();
+            for pt in test_case["curve"].as_array().unwrap() {
+                points.push(CurvePoint(pt[0].as_f64().unwrap(), pt[1].as_f64().unwrap()));
+            }
+            let input_temp = test_case["temp"].as_f64().unwrap();
+            let expected_pct = test_case["expected"].as_f64().unwrap();
+            let actual_pct = evaluate_spline(&points, input_temp);
+            assert!(
+                (actual_pct - expected_pct).abs() < 1e-5,
+                "Failed for temp {} with curve {:?}",
+                input_temp,
+                points
+            );
+        }
+    }
+
+    #[test]
+    fn test_pct_to_pwm() {
+        assert_eq!(pct_to_pwm(0), 0);
+        assert_eq!(pct_to_pwm(50), 128);
+        assert_eq!(pct_to_pwm(100), 255);
+    }
+
+    #[test]
+    fn test_is_ignored_sensor_device() {
+        assert!(is_ignored_sensor_device("nvme", "", ""));
+        assert!(is_ignored_sensor_device("mt7921_phy0", "", ""));
+        assert!(is_ignored_sensor_device("iwlwifi_1", "", ""));
+        assert!(is_ignored_sensor_device("wireless", "", ""));
+        assert!(is_ignored_sensor_device("wifi_core", "", ""));
+        assert!(is_ignored_sensor_device("nvidia", "", ""));
+        assert!(is_ignored_sensor_device("nouveau", "", ""));
+        assert!(is_ignored_sensor_device(
+            "temp_sensor",
+            "0x10de",
+            "0x030000"
+        ));
+
+        assert!(!is_ignored_sensor_device("coretemp", "", ""));
+        assert!(!is_ignored_sensor_device("k10temp", "", ""));
+        assert!(!is_ignored_sensor_device("zenpower", "", ""));
+        assert!(!is_ignored_sensor_device("acpitz", "", ""));
+    }
+
+    #[test]
+    fn test_evaluate_spline_sorting() {
+        let mut points = vec![
+            CurvePoint(75.0, 85.0),
+            CurvePoint(40.0, 0.0),
+            CurvePoint(85.0, 100.0),
+            CurvePoint(50.0, 30.0),
+            CurvePoint(65.0, 60.0),
+        ];
+        points.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        assert_eq!(evaluate_spline(&points, 40.0), 0.0);
+        assert_eq!(evaluate_spline(&points, 85.0), 100.0);
+
+        let mid = evaluate_spline(&points, 57.5);
+        assert!((mid - 45.0).abs() < 1e-4);
     }
 }

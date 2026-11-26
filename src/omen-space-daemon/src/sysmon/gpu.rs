@@ -1,9 +1,10 @@
-use std::fs;
-use std::sync::OnceLock;
-use std::sync::Mutex;
 use crate::sysmon::sensors::*;
+use std::fs;
+use std::sync::Mutex;
+use std::sync::OnceLock;
 fn get_nvidia_dgpu_path() -> Option<std::path::PathBuf> {
-    static NVIDIA_PATH: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+    static NVIDIA_PATH: std::sync::OnceLock<Option<std::path::PathBuf>> =
+        std::sync::OnceLock::new();
     NVIDIA_PATH
         .get_or_init(|| {
             if let Ok(entries) = std::fs::read_dir("/sys/bus/pci/devices") {
@@ -12,7 +13,8 @@ fn get_nvidia_dgpu_path() -> Option<std::path::PathBuf> {
                     let class = std::fs::read_to_string(path.join("class")).unwrap_or_default();
                     // Class 0x030000 (VGA) or 0x030200 (3D Controller) — ignores audio 0x040300
                     if class.trim().starts_with("0x03") {
-                        let vendor = std::fs::read_to_string(path.join("vendor")).unwrap_or_default();
+                        let vendor =
+                            std::fs::read_to_string(path.join("vendor")).unwrap_or_default();
                         if vendor.trim().eq_ignore_ascii_case("0x10de") {
                             return Some(path);
                         }
@@ -27,9 +29,22 @@ fn get_nvidia_dgpu_path() -> Option<std::path::PathBuf> {
 /// True for compositor/session processes that hold an idle graphics or compute context on the dGPU.
 fn is_desktop_process(pid: u32) -> bool {
     const IGNORED: &[&str] = &[
-        "kwin_wayland", "kwin_wayland_wr", "kwin_x11", "Xwayland", "Xorg", "X",
-        "gnome-shell", "mutter", "plasmashell", "Hyprland", "sway", "weston",
-        "cosmic-comp", "niri", "labwc", "wayfire",
+        "kwin_wayland",
+        "kwin_wayland_wr",
+        "kwin_x11",
+        "Xwayland",
+        "Xorg",
+        "X",
+        "gnome-shell",
+        "mutter",
+        "plasmashell",
+        "Hyprland",
+        "sway",
+        "weston",
+        "cosmic-comp",
+        "niri",
+        "labwc",
+        "wayfire",
     ];
     match fs::read_to_string(format!("/proc/{}/comm", pid)) {
         Ok(name) => IGNORED.contains(&name.trim()),
@@ -72,12 +87,15 @@ pub fn fetch_gpu_metrics_with_timeout() -> Option<GpuMetrics> {
     }
 
     // 2. Prevent thread accumulation: if a query is already in progress, return cached or None
-    if FETCHING_GPU.compare_exchange(
-        false,
-        true,
-        std::sync::atomic::Ordering::SeqCst,
-        std::sync::atomic::Ordering::SeqCst,
-    ).is_err() {
+    if FETCHING_GPU
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+        )
+        .is_err()
+    {
         if let Ok(guard) = CACHED_GPU_METRICS.lock() {
             return guard.as_ref().map(|(c, _)| c.clone());
         }
@@ -85,7 +103,7 @@ pub fn fetch_gpu_metrics_with_timeout() -> Option<GpuMetrics> {
     }
 
     let (tx, rx) = std::sync::mpsc::channel();
-    
+
     std::thread::spawn(move || {
         // Ensure flag is reset when thread finishes
         struct FetchGuard;
@@ -98,7 +116,12 @@ pub fn fetch_gpu_metrics_with_timeout() -> Option<GpuMetrics> {
 
         // CRITICAL BATTERY SAVER: Do not wake the GPU if it is runtime suspended.
         if check_nvidia_state() == Some(false) {
-            let res = GpuMetrics { has_clients: false, temp: None, power: None, util: None };
+            let res = GpuMetrics {
+                has_clients: false,
+                temp: None,
+                power: None,
+                util: None,
+            };
             let _ = tx.send(res.clone());
             if let Ok(mut c_guard) = CACHED_GPU_METRICS.lock() {
                 *c_guard = Some((res, std::time::Instant::now()));
@@ -107,9 +130,7 @@ pub fn fetch_gpu_metrics_with_timeout() -> Option<GpuMetrics> {
         }
 
         // Get or initialize the cached NVML instance
-        let nvml_lock = NVML_INSTANCE.get_or_init(|| {
-            Mutex::new(nvml_wrapper::Nvml::init().ok())
-        });
+        let nvml_lock = NVML_INSTANCE.get_or_init(|| Mutex::new(nvml_wrapper::Nvml::init().ok()));
 
         // Use try_lock() to avoid piling up threads if one is blocked in D3cold/D0 transition
         if let Ok(mut nvml_guard) = nvml_lock.try_lock() {
@@ -118,31 +139,40 @@ pub fn fetch_gpu_metrics_with_timeout() -> Option<GpuMetrics> {
                     // Desktop compositors keep an idle graphics/compute context open on the dGPU even
                     // when the iGPU renders the desktop. Counting them as "clients" means
                     // the idle cooldown never arms and NVML polling keeps the card in D0.
-                    let gfx = device.running_graphics_processes()
+                    let gfx = device
+                        .running_graphics_processes()
                         .map(|v| v.iter().filter(|p| !is_desktop_process(p.pid)).count())
                         .unwrap_or(0);
-                    let comp = device.running_compute_processes()
+                    let comp = device
+                        .running_compute_processes()
                         .map(|v| v.iter().filter(|p| !is_desktop_process(p.pid)).count())
                         .unwrap_or(0);
                     let has_clients = (gfx + comp) > 0;
-                    
+
                     let mut temp = None;
                     let mut power = None;
                     let mut util = None;
-                    
+
                     // FIX #344 & #341 A.1: The dGPU is already awake in D0 (check_nvidia_state() == Some(true)).
                     // Querying metrics when awake does NOT wake a sleeping card.
                     // Always read temperature, power, and utilization whenever NVML device is open.
                     if let Ok(u) = device.utilization_rates() {
                         util = Some(u.gpu as f64 / 100.0);
                     }
-                    if let Ok(t) = device.temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu) {
+                    if let Ok(t) = device
+                        .temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu)
+                    {
                         temp = Some(t as i32);
                     }
                     if let Ok(p) = device.power_usage() {
                         power = Some(p as f64 / 1000.0);
                     }
-                    let res = GpuMetrics { has_clients, temp, power, util };
+                    let res = GpuMetrics {
+                        has_clients,
+                        temp,
+                        power,
+                        util,
+                    };
                     let _ = tx.send(res.clone());
                     if let Ok(mut c_guard) = CACHED_GPU_METRICS.lock() {
                         *c_guard = Some((res, std::time::Instant::now()));

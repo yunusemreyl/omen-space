@@ -104,21 +104,25 @@ mod tests {
 
     #[test]
     fn only_live_processes_of_the_right_name_and_user_match() {
-        let root: PathBuf = std::env::temp_dir().join(format!("omen-tray-proc-{}", std::process::id()));
+        let root: PathBuf =
+            std::env::temp_dir().join(format!("omen-tray-proc-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         for (pid, stat) in [
-            ("100", "100 (omen-overlay) S 1 100 100 0 -1 0"),   // live overlay -> match
-            ("101", "101 (omen-overlay) Z 1 101 101 0 -1 0"),   // zombie overlay -> ignored
-            ("102", "102 (omen-gui) S 1 102 102 0 -1 0"),       // other program -> ignored
-            ("103", "103 (omen-overlay) R 1 103 103 0 -1 0"),   // running overlay -> match
-            ("104", "104 (omen-overlay) X 1 104 104 0 -1 0"),   // dead -> ignored
+            ("100", "100 (omen-overlay) S 1 100 100 0 -1 0"), // live overlay -> match
+            ("101", "101 (omen-overlay) Z 1 101 101 0 -1 0"), // zombie overlay -> ignored
+            ("102", "102 (omen-gui) S 1 102 102 0 -1 0"),     // other program -> ignored
+            ("103", "103 (omen-overlay) R 1 103 103 0 -1 0"), // running overlay -> match
+            ("104", "104 (omen-overlay) X 1 104 104 0 -1 0"), // dead -> ignored
         ] {
             fs::create_dir_all(root.join(pid)).unwrap();
             fs::write(root.join(pid).join("stat"), stat).unwrap();
         }
         fs::create_dir_all(root.join("self")).unwrap(); // non-numeric entry is skipped
 
-        assert_eq!(find_live_pids(&root, "omen-overlay", current_uid()), vec![100, 103]);
+        assert_eq!(
+            find_live_pids(&root, "omen-overlay", current_uid()),
+            vec![100, 103]
+        );
         // Directories created by this test belong to the current user, so another
         // uid must see nothing.
         assert!(find_live_pids(&root, "omen-overlay", current_uid() + 1).is_empty());
@@ -147,7 +151,10 @@ mod tests {
 
         // `pgrep -x sh` would match this pid; the zombie-aware check must not.
         let live = find_live_pids(Path::new("/proc"), "sh", current_uid());
-        assert!(!live.contains(&pid), "zombie pid {pid} was reported as live");
+        assert!(
+            !live.contains(&pid),
+            "zombie pid {pid} was reported as live"
+        );
 
         child.wait().unwrap();
     }

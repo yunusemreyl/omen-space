@@ -6,6 +6,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ---
 
+## [2.5.3] - 2026-11-26
+
+### Added
+- **Turkish Q (`TR-Q`) Keyboard Keycap Layout:** Added `TR-Q` alongside `EN` and `DE` in the RGB Studio keycap layout dropdown (`KeyboardLayout` in `keyboardrgb/helpers.rs` & `keyboard.rs`), persisted cleanly in `~/.config/omenspace/settings.json` without affecting HID usage mapping.
+- **Authoritative Primax `0xFF13` McuSDK2 Key-to-LED Matrix (`#385`):** Added exact hardware key-to-LED slot maps in `rgb/primax_map.rs` (`Ralph` 167-slot map for `0461:4F03`/`4E9B`/`4F11`/`4F1E`/`4ECB` and `Cybug` 168-slot map for `0461:4E9A`) with strict null-slot zeroing, non-blocking hidraw report draining, and corrected `evdev` navigation key coordinates in `rgb/key_layout.rs`.
+- **Automated Translation Parity & CI Formatting Gates:** Added a unit test enforcing 100% key-set parity across `en`, `tr`, and `es` GUI translations (fixing missing Spanish strings and two untranslated English labels), and added `cargo fmt --all -- --check` to GitHub Actions CI.
+
+### Fixed
+- **RGB Solid Color, Custom Wave, Effect Timing & Toggle Sync (`#385`):**
+  - Eliminated right-side `#00FFAA` Zone 4 bleed in Per-Key `Static` mode by applying `colors[0]` uniformly across all 104 key slots.
+  - Fixed `Wave (Custom Colors)` rendering static when primary and secondary colors match (added shaded trough modulation in both daemon `effects.rs` and GUI preview), and tuned `Breathing`, `Blinking`, `Marquee`, and `Ripple` animations.
+  - Synced the `Off / Key / Zone / All` toggle bar when initializing from `power = false` or selecting effects/colors from `Off`, and yielded cleanly to native keyboard `Fn` lighting presets when `Hardware Effects` is enabled on Primax `0xFF13` boards.
+- **Fan Dust Cleaning & `leave_max_boost` Recovery (`#385`, `#364`):** Added `refresh_active_platform_profile()` (`WMI 0x1A` refresh) inside `leave_max_boost`, immediately wrote a safe initial duty when transitioning from `max` to manual/curve modes, and seeded `PWM_MODE_MAX -> PWM_MODE_MANUAL` target RPMs from `priv->min_rpm * 100` in `driver/hp-wmi.c`.
+
+### Changed
+- **Workspace Unification & Dead-Code Cleanup:** Consolidated D-Bus proxies, `is_newer_semver`, and locale detection in `omen-types` (fixing stale `omen-cli` proxy method names); modularized `i18n/`, `monitoring/`, `updater/`, and `fan/protection.rs`; removed unused legacy assets (`omen_laptop.png`, `victus_laptop.png`, `custom.svg`), empty `omen-gui/src/lib.rs`, unused Cargo dependencies, legacy CSS selectors, and all `#[allow(dead_code)]` items.
+
+---
+
 ## [2.5.2] - 2026-11-26
 
 ### Fixed

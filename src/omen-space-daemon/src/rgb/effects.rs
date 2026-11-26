@@ -26,9 +26,18 @@ pub fn compute_anim_color(
         "wave" => {
             let phase = step + (eff_idx as f64 * (2.0 * PI / count));
             let factor = (phase.sin() * 0.5) + 0.5;
-            let r = (r1 as f64 * factor + r2 as f64 * (1.0 - factor)) as u8;
-            let g = (g1 as f64 * factor + g2 as f64 * (1.0 - factor)) as u8;
-            let b = (b1 as f64 * factor + b2 as f64 * (1.0 - factor)) as u8;
+            let (tr, tg, tb) = if (r1, g1, b1) == (r2, g2, b2) {
+                (
+                    (r1 as f64 * 0.08) as u8,
+                    (g1 as f64 * 0.08) as u8,
+                    (b1 as f64 * 0.08) as u8,
+                )
+            } else {
+                (r2, g2, b2)
+            };
+            let r = (r1 as f64 * factor + tr as f64 * (1.0 - factor)) as u8;
+            let g = (g1 as f64 * factor + tg as f64 * (1.0 - factor)) as u8;
+            let b = (b1 as f64 * factor + tb as f64 * (1.0 - factor)) as u8;
             (r, g, b)
         }
         "cycle" => {
@@ -46,7 +55,7 @@ pub fn compute_anim_color(
             (r, g, b)
         }
         "breathing" | "pulse" => {
-            let factor = (step.sin() * 0.5) + 0.5;
+            let factor = ((step * 1.8).sin() * 0.5) + 0.5;
             (
                 (r1 as f64 * factor) as u8,
                 (g1 as f64 * factor) as u8,
@@ -54,7 +63,7 @@ pub fn compute_anim_color(
             )
         }
         "blinking" => {
-            let on = (step * 2.0).sin() >= 0.0;
+            let on = (step * 2.5).sin() >= 0.0;
             if on {
                 (r1, g1, b1)
             } else {
@@ -62,12 +71,12 @@ pub fn compute_anim_color(
             }
         }
         "marquee" => {
-            let head = (step * 2.5) % count;
+            let head = (step * 4.0) % count;
             let direct = (eff_idx as f64 - head).abs();
             let dist = direct.min(count - direct);
-            let width = (count * 0.28).max(1.2);
+            let width = (count * 0.16).max(1.5);
             let factor = (1.0 - (dist / width)).clamp(0.0, 1.0);
-            let bg = 0.06;
+            let bg = 0.02;
             let blend = bg + (1.0 - bg) * factor;
             (
                 (r1 as f64 * blend) as u8,
@@ -176,8 +185,8 @@ pub fn render_per_key_frame(
             "ripple" => {
                 for &(kx, ky, age) in recent_keys {
                     let dist = ((kx - x).powi(2) + (ky - y).powi(2)).sqrt();
-                    let radius = age * 14.0;
-                    let thickness = 1.6;
+                    let radius = age * 12.0;
+                    let thickness = 1.15;
                     if (dist - radius).abs() < thickness {
                         let intensity = (1.0 - age * 0.8).clamp(0.0, 1.0);
                         rf += r1 as f64 * intensity;
@@ -251,7 +260,10 @@ mod tests {
         let f_t1 = render_per_key_frame("marquee", 2.0, "ltr", (0, 128, 255), (0, 0, 0), 1.0, &[]);
         assert_ne!(f_t0, f_t1, "marquee frame must advance over time (#385)");
         // At t=0 (head=0), Esc (slot 0, x=0.5) should be brighter than Enter (slot 65, x=13.87).
-        assert_ne!(f_t0[0], f_t0[65], "marquee must light a partial band, not uniform static");
+        assert_ne!(
+            f_t0[0], f_t0[65],
+            "marquee must light a partial band, not uniform static"
+        );
     }
 
     #[test]
@@ -302,6 +314,23 @@ mod tests {
         );
         assert_ne!(early[55], "000000", "ring center lights up immediately");
         assert_eq!(early[60], "000000", "key J far away not yet reached");
-        assert_ne!(later[60], "000000", "expanding ring reaches J at t=0.45s (#385)");
+        assert_ne!(
+            later[60], "000000",
+            "expanding ring reaches J at t=0.45s (#385)"
+        );
+    }
+
+    #[test]
+    fn wave_with_identical_primary_and_secondary_produces_varying_brightness() {
+        let mut distinct = std::collections::HashSet::new();
+        for col in 0..8 {
+            distinct.insert(compute_anim_color(
+                "wave", 0.3, col, 8, 0, 153, 237, 0, 153, 237,
+            ));
+        }
+        assert!(
+            distinct.len() > 1,
+            "wave must animate across columns even when primary == secondary"
+        );
     }
 }

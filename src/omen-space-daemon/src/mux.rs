@@ -30,7 +30,9 @@ struct MuxConfig {
 
 impl Default for MuxConfig {
     fn default() -> Self {
-        Self { mux_backend: "auto".to_string() }
+        Self {
+            mux_backend: "auto".to_string(),
+        }
     }
 }
 
@@ -273,7 +275,9 @@ impl MuxService {
                     if vendor == "0x10de" {
                         topo.has_nvidia = true;
                         if topo.dgpu_power_state.is_none() {
-                            if let Ok(rt) = std::fs::read_to_string(path.join("power/runtime_status")) {
+                            if let Ok(rt) =
+                                std::fs::read_to_string(path.join("power/runtime_status"))
+                            {
                                 let trimmed = rt.trim().to_lowercase();
                                 if !trimmed.is_empty() {
                                     topo.dgpu_power_state = Some(trimmed);
@@ -346,8 +350,13 @@ impl MuxService {
             return Vec::new();
         }
 
-        let sysfs_raw = tokio::fs::read_to_string(HP_WMI_SUPPORTED_MODES_PATH).await.ok();
-        let caps_supports_ao = if sysfs_raw.as_ref().is_some_and(|s| !parse_supported_modes_str(s).is_empty()) {
+        let sysfs_raw = tokio::fs::read_to_string(HP_WMI_SUPPORTED_MODES_PATH)
+            .await
+            .ok();
+        let caps_supports_ao = if sysfs_raw
+            .as_ref()
+            .is_some_and(|s| !parse_supported_modes_str(s).is_empty())
+        {
             false
         } else {
             let board_id = tokio::fs::read_to_string("/sys/class/dmi/id/board_name")
@@ -370,10 +379,16 @@ impl MuxService {
                         .map(|(_, v)| v.trim().to_string())
                 })
                 .unwrap_or_default();
-            crate::capabilities::detect(&board_id, &product_name, &cpu_model).supports_advanced_optimus
+            crate::capabilities::detect(&board_id, &product_name, &cpu_model)
+                .supports_advanced_optimus
         };
 
-        resolve_supported_modes(available, sysfs_raw.as_deref(), caps_supports_ao, current_fw_mode)
+        resolve_supported_modes(
+            available,
+            sysfs_raw.as_deref(),
+            caps_supports_ao,
+            current_fw_mode,
+        )
     }
 
     /// Enumerate connected displays with GPU vendor.
@@ -418,7 +433,10 @@ impl MuxService {
         }
 
         if !Self::wmi_available() {
-            warn!("SetGpuMode: WMI MUX interface not found at {}", HP_WMI_GRAPHICS_MODE_PATH);
+            warn!(
+                "SetGpuMode: WMI MUX interface not found at {}",
+                HP_WMI_GRAPHICS_MODE_PATH
+            );
             return "Error: WMI MUX interface not found".to_string();
         }
 
@@ -471,7 +489,11 @@ impl MuxService {
         let g = self.inner.lock().await;
         let available = Self::wmi_available();
         let backend = if available { "wmi-native" } else { "none" };
-        let available_backends: Vec<&str> = if available { vec!["wmi-native"] } else { vec![] };
+        let available_backends: Vec<&str> = if available {
+            vec!["wmi-native"]
+        } else {
+            vec![]
+        };
         let forced_backend = g.config.mux_backend.clone();
         let cached = g.cached_mode.clone();
         let boot_mode = g.boot_mode.clone();
@@ -566,7 +588,9 @@ mod tests {
     #[test]
     fn resolve_supported_modes_gates_advanced_optimus_strictly() {
         // No WMI MUX at all -> empty
-        assert!(resolve_supported_modes(false, Some("hybrid discrete advanced"), true, None).is_empty());
+        assert!(
+            resolve_supported_modes(false, Some("hybrid discrete advanced"), true, None).is_empty()
+        );
 
         // Sysfs present without advanced (older Victus / non-AO OMEN): even if boards.json claimed AO, trust BIOS
         assert_eq!(
@@ -576,8 +600,17 @@ mod tests {
 
         // Sysfs present with advanced -> includes advanced
         assert_eq!(
-            resolve_supported_modes(true, Some("hybrid discrete advanced\n"), false, Some("hybrid")),
-            vec!["hybrid".to_string(), "discrete".to_string(), "advanced".to_string()]
+            resolve_supported_modes(
+                true,
+                Some("hybrid discrete advanced\n"),
+                false,
+                Some("hybrid")
+            ),
+            vec![
+                "hybrid".to_string(),
+                "discrete".to_string(),
+                "advanced".to_string()
+            ]
         );
 
         // Sysfs missing (legacy hp-wmi) -> fallback to boards.json caps
@@ -587,26 +620,54 @@ mod tests {
         );
         assert_eq!(
             resolve_supported_modes(true, None, true, Some("hybrid")),
-            vec!["hybrid".to_string(), "discrete".to_string(), "advanced".to_string()]
+            vec![
+                "hybrid".to_string(),
+                "discrete".to_string(),
+                "advanced".to_string()
+            ]
         );
 
         // If BIOS currently reports advanced, preserve it even if fallback has false
         assert_eq!(
             resolve_supported_modes(true, None, false, Some("advanced")),
-            vec!["hybrid".to_string(), "discrete".to_string(), "advanced".to_string()]
+            vec![
+                "hybrid".to_string(),
+                "discrete".to_string(),
+                "advanced".to_string()
+            ]
         );
     }
 
     #[test]
     fn compute_reboot_pending_tracks_boot_vs_target_and_routing() {
         // Same as boot mode -> false
-        assert!(!compute_reboot_pending(Some("hybrid"), "hybrid", None, "hybrid"));
+        assert!(!compute_reboot_pending(
+            Some("hybrid"),
+            "hybrid",
+            None,
+            "hybrid"
+        ));
         // Switched to discrete while booted in hybrid -> true
-        assert!(compute_reboot_pending(Some("hybrid"), "discrete", Some("discrete"), "hybrid"));
+        assert!(compute_reboot_pending(
+            Some("hybrid"),
+            "discrete",
+            Some("discrete"),
+            "hybrid"
+        ));
         // Switched back to boot mode -> false
-        assert!(!compute_reboot_pending(Some("hybrid"), "hybrid", Some("hybrid"), "hybrid"));
+        assert!(!compute_reboot_pending(
+            Some("hybrid"),
+            "hybrid",
+            Some("hybrid"),
+            "hybrid"
+        ));
         // After GUI reopen without cached pending_mode, boot_mode differs from fw mode -> true
-        assert!(compute_reboot_pending(Some("hybrid"), "discrete", None, "hybrid"));
+        assert!(compute_reboot_pending(
+            Some("hybrid"),
+            "discrete",
+            None,
+            "hybrid"
+        ));
         // Even if daemon restarted and lost boot_mode, firmware=discrete vs routing=hybrid -> true
         assert!(compute_reboot_pending(None, "discrete", None, "hybrid"));
         assert!(compute_reboot_pending(None, "hybrid", None, "discrete"));

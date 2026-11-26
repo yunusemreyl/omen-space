@@ -1,11 +1,13 @@
+use crate::keyboardrgb::helpers::*;
 use gtk::prelude::*;
-use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use crate::keyboardrgb::helpers::*;
+use std::rc::Rc;
 
-fn keyboard_layout_is_de() -> bool {
-    let Ok(home) = std::env::var("HOME") else { return false };
+fn load_keyboard_layout() -> KeyboardLayout {
+    let Ok(home) = std::env::var("HOME") else {
+        return KeyboardLayout::En;
+    };
     let path = format!("{}/.config/omenspace/settings.json", home);
     std::fs::read_to_string(&path)
         .ok()
@@ -13,13 +15,15 @@ fn keyboard_layout_is_de() -> bool {
         .and_then(|v| {
             v.get("keyboard_layout")
                 .and_then(|x| x.as_str())
-                .map(|s| s.eq_ignore_ascii_case("de") || s.eq_ignore_ascii_case("german"))
+                .map(KeyboardLayout::from_saved)
         })
-        .unwrap_or(false)
+        .unwrap_or(KeyboardLayout::En)
 }
 
-fn save_keyboard_layout(de: bool) {
-    let Ok(home) = std::env::var("HOME") else { return };
+fn save_keyboard_layout(layout: KeyboardLayout) {
+    let Ok(home) = std::env::var("HOME") else {
+        return;
+    };
     let path = format!("{}/.config/omenspace/settings.json", home);
     if let Some(dir) = std::path::Path::new(&path).parent() {
         let _ = std::fs::create_dir_all(dir);
@@ -28,33 +32,11 @@ fn save_keyboard_layout(de: bool) {
         .ok()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
         .unwrap_or_else(|| serde_json::json!({}));
-    value["keyboard_layout"] = serde_json::json!(if de { "de" } else { "en" });
-    let _ = std::fs::write(&path, serde_json::to_string_pretty(&value).unwrap_or_default());
-}
-
-/// German keycaps for the US physical positions. Display only: the HID usage
-/// mapping is unchanged, so this never affects what a key actually lights.
-fn german_labels() -> HashMap<String, String> {
-    let pairs = [
-        ("~", "^"),
-        ("-", "ß"),
-        ("=", "´"),
-        ("[", "Ü"),
-        ("]", "+"),
-        ("\\", "#"),
-        (";", "Ö"),
-        ("'", "Ä"),
-        ("Z", "Y"),
-        ("Y", "Z"),
-        ("/", "-"),
-        ("Del", "Entf"),
-        ("Ctrl", "Strg"),
-        ("Alt_R", "AltGr"),
-    ];
-    pairs
-        .iter()
-        .map(|(us, de)| ((*us).to_string(), (*de).to_string()))
-        .collect()
+    value["keyboard_layout"] = serde_json::json!(layout.code());
+    let _ = std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&value).unwrap_or_default(),
+    );
 }
 
 pub type AnimCallback = Rc<dyn Fn(&str, f64)>;
@@ -63,7 +45,7 @@ pub fn build_interactive_keyboard(
     detected_mode: KeyboardMode,
     zone_colors: Rc<RefCell<Vec<String>>>,
     per_key_colors: Rc<RefCell<Vec<String>>>,
-    state_json_opt: &Option<serde_json::Value>
+    state_json_opt: &Option<serde_json::Value>,
 ) -> (gtk::Box, AnimCallback, gtk::Box) {
     // Restore saved 104-key frame from daemon so undrawn placeholder slots (98..103)
     // do not stay #0099ED blue on restart (#355).
@@ -86,26 +68,40 @@ pub fn build_interactive_keyboard(
         .orientation(gtk::Orientation::Vertical)
         .css_classes(["os-card"])
         .spacing(12)
-        .margin_top(16).margin_bottom(16).margin_start(16).margin_end(16)
+        .margin_top(16)
+        .margin_bottom(16)
+        .margin_start(16)
+        .margin_end(16)
         .halign(gtk::Align::Center)
         .build();
 
     // 1. Top Effects Tabs
     let (effect_labels, mode_str_list) = match detected_mode {
         KeyboardMode::Victus1Zone => (
-            vec![crate::i18n::t("effect_static"), crate::i18n::t("effect_breathing"), crate::i18n::t("effect_cycle")],
-            vec!["static", "breathing", "cycle"]
+            vec![
+                crate::i18n::t("effect_static"),
+                crate::i18n::t("effect_breathing"),
+                crate::i18n::t("effect_cycle"),
+            ],
+            vec!["static", "breathing", "cycle"],
         ),
         KeyboardMode::Omen4Zone => (
             vec![
-                crate::i18n::t("effect_static"), 
-                crate::i18n::t("effect_breathing"), 
-                crate::i18n::t("effect_blinking"), 
-                crate::i18n::t("effect_cycle"), 
-                crate::i18n::t("effect_wave_custom"), 
-                crate::i18n::t("effect_wave_rainbow")
+                crate::i18n::t("effect_static"),
+                crate::i18n::t("effect_breathing"),
+                crate::i18n::t("effect_blinking"),
+                crate::i18n::t("effect_cycle"),
+                crate::i18n::t("effect_wave_custom"),
+                crate::i18n::t("effect_wave_rainbow"),
             ],
-            vec!["static", "breathing", "blinking", "cycle", "wave", "wave_rainbow"]
+            vec![
+                "static",
+                "breathing",
+                "blinking",
+                "cycle",
+                "wave",
+                "wave_rainbow",
+            ],
         ),
         KeyboardMode::PerKey => (
             vec![
@@ -120,9 +116,22 @@ pub fn build_interactive_keyboard(
                 crate::i18n::t("effect_marquee"),
                 crate::i18n::t("effect_reactive"),
                 crate::i18n::t("effect_ripple"),
-                crate::i18n::t("effect_raindrop")
+                crate::i18n::t("effect_raindrop"),
             ],
-            vec!["static", "per_key_custom", "breathing", "blinking", "cycle", "wave", "wave_rainbow", "starlight", "marquee", "reactive", "ripple", "raindrop"]
+            vec![
+                "static",
+                "per_key_custom",
+                "breathing",
+                "blinking",
+                "cycle",
+                "wave",
+                "wave_rainbow",
+                "starlight",
+                "marquee",
+                "reactive",
+                "ripple",
+                "raindrop",
+            ],
         ),
         KeyboardMode::DesktopRgb => (
             vec![
@@ -132,72 +141,114 @@ pub fn build_interactive_keyboard(
                 crate::i18n::t("effect_blinking"),
                 crate::i18n::t("effect_wave"),
             ],
-            vec!["static", "breathing", "cycle", "blinking", "wave"]
+            vec!["static", "breathing", "cycle", "blinking", "wave"],
         ),
     };
 
-    let globals=Rc::new(RefCell::new(KeyboardGlobals::from_snapshot(state_json_opt.as_ref())));
+    let globals = Rc::new(RefCell::new(KeyboardGlobals::from_snapshot(
+        state_json_opt.as_ref(),
+    )));
     // Key-label language. Saved in settings.json; display only.
-    let layout_de = Rc::new(std::cell::Cell::new(keyboard_layout_is_de()));
-    let layout_labels: Rc<RefCell<HashMap<String, String>>> = Rc::new(RefCell::new(
-        if layout_de.get() { german_labels() } else { HashMap::new() },
-    ));
+    let current_layout = Rc::new(std::cell::Cell::new(load_keyboard_layout()));
+    let layout_labels: Rc<RefCell<HashMap<String, String>>> =
+        Rc::new(RefCell::new(current_layout.get().keycap_labels()));
 
-    let top_bar = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).build();
+    let top_bar = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(12)
+        .build();
 
     // -- Selection Tools (Left-aligned) --
-    let sel_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).build();
-    let sel_label = gtk::Label::builder().label(crate::i18n::t("kb_select_label")).css_classes(["dim-label"]).build();
+    let sel_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(6)
+        .build();
+    let sel_label = gtk::Label::builder()
+        .label(crate::i18n::t("kb_select_label"))
+        .css_classes(["dim-label"])
+        .build();
     sel_box.append(&sel_label);
-    
-    let sel_btns_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(0).build();
+
+    let sel_btns_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(0)
+        .build();
     sel_btns_box.add_css_class("linked");
-    
-    let btn_off = gtk::ToggleButton::builder().label(crate::i18n::t("kb_sel_off")).build();
-    let btn_key = gtk::ToggleButton::builder().label(crate::i18n::t("kb_sel_key")).active(detected_mode == KeyboardMode::PerKey).sensitive(detected_mode == KeyboardMode::PerKey).build();
-    let btn_zone = gtk::ToggleButton::builder().label(crate::i18n::t("kb_sel_zone")).active(detected_mode != KeyboardMode::PerKey).build();
-    let btn_all = gtk::ToggleButton::builder().label(crate::i18n::t("kb_sel_all")).build();
-    
-    // Set initial sel_mode based on supported mode
-    let sel_mode = Rc::new(RefCell::new(if detected_mode == KeyboardMode::PerKey { SelectionMode::Key } else { SelectionMode::Zone }));
+
+    let initial_power = globals.borrow().power;
+    let initial_sel = if !initial_power {
+        SelectionMode::Off
+    } else if detected_mode == KeyboardMode::PerKey {
+        SelectionMode::Key
+    } else {
+        SelectionMode::Zone
+    };
+
+    let btn_off = gtk::ToggleButton::builder()
+        .label(crate::i18n::t("kb_sel_off"))
+        .active(initial_sel == SelectionMode::Off)
+        .build();
+    let btn_key = gtk::ToggleButton::builder()
+        .label(crate::i18n::t("kb_sel_key"))
+        .active(initial_sel == SelectionMode::Key)
+        .sensitive(detected_mode == KeyboardMode::PerKey)
+        .build();
+    let btn_zone = gtk::ToggleButton::builder()
+        .label(crate::i18n::t("kb_sel_zone"))
+        .active(initial_sel == SelectionMode::Zone)
+        .build();
+    let btn_all = gtk::ToggleButton::builder()
+        .label(crate::i18n::t("kb_sel_all"))
+        .build();
+
+    // Set initial sel_mode based on supported mode and saved power state
+    let sel_mode = Rc::new(RefCell::new(initial_sel));
 
     btn_key.set_group(Some(&btn_off));
     btn_zone.set_group(Some(&btn_off));
     btn_all.set_group(Some(&btn_off));
-    
+
     let sm_o = sel_mode.clone();
-    let globals_sm_o=globals.clone();
+    let globals_sm_o = globals.clone();
     btn_off.connect_toggled(move |b| {
         if b.is_active() {
             *sm_o.borrow_mut() = SelectionMode::Off;
-            let mut state=globals_sm_o.borrow_mut();state.power=false;state.send();
+            let mut state = globals_sm_o.borrow_mut();
+            state.power = false;
+            state.send();
         }
     });
     let sm_k = sel_mode.clone();
-    let globals_sm_k=globals.clone();
+    let globals_sm_k = globals.clone();
     btn_key.connect_toggled(move |b| {
         if b.is_active() {
             *sm_k.borrow_mut() = SelectionMode::Key;
-            let mut state=globals_sm_k.borrow_mut();state.power=true;state.send();
+            let mut state = globals_sm_k.borrow_mut();
+            state.power = true;
+            state.send();
         }
     });
     let sm_z = sel_mode.clone();
-    let globals_sm_z=globals.clone();
+    let globals_sm_z = globals.clone();
     btn_zone.connect_toggled(move |b| {
         if b.is_active() {
             *sm_z.borrow_mut() = SelectionMode::Zone;
-            let mut state=globals_sm_z.borrow_mut();state.power=true;state.send();
+            let mut state = globals_sm_z.borrow_mut();
+            state.power = true;
+            state.send();
         }
     });
     let sm_a = sel_mode.clone();
-    let globals_sm_a=globals.clone();
+    let globals_sm_a = globals.clone();
     btn_all.connect_toggled(move |b| {
         if b.is_active() {
             *sm_a.borrow_mut() = SelectionMode::All;
-            let mut state=globals_sm_a.borrow_mut();state.power=true;state.send();
+            let mut state = globals_sm_a.borrow_mut();
+            state.power = true;
+            state.send();
         }
     });
-    
+
     sel_btns_box.append(&btn_off);
     sel_btns_box.append(&btn_key);
     sel_btns_box.append(&btn_zone);
@@ -218,7 +269,7 @@ pub fn build_interactive_keyboard(
             current_mode_str = ms.to_string();
         }
     }
-    
+
     let mut speed_val = 50.0;
     if let Some(state_json) = state_json_opt {
         if let Some(speed) = state_json["speed"].as_f64() {
@@ -242,46 +293,134 @@ pub fn build_interactive_keyboard(
         *active_mode_idx.borrow_mut() = pos;
     }
 
-    let am_idx = active_mode_idx.clone();
-    let msl_local = msl_c.clone();
-    let aa_local = aa_hook.clone();
-    let speed_ref = speed_rc.clone();
-    let direction_globals=globals.clone();
-    effects_dropdown.connect_selected_notify(move |dd| {
-        let i = dd.selected() as usize;
-        if i < msl_local.len() {
-            *am_idx.borrow_mut() = i;
-            let m = &msl_local[i];
-            let speed = *speed_ref.borrow();
-            if m == "wave_ltr" {
-                crate::daemon_client::set_mode_sync("wave", speed as i32);
-                let mut state=direction_globals.borrow_mut();state.direction="ltr".into();state.send();
-            } else if m == "wave_rtl" {
-                crate::daemon_client::set_mode_sync("wave", speed as i32);
-                let mut state=direction_globals.borrow_mut();state.direction="rtl".into();state.send();
-            } else {
-                crate::daemon_client::set_mode_sync(m, speed as i32);
-            }
-            if let Some(anim_func) = &*aa_local.borrow() {
-                let anim_m = if m.starts_with("wave_") { "wave" } else { m.as_str() };
-                anim_func(anim_m, speed);
-            }
-        }
-    });
-
-    top_bar.append(&gtk::Label::builder().label(crate::i18n::t("kb_effect_label")).css_classes(["dim-label"]).build());
+    top_bar.append(
+        &gtk::Label::builder()
+            .label(crate::i18n::t("kb_effect_label"))
+            .css_classes(["dim-label"])
+            .build(),
+    );
     top_bar.append(&effects_dropdown);
 
     kb_card.append(&top_bar);
 
     // 3. Canvas
     let layout_def = vec![
-        vec![("Esc", 1.0), ("", 0.5), ("F1", 1.0), ("F2", 1.0), ("F3", 1.0), ("F4", 1.0), ("", 0.5), ("F5", 1.0), ("F6", 1.0), ("F7", 1.0), ("F8", 1.0), ("", 0.5), ("F9", 1.0), ("F10", 1.0), ("F11", 1.0), ("F12", 1.0), ("", 0.5), ("Del", 1.0), ("Omen", 1.0), ("Calc", 1.0), ("Power", 1.0)],
-        vec![("~", 1.0), ("1", 1.0), ("2", 1.0), ("3", 1.0), ("4", 1.0), ("5", 1.0), ("6", 1.0), ("7", 1.0), ("8", 1.0), ("9", 1.0), ("0", 1.0), ("-", 1.0), ("=", 1.0), ("Backspace", 2.0), ("Num", 1.0), ("/_num", 1.0), ("*_num", 1.0), ("-_num", 1.0)],
-        vec![("Tab", 1.5), ("Q", 1.0), ("W", 1.0), ("E", 1.0), ("R", 1.0), ("T", 1.0), ("Y", 1.0), ("U", 1.0), ("I", 1.0), ("O", 1.0), ("P", 1.0), ("[", 1.0), ("]", 1.0), ("\\", 1.5), ("7_num", 1.0), ("8_num", 1.0), ("9_num", 1.0), ("+_num", 1.0)],
-        vec![("Caps", 1.75), ("A", 1.0), ("S", 1.0), ("D", 1.0), ("F", 1.0), ("G", 1.0), ("H", 1.0), ("J", 1.0), ("K", 1.0), ("L", 1.0), (";", 1.0), ("'", 1.0), ("Enter", 2.25), ("4_num", 1.0), ("5_num", 1.0), ("6_num", 1.0), ("", 1.0)],
-        vec![("Shift", 2.25), ("Z", 1.0), ("X", 1.0), ("C", 1.0), ("V", 1.0), ("B", 1.0), ("N", 1.0), ("M", 1.0), (",", 1.0), (".", 1.0), ("/", 1.0), ("Shift_R", 1.75), ("Up", 1.0), ("1_num", 1.0), ("2_num", 1.0), ("3_num", 1.0), ("Enter_num", 1.0)],
-        vec![("Ctrl", 1.25), ("Fn", 1.25), ("Win", 1.25), ("Alt", 1.25), ("Space", 5.5), ("Alt_R", 1.25), ("Menu", 1.25), ("Left", 1.0), ("Down", 1.0), ("Right", 1.0), ("0_num", 1.0), ("._num", 1.0), ("", 1.0)]
+        vec![
+            ("Esc", 1.0),
+            ("", 0.5),
+            ("F1", 1.0),
+            ("F2", 1.0),
+            ("F3", 1.0),
+            ("F4", 1.0),
+            ("", 0.5),
+            ("F5", 1.0),
+            ("F6", 1.0),
+            ("F7", 1.0),
+            ("F8", 1.0),
+            ("", 0.5),
+            ("F9", 1.0),
+            ("F10", 1.0),
+            ("F11", 1.0),
+            ("F12", 1.0),
+            ("", 0.5),
+            ("Del", 1.0),
+            ("Omen", 1.0),
+            ("Calc", 1.0),
+            ("Power", 1.0),
+        ],
+        vec![
+            ("~", 1.0),
+            ("1", 1.0),
+            ("2", 1.0),
+            ("3", 1.0),
+            ("4", 1.0),
+            ("5", 1.0),
+            ("6", 1.0),
+            ("7", 1.0),
+            ("8", 1.0),
+            ("9", 1.0),
+            ("0", 1.0),
+            ("-", 1.0),
+            ("=", 1.0),
+            ("Backspace", 2.0),
+            ("Num", 1.0),
+            ("/_num", 1.0),
+            ("*_num", 1.0),
+            ("-_num", 1.0),
+        ],
+        vec![
+            ("Tab", 1.5),
+            ("Q", 1.0),
+            ("W", 1.0),
+            ("E", 1.0),
+            ("R", 1.0),
+            ("T", 1.0),
+            ("Y", 1.0),
+            ("U", 1.0),
+            ("I", 1.0),
+            ("O", 1.0),
+            ("P", 1.0),
+            ("[", 1.0),
+            ("]", 1.0),
+            ("\\", 1.5),
+            ("7_num", 1.0),
+            ("8_num", 1.0),
+            ("9_num", 1.0),
+            ("+_num", 1.0),
+        ],
+        vec![
+            ("Caps", 1.75),
+            ("A", 1.0),
+            ("S", 1.0),
+            ("D", 1.0),
+            ("F", 1.0),
+            ("G", 1.0),
+            ("H", 1.0),
+            ("J", 1.0),
+            ("K", 1.0),
+            ("L", 1.0),
+            (";", 1.0),
+            ("'", 1.0),
+            ("Enter", 2.25),
+            ("4_num", 1.0),
+            ("5_num", 1.0),
+            ("6_num", 1.0),
+            ("", 1.0),
+        ],
+        vec![
+            ("Shift", 2.25),
+            ("Z", 1.0),
+            ("X", 1.0),
+            ("C", 1.0),
+            ("V", 1.0),
+            ("B", 1.0),
+            ("N", 1.0),
+            ("M", 1.0),
+            (",", 1.0),
+            (".", 1.0),
+            ("/", 1.0),
+            ("Shift_R", 1.75),
+            ("Up", 1.0),
+            ("1_num", 1.0),
+            ("2_num", 1.0),
+            ("3_num", 1.0),
+            ("Enter_num", 1.0),
+        ],
+        vec![
+            ("Ctrl", 1.25),
+            ("Fn", 1.25),
+            ("Win", 1.25),
+            ("Alt", 1.25),
+            ("Space", 5.5),
+            ("Alt_R", 1.25),
+            ("Menu", 1.25),
+            ("Left", 1.0),
+            ("Down", 1.0),
+            ("Right", 1.0),
+            ("0_num", 1.0),
+            ("._num", 1.0),
+            ("", 1.0),
+        ],
     ];
     let unit_size = 38.0;
     let margin = 3.5;
@@ -306,19 +445,27 @@ pub fn build_interactive_keyboard(
                 } else {
                     name
                 };
-                
+
                 let def_color = if detected_mode == KeyboardMode::Omen4Zone {
                     zone_colors.borrow()[(get_zone_for_key(name) - 1) as usize].clone()
                 } else if detected_mode == KeyboardMode::Victus1Zone {
                     zone_colors.borrow()[0].clone()
                 } else if detected_mode == KeyboardMode::PerKey {
-                    if global_idx < per_key_colors.borrow().len() { per_key_colors.borrow()[global_idx].clone() } else { "#0099ED".to_string() }
+                    if global_idx < per_key_colors.borrow().len() {
+                        per_key_colors.borrow()[global_idx].clone()
+                    } else {
+                        "#0099ED".to_string()
+                    }
                 } else {
                     "#0099ED".to_string()
                 };
                 key_colors.borrow_mut().insert(name.to_string(), def_color);
 
-                let k_height = if *name == "+_num" || *name == "Enter_num" { height * 2.0 + margin } else { height };
+                let k_height = if *name == "+_num" || *name == "Enter_num" {
+                    height * 2.0 + margin
+                } else {
+                    height
+                };
                 keys.push(KeyGeom {
                     id: global_idx,
                     name: name.to_string(),
@@ -343,28 +490,30 @@ pub fn build_interactive_keyboard(
 
     // Layout selector: same DropDown control as Effect, so new layouts are just
     // new model entries. Left of Effect.
-    let layout_model = gtk::StringList::new(&["EN", "DE"]);
+    let layout_model = gtk::StringList::new(&KeyboardLayout::LABELS);
     let layout_dropdown = gtk::DropDown::builder()
         .model(&layout_model)
-        .selected(if layout_de.get() { 1 } else { 0 })
+        .selected(current_layout.get().index())
         .valign(gtk::Align::Center)
         .tooltip_text(crate::i18n::t("kb_layout_tooltip"))
         .build();
     top_bar.prepend(&layout_dropdown);
-    top_bar.prepend(&gtk::Label::builder().label(crate::i18n::t("kb_layout_label")).css_classes(["dim-label"]).build());
+    top_bar.prepend(
+        &gtk::Label::builder()
+            .label(crate::i18n::t("kb_layout_label"))
+            .css_classes(["dim-label"])
+            .build(),
+    );
 
     let da_layout = drawing_area.clone();
     let layout_labels_c = layout_labels.clone();
-    let layout_de_c = layout_de.clone();
+    let layout_c = current_layout.clone();
     layout_dropdown.connect_selected_notify(move |dd| {
-        let de = dd.selected() == 1;
-        layout_de_c.set(de);
-        {
-            let mut labels = layout_labels_c.borrow_mut();
-            if de { *labels = german_labels(); } else { labels.clear(); }
-        }
+        let chosen = KeyboardLayout::from_index(dd.selected());
+        layout_c.set(chosen);
+        *layout_labels_c.borrow_mut() = chosen.keycap_labels();
         da_layout.queue_draw();
-        save_keyboard_layout(de);
+        save_keyboard_layout(chosen);
     });
 
     let keys_rc = Rc::new(keys);
@@ -380,7 +529,7 @@ pub fn build_interactive_keyboard(
     let hovered_draw = hovered_key.clone();
     let colors_draw = key_colors.clone();
     let sel_mode_draw = sel_mode.clone();
-    
+
     drawing_area.set_draw_func(move |_, cr, _, _| {
         cr.set_source_rgba(0.08, 0.08, 0.09, 1.0);
         let _ = cr.paint();
@@ -388,7 +537,7 @@ pub fn build_interactive_keyboard(
         let hov = hovered_draw.borrow();
         let cols = colors_draw.borrow();
         cr.translate(10.0, 10.0);
-        
+
         let (anim_mode, anim_speed, anim_time) = anim_draw.borrow().clone();
         for k in keys_draw.iter() {
             let hex = cols.get(&k.name).map(|s| s.as_str()).unwrap_or("#141418");
@@ -396,31 +545,47 @@ pub fn build_interactive_keyboard(
 
             if anim_mode == "breathing" {
                 let factor = (anim_time * anim_speed * 0.05).sin().abs() * 0.8 + 0.2;
-                r *= factor; g *= factor; b *= factor;
+                r *= factor;
+                g *= factor;
+                b *= factor;
             } else if anim_mode == "cycle" {
                 let h = (anim_time * anim_speed * 2.0) % 360.0;
                 let (nr, ng, nb) = hsl_to_rgb(h, 1.0, 0.5);
-                r = nr; g = ng; b = nb;
+                r = nr;
+                g = ng;
+                b = nb;
             } else if anim_mode == "wave" {
-                let offset = k.x / 10.0;
-                let h = ((anim_time * anim_speed * 4.0) + offset * 8.0) % 360.0;
-                let (nr, ng, nb) = hsl_to_rgb(h, 1.0, 0.5);
-                r = nr; g = ng; b = nb;
+                let phase = (anim_time * anim_speed * 0.08) + (k.x / 120.0);
+                let factor = (phase.sin() * 0.5) + 0.5;
+                let blend = 0.08 + 0.92 * factor;
+                r *= blend;
+                g *= blend;
+                b *= blend;
             } else if anim_mode == "wave_rainbow" {
                 let offset = k.x / 10.0;
                 let h = ((anim_time * anim_speed * 4.0) - offset * 8.0) % 360.0;
                 let (nr, ng, nb) = hsl_to_rgb(h, 1.0, 0.5);
-                r = nr; g = ng; b = nb;
+                r = nr;
+                g = ng;
+                b = nb;
             } else if anim_mode == "blinking" {
-                let factor = if (anim_time * anim_speed * 0.12).sin() >= 0.0 { 1.0 } else { 0.08 };
-                r *= factor; g *= factor; b *= factor;
+                let factor = if (anim_time * anim_speed * 0.12).sin() >= 0.0 {
+                    1.0
+                } else {
+                    0.08
+                };
+                r *= factor;
+                g *= factor;
+                b *= factor;
             } else if anim_mode == "marquee" {
                 let norm_x = (k.x / 720.0).clamp(0.0, 1.0);
                 let head = (anim_time * anim_speed * 0.015).fract();
                 let d = (norm_x - head).abs();
                 let dist = d.min(1.0 - d);
                 let factor = (1.0 - (dist / 0.25)).clamp(0.06, 1.0);
-                r *= factor; g *= factor; b *= factor;
+                r *= factor;
+                g *= factor;
+                b *= factor;
             }
 
             let active_sel = *sel_mode_draw.borrow();
@@ -434,12 +599,12 @@ pub fn build_interactive_keyboard(
             } else {
                 hov.as_ref() == Some(&k.name)
             };
-            
+
             cr.set_line_width(1.0);
             cr.set_source_rgb(r, g, b);
             draw_rounded_rect(cr, k.x, k.y, k.w, k.h, 4.0);
             let _ = cr.fill_preserve();
-            
+
             if is_sel {
                 cr.set_source_rgb(1.0, 1.0, 1.0);
                 cr.set_line_width(2.0);
@@ -452,10 +617,14 @@ pub fn build_interactive_keyboard(
                 cr.set_source_rgba(0.3, 0.3, 0.35, 1.0);
                 let _ = cr.stroke();
             }
-            
+
             let lum = r * 0.299 + g * 0.587 + b * 0.114;
-            if lum > 0.5 { cr.set_source_rgb(0.0, 0.0, 0.0); } else { cr.set_source_rgb(0.9, 0.9, 0.9); }
-            
+            if lum > 0.5 {
+                cr.set_source_rgb(0.0, 0.0, 0.0);
+            } else {
+                cr.set_source_rgb(0.9, 0.9, 0.9);
+            }
+
             cr.set_font_size(11.0);
             let labels_guard = layout_labels_draw.borrow();
             let label = labels_guard
@@ -465,7 +634,7 @@ pub fn build_interactive_keyboard(
             if let Ok(extents) = cr.text_extents(label) {
                 cr.move_to(
                     k.x + (k.w - extents.width()) / 2.0 - extents.x_bearing(),
-                    k.y + (k.h - extents.height()) / 2.0 - extents.y_bearing()
+                    k.y + (k.h - extents.height()) / 2.0 - extents.y_bearing(),
                 );
                 let _ = cr.show_text(label);
             }
@@ -513,29 +682,95 @@ pub fn build_interactive_keyboard(
             .unwrap_or_else(|| "#0099ED".to_string())
     };
     let paint_color = Rc::new(RefCell::new(initial_paint_color.clone()));
-    
+
+    let am_idx = active_mode_idx.clone();
+    let msl_local = msl_c.clone();
+    let aa_local = aa_hook.clone();
+    let speed_ref = speed_rc.clone();
+    let direction_globals = globals.clone();
+    let sm_dd = sel_mode.clone();
+    let btn_key_dd = btn_key.clone();
+    let btn_zone_dd = btn_zone.clone();
+    let kc_dd = key_colors.clone();
+    let pk_dd = per_key_colors.clone();
+    let keys_dd = keys_rc.clone();
+    let p_color_dd = paint_color.clone();
+    effects_dropdown.connect_selected_notify(move |dd| {
+        let i = dd.selected() as usize;
+        if i < msl_local.len() {
+            *am_idx.borrow_mut() = i;
+            let m = &msl_local[i];
+            if *sm_dd.borrow() == SelectionMode::Off {
+                match restored_selection_mode(*sm_dd.borrow(), detected_mode) {
+                    SelectionMode::Key => btn_key_dd.set_active(true),
+                    SelectionMode::Zone => btn_zone_dd.set_active(true),
+                    _ => {}
+                }
+            }
+            if detected_mode == KeyboardMode::PerKey && m == "static" {
+                let hex = p_color_dd.borrow().clone();
+                let mut kc_mut = kc_dd.borrow_mut();
+                for k in keys_dd.iter() {
+                    kc_mut.insert(k.name.clone(), hex.clone());
+                }
+            } else if detected_mode == KeyboardMode::PerKey && m == "per_key_custom" {
+                let pk = pk_dd.borrow();
+                let mut kc_mut = kc_dd.borrow_mut();
+                for k in keys_dd.iter() {
+                    if k.id < pk.len() {
+                        kc_mut.insert(k.name.clone(), pk[k.id].clone());
+                    }
+                }
+            }
+            let speed = *speed_ref.borrow();
+            if m == "wave_ltr" {
+                crate::daemon_client::set_mode_sync("wave", speed as i32);
+                let mut state = direction_globals.borrow_mut();
+                state.direction = "ltr".into();
+                state.send();
+            } else if m == "wave_rtl" {
+                crate::daemon_client::set_mode_sync("wave", speed as i32);
+                let mut state = direction_globals.borrow_mut();
+                state.direction = "rtl".into();
+                state.send();
+            } else {
+                crate::daemon_client::set_mode_sync(m, speed as i32);
+            }
+            if let Some(anim_func) = &*aa_local.borrow() {
+                let anim_m = if m.starts_with("wave_") {
+                    "wave"
+                } else {
+                    m.as_str()
+                };
+                anim_func(anim_m, speed);
+            }
+        }
+    });
+
     let click = gtk::GestureClick::new();
     click.set_button(0);
     let keys_click = keys_rc.clone();
     let da_click = drawing_area.clone();
     let sm_click = sel_mode.clone();
-    
+
     let p_color_c = paint_color.clone();
     let kc_c = key_colors.clone();
     let pk_c = per_key_colors.clone();
     let zc_c = zone_colors.clone();
-    
+
     let msl_click = msl_c.clone();
     let am_click = active_mode_idx.clone();
 
     click.connect_pressed(move |_g, _n_press, x, y| {
         let mode = *sm_click.borrow();
         let hex = p_color_c.borrow().clone();
-        
+
         let mut hit_names = Vec::new();
-        
+
         if mode == SelectionMode::All {
-            for k in keys_click.iter() { hit_names.push(k.name.clone()); }
+            for k in keys_click.iter() {
+                hit_names.push(k.name.clone());
+            }
         } else {
             let lx = x - 10.0;
             let ly = y - 10.0;
@@ -549,50 +784,55 @@ pub fn build_interactive_keyboard(
             if let Some(k) = hit {
                 match mode {
                     SelectionMode::Key => hit_names.push(k.name.clone()),
-                    SelectionMode::Row => {
-                        let y_target = k.y;
-                        for other in keys_click.iter() {
-                            if (other.y - y_target).abs() < 5.0 { hit_names.push(other.name.clone()); }
-                        }
-                    }
                     SelectionMode::Zone => {
                         let z_target = get_zone_for_key(&k.name);
                         for other in keys_click.iter() {
-                            if get_zone_for_key(&other.name) == z_target { hit_names.push(other.name.clone()); }
+                            if get_zone_for_key(&other.name) == z_target {
+                                hit_names.push(other.name.clone());
+                            }
                         }
                     }
                     _ => {}
                 }
             }
         }
-        
+
         if !hit_names.is_empty() {
             let mut kc_mut = kc_c.borrow_mut();
             let mut pk_mut = pk_c.borrow_mut();
             let mut zc_mut = zc_c.borrow_mut();
             let mut zones_changed = Vec::new();
-            
+
             for n in &hit_names {
                 kc_mut.insert(n.clone(), hex.clone());
                 if detected_mode == KeyboardMode::Omen4Zone {
                     let z = get_zone_for_key(n);
-                    zc_mut[(z-1) as usize] = hex.clone();
-                    if !zones_changed.contains(&z) { zones_changed.push(z); }
+                    zc_mut[(z - 1) as usize] = hex.clone();
+                    if !zones_changed.contains(&z) {
+                        zones_changed.push(z);
+                    }
                 } else if detected_mode == KeyboardMode::PerKey {
                     if let Some(k) = keys_click.iter().find(|x| &x.name == n) {
-                        if k.id < pk_mut.len() { pk_mut[k.id] = hex.clone(); }
+                        if k.id < pk_mut.len() {
+                            pk_mut[k.id] = hex.clone();
+                        }
                     }
                 } else if detected_mode == KeyboardMode::Victus1Zone {
                     zc_mut[0] = hex.clone();
-                    if !zones_changed.contains(&1) { zones_changed.push(1); }
+                    if !zones_changed.contains(&1) {
+                        zones_changed.push(1);
+                    }
                 }
             }
-            
+
             if detected_mode == KeyboardMode::PerKey {
                 if mode == SelectionMode::All {
                     fill_all_key_slots(&mut pk_mut, &hex);
                     zc_mut.iter_mut().take(4).for_each(|z| *z = hex.clone());
-                    let cur_m = msl_click.get(*am_click.borrow()).map(|s| s.as_str()).unwrap_or("static");
+                    let cur_m = msl_click
+                        .get(*am_click.borrow())
+                        .map(|s| s.as_str())
+                        .unwrap_or("static");
                     if cur_m == "per_key_custom" {
                         crate::daemon_client::set_per_key_colors_sync(pk_mut.clone());
                     } else {
@@ -602,7 +842,9 @@ pub fn build_interactive_keyboard(
                     crate::daemon_client::set_per_key_colors_sync(pk_mut.clone());
                 }
             } else if detected_mode == KeyboardMode::Omen4Zone {
-                for z in zones_changed { crate::daemon_client::set_color_sync(z-1, hex.clone()); }
+                for z in zones_changed {
+                    crate::daemon_client::set_color_sync(z - 1, hex.clone());
+                }
             } else if detected_mode == KeyboardMode::Victus1Zone && !zones_changed.is_empty() {
                 crate::daemon_client::set_color_sync(8, hex.clone());
             }
@@ -624,7 +866,7 @@ pub fn build_interactive_keyboard(
 
     // We store painted keys during the drag to avoid redundant daemon calls
     let painted_during_drag = Rc::new(RefCell::new(Vec::new()));
-    
+
     let ds_update = drag_start.clone();
     let keys_drag_u = keys_drag.clone();
     let da_drag_u = da_drag.clone();
@@ -632,9 +874,11 @@ pub fn build_interactive_keyboard(
     let p_color_u = paint_color.clone();
     let kc_u = key_colors.clone();
     let painted_u = painted_during_drag.clone();
-    
+
     drag.connect_drag_update(move |_, dx, dy| {
-        if *sm_d2.borrow() == SelectionMode::All { return; }
+        if *sm_d2.borrow() == SelectionMode::All {
+            return;
+        }
         let (sx, sy) = *ds_update.borrow();
         let ex = sx + dx;
         let ey = sy + dy;
@@ -649,40 +893,37 @@ pub fn build_interactive_keyboard(
 
         for k in keys_drag_u.iter() {
             let overlaps = !(k.x + k.w < rx || k.x > rx + rw || k.y + k.h < ry || k.y > ry + rh);
-            if overlaps { hit_names.push(k.name.clone()); }
+            if overlaps {
+                hit_names.push(k.name.clone());
+            }
         }
-        
+
         let mut final_hits = Vec::new();
         match mode {
-            SelectionMode::Key => { final_hits = hit_names; }
-            SelectionMode::Row => {
-                let mut hit_y = Vec::new();
-                for n in &hit_names {
-                    if let Some(k) = keys_drag_u.iter().find(|x| &x.name == n) {
-                        if !hit_y.contains(&k.y) { hit_y.push(k.y); }
-                    }
-                }
-                for k in keys_drag_u.iter() {
-                    if hit_y.iter().any(|y| (k.y - y).abs() < 5.0) { final_hits.push(k.name.clone()); }
-                }
+            SelectionMode::Key => {
+                final_hits = hit_names;
             }
             SelectionMode::Zone => {
                 let mut hit_z = Vec::new();
                 for n in &hit_names {
                     let z = get_zone_for_key(n);
-                    if !hit_z.contains(&z) { hit_z.push(z); }
+                    if !hit_z.contains(&z) {
+                        hit_z.push(z);
+                    }
                 }
                 for k in keys_drag_u.iter() {
-                    if hit_z.contains(&get_zone_for_key(&k.name)) { final_hits.push(k.name.clone()); }
+                    if hit_z.contains(&get_zone_for_key(&k.name)) {
+                        final_hits.push(k.name.clone());
+                    }
                 }
             }
             _ => {}
         }
-        
+
         let mut changed = false;
         let mut kc_mut = kc_u.borrow_mut();
         let mut painted = painted_u.borrow_mut();
-        
+
         for n in final_hits {
             if !painted.contains(&n) {
                 kc_mut.insert(n.clone(), hex.clone());
@@ -690,48 +931,60 @@ pub fn build_interactive_keyboard(
                 changed = true;
             }
         }
-        
-        if changed { da_drag_u.queue_draw(); }
+
+        if changed {
+            da_drag_u.queue_draw();
+        }
     });
-    
+
     let pk_d = per_key_colors.clone();
     let zc_d = zone_colors.clone();
     let keys_d = keys_rc.clone();
     let painted_d = painted_during_drag.clone();
     let hex_d = paint_color.clone();
-    
+
     drag.connect_drag_end(move |_, _, _| {
         let painted = painted_d.borrow().clone();
-        if painted.is_empty() { return; }
-        
+        if painted.is_empty() {
+            return;
+        }
+
         let hex = hex_d.borrow().clone();
         let mut pk_mut = pk_d.borrow_mut();
         let mut zc_mut = zc_d.borrow_mut();
         let mut zones_changed = Vec::new();
-        
+
         for n in &painted {
             if detected_mode == KeyboardMode::Omen4Zone {
                 let z = get_zone_for_key(n);
-                zc_mut[(z-1) as usize] = hex.clone();
-                if !zones_changed.contains(&z) { zones_changed.push(z); }
+                zc_mut[(z - 1) as usize] = hex.clone();
+                if !zones_changed.contains(&z) {
+                    zones_changed.push(z);
+                }
             } else if detected_mode == KeyboardMode::PerKey {
                 if let Some(k) = keys_d.iter().find(|x| &x.name == n) {
-                    if k.id < pk_mut.len() { pk_mut[k.id] = hex.clone(); }
+                    if k.id < pk_mut.len() {
+                        pk_mut[k.id] = hex.clone();
+                    }
                 }
             } else if detected_mode == KeyboardMode::Victus1Zone {
                 zc_mut[0] = hex.clone();
-                if !zones_changed.contains(&1) { zones_changed.push(1); }
+                if !zones_changed.contains(&1) {
+                    zones_changed.push(1);
+                }
             }
         }
-        
+
         if detected_mode == KeyboardMode::PerKey {
             crate::daemon_client::set_per_key_colors_sync(pk_mut.clone());
         } else if detected_mode == KeyboardMode::Omen4Zone {
-            for z in zones_changed { crate::daemon_client::set_color_sync(z-1, hex.clone()); }
+            for z in zones_changed {
+                crate::daemon_client::set_color_sync(z - 1, hex.clone());
+            }
         } else if detected_mode == KeyboardMode::Victus1Zone && !zones_changed.is_empty() {
             crate::daemon_client::set_color_sync(8, hex.clone());
         }
-        
+
         painted_d.borrow_mut().clear();
     });
 
@@ -740,28 +993,51 @@ pub fn build_interactive_keyboard(
     kb_card.append(&drawing_area);
 
     // 4. Color Pickers and Controls at the Bottom
-    let bottom_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).margin_top(12).halign(gtk::Align::Center).build();
+    let bottom_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .margin_top(12)
+        .halign(gtk::Align::Center)
+        .build();
 
     let instructions = gtk::Label::builder()
         .label(crate::i18n::t("rgb_paint_hint"))
         .css_classes(["dim-label"])
         .build();
     bottom_box.append(&instructions);
-    
-    let controls_row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(16).halign(gtk::Align::Center).build();
 
-    let color_container = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).valign(gtk::Align::Center).build();
-    color_container.append(&gtk::Label::builder().label(crate::i18n::t("kb_color_label")).css_classes(["dim-label"]).build());
-    
-    let global_color_btn = gtk::Button::builder().width_request(32).height_request(32).build();
+    let controls_row = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(16)
+        .halign(gtk::Align::Center)
+        .build();
+
+    let color_container = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(6)
+        .valign(gtk::Align::Center)
+        .build();
+    color_container.append(
+        &gtk::Label::builder()
+            .label(crate::i18n::t("kb_color_label"))
+            .css_classes(["dim-label"])
+            .build(),
+    );
+
+    let global_color_btn = gtk::Button::builder()
+        .width_request(32)
+        .height_request(32)
+        .build();
     global_color_btn.add_css_class("circular");
     global_color_btn.set_widget_name("global_color_btn");
-    
+
     let dyn_prov_g = gtk::CssProvider::new();
     dyn_prov_g.load_from_string(&format!("#global_color_btn {{ background: {}; background-image: none; border: 1px solid rgba(255,255,255,0.4); }}", initial_paint_color));
     #[allow(deprecated)]
-    global_color_btn.style_context().add_provider(&dyn_prov_g, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
-    
+    global_color_btn
+        .style_context()
+        .add_provider(&dyn_prov_g, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+
     let dyn_prov_clone = dyn_prov_g.clone();
     let paint_color_btn = paint_color.clone();
     let msl_color = msl_c.clone();
@@ -771,6 +1047,9 @@ pub fn build_interactive_keyboard(
     let kc_color = key_colors.clone();
     let keys_color = keys_rc.clone();
     let da_color = drawing_area.clone();
+    let sm_color = sel_mode.clone();
+    let btn_key_color = btn_key.clone();
+    let btn_zone_color = btn_zone.clone();
     global_color_btn.connect_clicked(move |btn| {
         let dyn_local = dyn_prov_clone.clone();
         let pc_local = paint_color_btn.clone();
@@ -781,7 +1060,17 @@ pub fn build_interactive_keyboard(
         let kc_l = kc_color.clone();
         let keys_l = keys_color.clone();
         let da_l = da_color.clone();
+        let sm_l = sm_color.clone();
+        let btn_key_l = btn_key_color.clone();
+        let btn_zone_l = btn_zone_color.clone();
         show_color_picker_popover(btn, Rc::new(move |hex| {
+            if *sm_l.borrow() == SelectionMode::Off {
+                match restored_selection_mode(*sm_l.borrow(), detected_mode) {
+                    SelectionMode::Key => btn_key_l.set_active(true),
+                    SelectionMode::Zone => btn_zone_l.set_active(true),
+                    _ => {}
+                }
+            }
             *pc_local.borrow_mut() = hex.clone();
             dyn_local.load_from_string(&format!("#global_color_btn {{ background: {}; background-image: none; border: 1px solid rgba(255,255,255,0.4); }}", hex));
             // When in static or an animated effect mode on PerKey/1-zone (or using the global color button),
@@ -882,15 +1171,21 @@ pub fn build_interactive_keyboard(
 
     let label_sg = gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal);
 
-    let speed_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).build();
-    let speed_label = gtk::Label::builder().label(crate::i18n::t("kb_effect_speed")).xalign(0.0).build();
+    let speed_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(6)
+        .build();
+    let speed_label = gtk::Label::builder()
+        .label(crate::i18n::t("kb_effect_speed"))
+        .xalign(0.0)
+        .build();
     label_sg.add_widget(&speed_label);
     speed_box.append(&speed_label);
     let speed_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
     speed_scale.set_value(*speed_rc.borrow());
     speed_scale.set_size_request(150, -1);
     speed_scale.set_valign(gtk::Align::Center);
-    
+
     let ae_hook = apply_anim_rc.clone();
     let speed_rc2 = speed_rc.clone();
     let msl_local = msl_c.clone();
@@ -907,49 +1202,80 @@ pub fn build_interactive_keyboard(
                 crate::daemon_client::set_mode_sync(m, speed as i32);
             }
             if let Some(anim_func) = &*ae_hook.borrow() {
-                let anim_m = if m.starts_with("wave_") { "wave" } else { m.as_str() };
+                let anim_m = if m.starts_with("wave_") {
+                    "wave"
+                } else {
+                    m.as_str()
+                };
                 anim_func(anim_m, speed);
             }
         }
     });
     speed_box.append(&speed_scale);
-    
-    let bright_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).build();
-    let bright_label = gtk::Label::builder().label(crate::i18n::t("kb_brightness")).xalign(0.0).build();
+
+    let bright_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(6)
+        .build();
+    let bright_label = gtk::Label::builder()
+        .label(crate::i18n::t("kb_brightness"))
+        .xalign(0.0)
+        .build();
     label_sg.add_widget(&bright_label);
     bright_box.append(&bright_label);
     let bright_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
     let mut bval = 100.0;
     if let Some(state_json) = state_json_opt {
-        if let Some(b) = state_json["brightness"].as_f64() { bval = b; }
+        if let Some(b) = state_json["brightness"].as_f64() {
+            bval = b;
+        }
     }
     bright_scale.set_value(bval);
     bright_scale.set_size_request(150, -1);
     bright_scale.set_valign(gtk::Align::Center);
-    let brightness_globals=globals.clone();
+    let brightness_globals = globals.clone();
     bright_scale.connect_value_changed(move |sc| {
-        let mut state=brightness_globals.borrow_mut();
-        state.brightness=sc.value() as i32;state.send();
+        let mut state = brightness_globals.borrow_mut();
+        state.brightness = sc.value() as i32;
+        state.send();
     });
     bright_box.append(&bright_scale);
-    
+
     // Experimental (#322): run supported effects on the keyboard MCU (Darfon 0d62:54bf & Primax 0461:*).
     // The MCU ignores brightness on Darfon (and accepts it via 0x0C on Primax).
     let hw_on = Rc::new(std::cell::Cell::new(false));
-    let supports_hw_effects = detected_mode == KeyboardMode::PerKey && state_json_opt.as_ref()
-        .and_then(|j| j["hid_device_pid"].as_str())
-        .map(|p| matches!(
-            p.to_ascii_uppercase().as_str(),
-            "54BF" | "4E9A" | "4E9B" | "4F03" | "4F11" | "4F1E" | "4ECB"
-        ))
-        .unwrap_or(false);
-    let hw_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).build();
+    let supports_hw_effects = detected_mode == KeyboardMode::PerKey
+        && state_json_opt
+            .as_ref()
+            .and_then(|j| j["hid_device_pid"].as_str())
+            .map(|p| {
+                matches!(
+                    p.to_ascii_uppercase().as_str(),
+                    "54BF" | "4E9A" | "4E9B" | "4F03" | "4F11" | "4F1E" | "4ECB"
+                )
+            })
+            .unwrap_or(false);
+    let hw_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(6)
+        .build();
     if supports_hw_effects {
-        hw_on.set(state_json_opt.as_ref().and_then(|j| j["hw_effects"].as_bool()).unwrap_or(false));
-        let hw_label = gtk::Label::builder().label(crate::i18n::t("kb_hw_effects")).xalign(0.0).build();
+        hw_on.set(
+            state_json_opt
+                .as_ref()
+                .and_then(|j| j["hw_effects"].as_bool())
+                .unwrap_or(false),
+        );
+        let hw_label = gtk::Label::builder()
+            .label(crate::i18n::t("kb_hw_effects"))
+            .xalign(0.0)
+            .build();
         label_sg.add_widget(&hw_label);
         hw_box.append(&hw_label);
-        let hw_switch = gtk::Switch::builder().valign(gtk::Align::Center).active(hw_on.get()).build();
+        let hw_switch = gtk::Switch::builder()
+            .valign(gtk::Align::Center)
+            .active(hw_on.get())
+            .build();
         hw_switch.set_tooltip_text(Some(crate::i18n::t("kb_hw_effects_tooltip")));
         hw_box.append(&hw_switch);
         bright_scale.set_sensitive(!hw_on.get());
@@ -962,14 +1288,17 @@ pub fn build_interactive_keyboard(
         });
     }
 
-    let sliders_container = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).build();
+    let sliders_container = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(6)
+        .build();
     sliders_container.append(&speed_box);
     sliders_container.append(&bright_box);
     if supports_hw_effects {
         sliders_container.append(&hw_box);
     }
     controls_row.append(&sliders_container);
-    
+
     bottom_box.append(&controls_row);
 
     kb_card.append(&bottom_box);
@@ -977,7 +1306,7 @@ pub fn build_interactive_keyboard(
     let tick_id: Rc<RefCell<Option<gtk::TickCallbackId>>> = Rc::new(RefCell::new(None));
     let da_anim = drawing_area.clone();
     let anim_state_apply = anim_state.clone();
-    
+
     let bright_scale_apply = bright_scale.clone();
     let hw_on_apply = hw_on.clone();
     let apply_anim: AnimCallback = Rc::new(move |mode: &str, speed: f64| {
@@ -986,9 +1315,9 @@ pub fn build_interactive_keyboard(
         ts.1 = speed;
         drop(ts);
         bright_scale_apply.set_sensitive(!hw_on_apply.get());
-        
+
         let needs_anim = mode != "static" && mode != "per_key_custom";
-        
+
         let mut curr_id = tick_id.borrow_mut();
         if !needs_anim && curr_id.is_some() {
             curr_id.take().unwrap().remove();
@@ -1012,5 +1341,9 @@ pub fn build_interactive_keyboard(
     });
     *apply_anim_rc.borrow_mut() = Some(apply_anim.clone());
 
-    (kb_card, apply_anim, gtk::Box::new(gtk::Orientation::Horizontal, 0))
+    (
+        kb_card,
+        apply_anim,
+        gtk::Box::new(gtk::Orientation::Horizontal, 0),
+    )
 }

@@ -1,43 +1,29 @@
+use omen_types::i18n::{detect_env_lang, parse_lang_code, Lang};
 use std::env;
 use std::fs;
 
-fn get_lang() -> String {
-    let mut lang_code = "auto".to_string();
-    
+fn get_lang() -> Lang {
     if let Ok(home) = env::var("HOME") {
         let path = format!("{}/.config/omenspace/gui_config.json", home);
         if let Ok(json_str) = fs::read_to_string(&path) {
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&json_str) {
                 if let Some(lang) = json.get("language").and_then(|v| v.as_str()) {
-                    lang_code = lang.to_string();
+                    if let Some(parsed) = parse_lang_code(lang) {
+                        return parsed;
+                    }
                 }
             }
         }
     }
-    
-    if lang_code == "auto" {
-        for var in &["LC_MESSAGES", "LC_ALL", "LANG", "LANGUAGE"] {
-            if let Ok(val) = env::var(var) {
-                let lower = val.to_lowercase();
-                if lower.starts_with("tr") || lower.contains("tr_tr") || lower.contains("turkish") {
-                    return "tr".to_string();
-                }
-                if lower.starts_with("es") || lower.contains("spanish") {
-                    return "es".to_string();
-                }
-            }
-        }
-        return "en".to_string();
-    }
-    
-    lang_code
+
+    detect_env_lang()
 }
 
 pub fn t(key: &str) -> String {
     let lang = get_lang();
 
-    match lang.as_str() {
-        "tr" => match key {
+    match lang {
+        Lang::Tr => match key {
             "title" => "OMEN Hızlı Kontrol",
             "perf_mode" => "Performans Modu",
             "quiet" => "Sessiz",
@@ -58,7 +44,7 @@ pub fn t(key: &str) -> String {
             "close" => "Kapat",
             _ => key,
         },
-        "es" => match key {
+        Lang::Es => match key {
             "title" => "Control Rápido OMEN",
             "perf_mode" => "Modo de rendimiento",
             "quiet" => "Silencioso",
@@ -79,7 +65,7 @@ pub fn t(key: &str) -> String {
             "close" => "Cerrar",
             _ => key,
         },
-        _ => match key {
+        Lang::En => match key {
             "title" => "OMEN Quick Control",
             "perf_mode" => "Performance Mode",
             "quiet" => "Quiet",
@@ -103,4 +89,3 @@ pub fn t(key: &str) -> String {
     }
     .to_string()
 }
-

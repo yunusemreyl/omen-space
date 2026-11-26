@@ -139,7 +139,8 @@ pub fn probe_battery(sysfs_root: &Path) -> Option<BatteryTelemetry> {
     let bat_path = find_battery_path(&psy_dir)?;
     let name = bat_path.file_name()?.to_string_lossy().to_string();
 
-    let status_str = read_trimmed(&bat_path.join("status")).unwrap_or_else(|| "Unknown".to_string());
+    let status_str =
+        read_trimmed(&bat_path.join("status")).unwrap_or_else(|| "Unknown".to_string());
     let status = parse_battery_status(&status_str);
 
     let ac_online = probe_ac_online(&psy_dir);
@@ -161,7 +162,9 @@ pub fn probe_battery(sysfs_root: &Path) -> Option<BatteryTelemetry> {
     let charge_full_uah = read_u64(&bat_path.join("charge_full"));
     let charge_design_uah = read_u64(&bat_path.join("charge_full_design"));
 
-    let (energy_now_wh, energy_full_wh, energy_design_wh, health_pct) = if let Some(e_now) = energy_now_uwh {
+    let (energy_now_wh, energy_full_wh, energy_design_wh, health_pct) = if let Some(e_now) =
+        energy_now_uwh
+    {
         let e_full = energy_full_uwh;
         let e_des = energy_design_uwh;
 
@@ -194,7 +197,12 @@ pub fn probe_battery(sysfs_root: &Path) -> Option<BatteryTelemetry> {
             }
         };
 
-        (to_wh(c_now), c_full.and_then(to_wh), c_des.and_then(to_wh), health)
+        (
+            to_wh(c_now),
+            c_full.and_then(to_wh),
+            c_des.and_then(to_wh),
+            health,
+        )
     } else {
         (None, None, None, None)
     };
@@ -210,7 +218,9 @@ pub fn probe_battery(sysfs_root: &Path) -> Option<BatteryTelemetry> {
     // Instantaneous Power Draw
     let power_w = if let Some(p_uw) = read_u64(&bat_path.join("power_now")) {
         p_uw as f64 / 1_000_000.0
-    } else if let (Some(cur_ua), Some(vol_uv)) = (read_u64(&bat_path.join("current_now")), voltage_now_uv) {
+    } else if let (Some(cur_ua), Some(vol_uv)) =
+        (read_u64(&bat_path.join("current_now")), voltage_now_uv)
+    {
         (cur_ua as f64 * vol_uv as f64) / 1_000_000_000_000.0
     } else {
         0.0
@@ -225,8 +235,14 @@ pub fn probe_battery(sysfs_root: &Path) -> Option<BatteryTelemetry> {
             if crate::battery_limit::hp_wmi_charge_mode_supported() {
                 if let Ok(raw) = std::fs::read_to_string("/etc/omen-space/platform.json") {
                     if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
-                        let lim = val.get("battery_charge_limit").and_then(|v| v.as_u64()).unwrap_or(100);
-                        let bypass = val.get("battery_charge_bypass").and_then(|v| v.as_bool()).unwrap_or(false);
+                        let lim = val
+                            .get("battery_charge_limit")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(100);
+                        let bypass = val
+                            .get("battery_charge_bypass")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
                         if (50..=95).contains(&lim) && !bypass {
                             return Some(lim as u8);
                         }
@@ -343,7 +359,10 @@ mod tests {
         t.write("class/power_supply/BAT0/voltage_now", "12000000\n"); // 12.0V -> 18.0W
         t.write("class/power_supply/BAT0/voltage_min_design", "11400000\n");
         t.write("class/power_supply/BAT0/cycle_count", "120\n");
-        t.write("class/power_supply/BAT0/charge_control_end_threshold", "80\n");
+        t.write(
+            "class/power_supply/BAT0/charge_control_end_threshold",
+            "80\n",
+        );
 
         let telem = probe_battery(t.sys()).expect("Should discover BAT0");
         assert_eq!(telem.status, BatteryStatus::Discharging);

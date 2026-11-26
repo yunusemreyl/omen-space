@@ -1,8 +1,8 @@
 //! One offline prompt per window; recovery dismisses the stale prompt.
 use crate::daemon_client::{self, DaemonStatus};
+use adw::prelude::*;
 use gtk::prelude::*;
 use libadwaita as adw;
-use adw::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -21,7 +21,9 @@ pub fn bind(window: &adw::ApplicationWindow) {
         if pending.borrow().is_some() {
             return;
         }
-        let Some(window) = window.upgrade() else { return; };
+        let Some(window) = window.upgrade() else {
+            return;
+        };
         let dialog = adw::MessageDialog::new(
             Some(&window),
             Some(crate::i18n::t("daemon_offline_title")),

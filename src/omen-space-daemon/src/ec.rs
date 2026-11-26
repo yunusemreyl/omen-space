@@ -163,7 +163,9 @@ mod tests {
                 allowed
             );
         }
-        for blocked in ["8C77", "8EDF", "8D42", "8D88", "8DCF", "8A4C", "8A17", "UNKNOWN", ""] {
+        for blocked in [
+            "8C77", "8EDF", "8D42", "8D88", "8DCF", "8A4C", "8A17", "UNKNOWN", "",
+        ] {
             assert!(
                 !LinuxEcController::allows_direct_ec_writes(blocked),
                 "modern/non-legacy board '{}' must NEVER get raw EC writes (#395)",

@@ -1,6 +1,6 @@
-use zbus::interface;
-use crate::sysmon::stats::*;
 use crate::sysmon::sensors::*;
+use crate::sysmon::stats::*;
+use zbus::interface;
 #[derive(Clone)]
 pub struct SysMonInterface {}
 
@@ -24,8 +24,14 @@ impl SysMonInterface {
         crate::sysmon::drives::refresh_specs(&mut specs);
         if let Some(bat) = crate::sysmon::battery::current_battery() {
             let cap_wh = bat.energy_full_wh.or(bat.energy_design_wh).unwrap_or(0.0);
-            let health_str = bat.health_pct.map(|h| format!(" · {:.0}% Health", h)).unwrap_or_default();
-            let cycles_str = bat.cycle_count.map(|c| format!(" ({} cycles)", c)).unwrap_or_default();
+            let health_str = bat
+                .health_pct
+                .map(|h| format!(" · {:.0}% Health", h))
+                .unwrap_or_default();
+            let cycles_str = bat
+                .cycle_count
+                .map(|c| format!(" ({} cycles)", c))
+                .unwrap_or_default();
             if cap_wh > 0.0 {
                 specs.battery_spec = format!("{:.1} Wh Li-ion{}{}", cap_wh, health_str, cycles_str);
             } else {
@@ -40,28 +46,47 @@ impl SysMonInterface {
         // reactor and GUI never freeze during report generation (#364).
         tokio::task::spawn_blocking(build_unified_system_dump)
             .await
-            .unwrap_or_else(|e| format!("# OMENSpace Full System Dump\n\nError collecting report: {}", e))
+            .unwrap_or_else(|e| {
+                format!(
+                    "# OMENSpace Full System Dump\n\nError collecting report: {}",
+                    e
+                )
+            })
     }
 
     async fn generate_rgb_issue(&self) -> String {
         tokio::task::spawn_blocking(build_unified_system_dump)
             .await
-            .unwrap_or_else(|e| format!("# OMENSpace Full System Dump\n\nError collecting report: {}", e))
+            .unwrap_or_else(|e| {
+                format!(
+                    "# OMENSpace Full System Dump\n\nError collecting report: {}",
+                    e
+                )
+            })
     }
 
     #[zbus(signal)]
-    pub async fn telemetry_updated(ctxt: &zbus::SignalContext<'_>, json_stats: &str) -> zbus::Result<()>;
+    pub async fn telemetry_updated(
+        ctxt: &zbus::SignalContext<'_>,
+        json_stats: &str,
+    ) -> zbus::Result<()>;
 }
 
 fn build_unified_system_dump() -> String {
     let specs = get_hardware_specs();
     let stats = fetch_system_stats();
     let board_id = std::fs::read_to_string("/sys/class/dmi/id/board_name")
-        .unwrap_or_else(|_| "Unknown".to_string()).trim().to_string();
+        .unwrap_or_else(|_| "Unknown".to_string())
+        .trim()
+        .to_string();
     let manufacturer = std::fs::read_to_string("/sys/class/dmi/id/sys_vendor")
-        .unwrap_or_else(|_| "HP".to_string()).trim().to_string();
+        .unwrap_or_else(|_| "HP".to_string())
+        .trim()
+        .to_string();
     let product_name = std::fs::read_to_string("/sys/class/dmi/id/product_name")
-        .unwrap_or_else(|_| "Unknown".to_string()).trim().to_string();
+        .unwrap_or_else(|_| "Unknown".to_string())
+        .trim()
+        .to_string();
     let is_verified = crate::capabilities::LinuxCapabilityClassifier::is_board_verified(&board_id);
     let init_sys = if std::path::Path::new("/run/systemd/system").exists() {
         "systemd"
@@ -74,13 +99,20 @@ fn build_unified_system_dump() -> String {
     if let Ok(mut entries) = glob::glob("/sys/firmware/efi/efivars/SecureBoot-*") {
         if let Some(Ok(p)) = entries.next() {
             if let Ok(b) = std::fs::read(&p) {
-                secure_boot = if *b.last().unwrap_or(&0) == 1 { "Enabled".to_string() } else { "Disabled".to_string() };
+                secure_boot = if *b.last().unwrap_or(&0) == 1 {
+                    "Enabled".to_string()
+                } else {
+                    "Disabled".to_string()
+                };
             }
         }
     }
 
     let mut report = String::new();
-    report.push_str(&format!("# OMENSpace Full System Dump — {} ({})\n\n", product_name, board_id));
+    report.push_str(&format!(
+        "# OMENSpace Full System Dump — {} ({})\n\n",
+        product_name, board_id
+    ));
     let date = std::process::Command::new("date")
         .arg("+%Y-%m-%d %H:%M:%S")
         .output()
@@ -90,9 +122,15 @@ fn build_unified_system_dump() -> String {
 
     // ── Environment ──────────────────────────────────────────
     report.push_str("## Environment\n\n| Field | Value |\n|-------|-------|\n");
-    report.push_str(&format!("| OMENSpace version | `{}` |\n", env!("CARGO_PKG_VERSION")));
+    report.push_str(&format!(
+        "| OMENSpace version | `{}` |\n",
+        env!("CARGO_PKG_VERSION")
+    ));
     report.push_str(&format!("| OS                | `{}` |\n", specs.os_spec));
-    report.push_str(&format!("| Kernel            | `{}` |\n", specs.kernel_version));
+    report.push_str(&format!(
+        "| Kernel            | `{}` |\n",
+        specs.kernel_version
+    ));
     report.push_str(&format!("| Init System       | `{}` |\n", init_sys));
     report.push_str(&format!("| Secure Boot       | `{}` |\n", secure_boot));
 
@@ -100,7 +138,15 @@ fn build_unified_system_dump() -> String {
     report.push_str("\n## Hardware Probe\n\n| Field | Value |\n|-------|-------|\n");
     report.push_str(&format!("| Manufacturer   | `{}` |\n", manufacturer));
     report.push_str(&format!("| Product Name   | `{}` |\n", product_name));
-    report.push_str(&format!("| Board ID       | `{}` ({}) |\n", board_id, if is_verified { "Verified" } else { "Unverified" }));
+    report.push_str(&format!(
+        "| Board ID       | `{}` ({}) |\n",
+        board_id,
+        if is_verified {
+            "Verified"
+        } else {
+            "Unverified"
+        }
+    ));
     report.push_str(&format!("| BIOS Version   | `{}` |\n", specs.bios_version));
     report.push_str(&format!("| CPU            | `{}` |\n", specs.cpu_spec));
     report.push_str(&format!("| GPU            | `{}` |\n", specs.gpu_spec));
@@ -119,17 +165,31 @@ fn build_unified_system_dump() -> String {
     report.push_str(&format!(
         "- Kernel Modules: `hp_wmi={}` | `hp_omen_extra={}` | `ec_sys={}`\n",
         if has_hp_wmi { "loaded" } else { "missing" },
-        if has_hp_omen_extra { "loaded" } else { "not loaded" },
-        if has_ec_sys { "active" } else { "not loaded (optional)" },
+        if has_hp_omen_extra {
+            "loaded"
+        } else {
+            "not loaded"
+        },
+        if has_ec_sys {
+            "active"
+        } else {
+            "not loaded (optional)"
+        },
     ));
-    if let Ok(out) = std::process::Command::new("modinfo").args(["-n", "hp-wmi"]).output() {
+    if let Ok(out) = std::process::Command::new("modinfo")
+        .args(["-n", "hp-wmi"])
+        .output()
+    {
         let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
         if !p.is_empty() {
             report.push_str(&format!("- `hp-wmi` module path: `{}`\n", p));
         }
     }
     if conflicts.has_conflicts {
-        report.push_str(&format!("- Conflicts: {}\n", conflicts.conflicting_processes.join("; ")));
+        report.push_str(&format!(
+            "- Conflicts: {}\n",
+            conflicts.conflicting_processes.join("; ")
+        ));
     } else {
         report.push_str("- Conflicts: None detected\n");
     }
@@ -140,23 +200,43 @@ fn build_unified_system_dump() -> String {
     let mut hwmon_rows = Vec::new();
     if let Ok(entries) = glob::glob("/sys/class/hwmon/hwmon*") {
         for entry in entries.filter_map(Result::ok) {
-            let name = std::fs::read_to_string(entry.join("name"))
-                .unwrap_or_else(|_| "?".to_string());
+            let name =
+                std::fs::read_to_string(entry.join("name")).unwrap_or_else(|_| "?".to_string());
             let name = name.trim();
             let fan1_p = entry.join("fan1_input");
             let fan2_p = entry.join("fan2_input");
             if matches!(name, "hp" | "hp_wmi" | "hp-omen" | "acpi_fan") {
-                if fan1_p.exists() { hp_fan1_exists = true; }
-                if fan2_p.exists() { hp_fan2_exists = true; }
+                if fan1_p.exists() {
+                    hp_fan1_exists = true;
+                }
+                if fan2_p.exists() {
+                    hp_fan2_exists = true;
+                }
             }
-            let fan1 = std::fs::read_to_string(&fan1_p).map(|v| v.trim().to_string()).unwrap_or_else(|_| "—".to_string());
-            let fan2 = std::fs::read_to_string(&fan2_p).map(|v| v.trim().to_string()).unwrap_or_else(|_| "—".to_string());
-            let fan1_max = std::fs::read_to_string(entry.join("fan1_max")).map(|v| v.trim().to_string()).unwrap_or_else(|_| "—".to_string());
-            let pwm1 = std::fs::read_to_string(entry.join("pwm1")).map(|v| v.trim().to_string()).unwrap_or_else(|_| "—".to_string());
-            let pwm1_en = std::fs::read_to_string(entry.join("pwm1_enable")).map(|v| v.trim().to_string()).unwrap_or_else(|_| "—".to_string());
-            let hwmon_name = entry.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let fan1 = std::fs::read_to_string(&fan1_p)
+                .map(|v| v.trim().to_string())
+                .unwrap_or_else(|_| "—".to_string());
+            let fan2 = std::fs::read_to_string(&fan2_p)
+                .map(|v| v.trim().to_string())
+                .unwrap_or_else(|_| "—".to_string());
+            let fan1_max = std::fs::read_to_string(entry.join("fan1_max"))
+                .map(|v| v.trim().to_string())
+                .unwrap_or_else(|_| "—".to_string());
+            let pwm1 = std::fs::read_to_string(entry.join("pwm1"))
+                .map(|v| v.trim().to_string())
+                .unwrap_or_else(|_| "—".to_string());
+            let pwm1_en = std::fs::read_to_string(entry.join("pwm1_enable"))
+                .map(|v| v.trim().to_string())
+                .unwrap_or_else(|_| "—".to_string());
+            let hwmon_name = entry
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
             if fan1 != "—" || fan2 != "—" || pwm1_en != "—" || pwm1 != "—" {
-                hwmon_rows.push(format!("| `{}` | `{}` | {} | {} | {} | {} | {} |", hwmon_name, name, fan1, fan2, fan1_max, pwm1, pwm1_en));
+                hwmon_rows.push(format!(
+                    "| `{}` | `{}` | {} | {} | {} | {} | {} |",
+                    hwmon_name, name, fan1, fan2, fan1_max, pwm1, pwm1_en
+                ));
             }
         }
     }
@@ -195,19 +275,34 @@ fn build_unified_system_dump() -> String {
     let pp_choices = std::fs::read_to_string("/sys/firmware/acpi/platform_profile_choices")
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|_| "—".to_string());
-    report.push_str(&format!("- Platform Profile: `{}` (choices: `{}`)\n", pp, pp_choices));
+    report.push_str(&format!(
+        "- Platform Profile: `{}` (choices: `{}`)\n",
+        pp, pp_choices
+    ));
 
     // ── Battery Telemetry ────────────────────────────────────
     if let Some(ref bat) = stats.battery {
         report.push_str("\n## Battery Telemetry\n\n| Field | Value |\n|-------|-------|\n");
-        report.push_str(&format!("| Battery Node | `{}` ({:?}, AC Online: `{}`) |\n", bat.name, bat.status, bat.ac_online));
-        report.push_str(&format!("| Charge / Health | `{}%` / `{}` |\n",
+        report.push_str(&format!(
+            "| Battery Node | `{}` ({:?}, AC Online: `{}`) |\n",
+            bat.name, bat.status, bat.ac_online
+        ));
+        report.push_str(&format!(
+            "| Charge / Health | `{}%` / `{}` |\n",
             bat.charge_pct,
-            bat.health_pct.map(|h| format!("{:.1}%", h)).unwrap_or_else(|| "—".to_string())
+            bat.health_pct
+                .map(|h| format!("{:.1}%", h))
+                .unwrap_or_else(|| "—".to_string())
         ));
         if let (Some(now), Some(full)) = (bat.energy_now_wh, bat.energy_full_wh) {
-            let des_str = bat.energy_design_wh.map(|d| format!(" / {:.2} Wh design", d)).unwrap_or_default();
-            report.push_str(&format!("| Energy | `{:.2} / {:.2} Wh{}` |\n", now, full, des_str));
+            let des_str = bat
+                .energy_design_wh
+                .map(|d| format!(" / {:.2} Wh design", d))
+                .unwrap_or_default();
+            report.push_str(&format!(
+                "| Energy | `{:.2} / {:.2} Wh{}` |\n",
+                now, full, des_str
+            ));
         }
         if let Some(cycles) = bat.cycle_count {
             report.push_str(&format!("| Cycle Count | `{}` |\n", cycles));
@@ -216,8 +311,10 @@ fn build_unified_system_dump() -> String {
 
     // ── hwmon Paths ──────────────────────────────────────────
     report.push_str("\n## hwmon Sensor Paths\n\n");
-    report.push_str("| hwmon | Driver | fan1_input | fan2_input | fan1_max | pwm1 | pwm1_enable |\n");
-    report.push_str("|-------|--------|------------|------------|----------|------|-------------|\n");
+    report
+        .push_str("| hwmon | Driver | fan1_input | fan2_input | fan1_max | pwm1 | pwm1_enable |\n");
+    report
+        .push_str("|-------|--------|------------|------------|----------|------|-------------|\n");
     if hwmon_rows.is_empty() {
         report.push_str("| — | (no fan hwmon nodes found) | — | — | — | — | — |\n");
     } else {
@@ -256,10 +353,18 @@ fn build_unified_system_dump() -> String {
             .lines()
             .filter(|l| {
                 let lo = l.to_lowercase();
-                lo.contains("hp") || lo.contains("hewlett") || lo.contains("omen")
-                    || lo.contains("03f0") || lo.contains("0d62") || lo.contains("darfon")
-                    || lo.contains("0461") || lo.contains("primax") || lo.contains("1038")
-                    || lo.contains("0c45") || lo.contains("microdia") || lo.contains("sonix")
+                lo.contains("hp")
+                    || lo.contains("hewlett")
+                    || lo.contains("omen")
+                    || lo.contains("03f0")
+                    || lo.contains("0d62")
+                    || lo.contains("darfon")
+                    || lo.contains("0461")
+                    || lo.contains("primax")
+                    || lo.contains("1038")
+                    || lo.contains("0c45")
+                    || lo.contains("microdia")
+                    || lo.contains("sonix")
                     || lo.contains("keyboard")
             })
             .collect();
@@ -275,10 +380,20 @@ fn build_unified_system_dump() -> String {
     if let Ok(entries) = glob::glob("/sys/class/hidraw/hidraw*") {
         let mut hid_lines = Vec::new();
         for entry in entries.filter_map(Result::ok) {
-            let dev_name = entry.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let dev_name = entry
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             let uevent = std::fs::read_to_string(entry.join("device/uevent")).unwrap_or_default();
-            let hid_id = uevent.lines().find(|l| l.starts_with("HID_ID=")).unwrap_or("");
-            let hid_name = uevent.lines().find(|l| l.starts_with("HID_NAME=")).unwrap_or("");
+            let hid_id = uevent
+                .lines()
+                .find(|l| l.starts_with("HID_ID="))
+                .unwrap_or("");
+            let hid_name = uevent
+                .lines()
+                .find(|l| l.starts_with("HID_NAME="))
+                .unwrap_or("");
             let desc = std::fs::read(entry.join("device/report_descriptor")).unwrap_or_default();
             let tag = if desc.starts_with(&[0x05, 0x59, 0x09, 0x01]) {
                 " [LampArray 0x59]"
@@ -288,7 +403,13 @@ fn build_unified_system_dump() -> String {
                 ""
             };
             if !hid_id.is_empty() {
-                hid_lines.push(format!("- `/dev/{}`: `{}` `{}`{}", dev_name, hid_id.trim_start_matches("HID_ID="), hid_name.trim_start_matches("HID_NAME="), tag));
+                hid_lines.push(format!(
+                    "- `/dev/{}`: `{}` `{}`{}",
+                    dev_name,
+                    hid_id.trim_start_matches("HID_ID="),
+                    hid_name.trim_start_matches("HID_NAME="),
+                    tag
+                ));
             }
         }
         for l in hid_lines {
@@ -300,16 +421,50 @@ fn build_unified_system_dump() -> String {
     // ── ACPI DSDT/SSDT Summary ───────────────────────────────
     let acpi = crate::acpi_diagnostics::AcpiDiagnosticRunner::analyze_acpi_tables();
     report.push_str("\n## ACPI WMI GUIDs & Methods\n\n");
-    report.push_str(&format!("- DSDT: `{}` | SSDT count: `{}`\n", if acpi.dsdt_found { "present" } else { "missing" }, acpi.ssdt_count));
-    let active_guids: Vec<String> = acpi.guids.iter().filter(|g| g.detected).map(|g| format!("`{}`", g.guid)).collect();
-    let active_methods: Vec<String> = acpi.methods.iter().filter(|m| m.detected).map(|m| format!("`{}`", m.name)).collect();
-    report.push_str(&format!("- Active GUIDs: {}\n", if active_guids.is_empty() { "none".to_string() } else { active_guids.join(", ") }));
-    report.push_str(&format!("- Active Methods: {}\n", if active_methods.is_empty() { "none".to_string() } else { active_methods.join(", ") }));
+    report.push_str(&format!(
+        "- DSDT: `{}` | SSDT count: `{}`\n",
+        if acpi.dsdt_found {
+            "present"
+        } else {
+            "missing"
+        },
+        acpi.ssdt_count
+    ));
+    let active_guids: Vec<String> = acpi
+        .guids
+        .iter()
+        .filter(|g| g.detected)
+        .map(|g| format!("`{}`", g.guid))
+        .collect();
+    let active_methods: Vec<String> = acpi
+        .methods
+        .iter()
+        .filter(|m| m.detected)
+        .map(|m| format!("`{}`", m.name))
+        .collect();
+    report.push_str(&format!(
+        "- Active GUIDs: {}\n",
+        if active_guids.is_empty() {
+            "none".to_string()
+        } else {
+            active_guids.join(", ")
+        }
+    ));
+    report.push_str(&format!(
+        "- Active Methods: {}\n",
+        if active_methods.is_empty() {
+            "none".to_string()
+        } else {
+            active_methods.join(", ")
+        }
+    ));
 
     // ── EC Registers Snapshot ────────────────────────────────
     report.push_str("\n## EC Registers — Snapshot\n\n");
     if !ec_io_exists {
-        let _ = std::process::Command::new("modprobe").args(["ec_sys", "write_support=1"]).output();
+        let _ = std::process::Command::new("modprobe")
+            .args(["ec_sys", "write_support=1"])
+            .output();
     }
     if let Ok(ec_data) = std::fs::read("/sys/kernel/debug/ec/ec0/io") {
         report.push_str("```\n");
@@ -356,7 +511,16 @@ fn build_unified_system_dump() -> String {
             .unwrap_or_default()
     } else {
         std::fs::read_to_string("/var/log/omen-space-daemon.log")
-            .map(|s| s.lines().rev().take(20).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n"))
+            .map(|s| {
+                s.lines()
+                    .rev()
+                    .take(20)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
             .unwrap_or_default()
     };
     if daemon_logs.trim().is_empty() {

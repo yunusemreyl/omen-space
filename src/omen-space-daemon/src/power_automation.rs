@@ -41,11 +41,13 @@ impl PowerAutomationService {
                         while let Some(signal) = stream.next().await {
                             if let Ok(args) = signal.args() {
                                 if args.interface_name() == "net.hadess.PowerProfiles" {
-                                    if let Some(val) = args.changed_properties().get("ActiveProfile")
+                                    if let Some(val) =
+                                        args.changed_properties().get("ActiveProfile")
                                     {
                                         if let Ok(profile_str) = <&str>::try_from(val) {
                                             info!("PPD Profile changed to: {}", profile_str);
-                                            let _ = power_ppd.set_profile_internal(profile_str).await;
+                                            let _ =
+                                                power_ppd.set_profile_internal(profile_str).await;
                                         }
                                     }
                                 }

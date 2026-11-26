@@ -1,7 +1,7 @@
+use crate::notifier::DesktopNotifier;
+use log::info;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use log::info;
-use crate::notifier::DesktopNotifier;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BiosUpdateInfo {
@@ -22,7 +22,10 @@ impl BiosUpdateChecker {
         let product_name = read_dmi_value("product_name");
         let installed_bios = read_dmi_value("bios_version");
 
-        info!("Omen Space: Checking BIOS updates for board '{}' (Installed: '{}')...", board_id, installed_bios);
+        info!(
+            "Omen Space: Checking BIOS updates for board '{}' (Installed: '{}')...",
+            board_id, installed_bios
+        );
 
         // Fetch known board BIOS versions or query HP release catalog
         let (latest_bios, download_url) = fetch_hp_bios_catalog(&board_id, &installed_bios);
@@ -30,7 +33,10 @@ impl BiosUpdateChecker {
         let update_available = is_version_newer(&installed_bios, &latest_bios);
 
         let check_status = if update_available {
-            format!("New BIOS update '{}' available for board {} (Installed: '{}')", latest_bios, board_id, installed_bios)
+            format!(
+                "New BIOS update '{}' available for board {} (Installed: '{}')",
+                latest_bios, board_id, installed_bios
+            )
         } else {
             format!("BIOS is up to date ('{}')", installed_bios)
         };
@@ -40,9 +46,13 @@ impl BiosUpdateChecker {
         if update_available {
             DesktopNotifier::send_notification(
                 "Omen Space BIOS Update Available",
-                &format!("New BIOS update '{}' is available for your HP OMEN ({})! Current: '{}'", latest_bios, board_id, installed_bios),
+                &format!(
+                    "New BIOS update '{}' is available for your HP OMEN ({})! Current: '{}'",
+                    latest_bios, board_id, installed_bios
+                ),
                 1,
-            ).await;
+            )
+            .await;
         }
 
         BiosUpdateInfo {
@@ -71,13 +81,19 @@ fn fetch_hp_bios_catalog(board_id: &str, installed: &str) -> (String, String) {
         (latest.to_string(), url.to_string())
     } else {
         // Fallback: If unknown board, return current version as latest
-        (installed.to_string(), "https://support.hp.com/us-en/drivers".to_string())
+        (
+            installed.to_string(),
+            "https://support.hp.com/us-en/drivers".to_string(),
+        )
     }
 }
 
 fn is_version_newer(installed: &str, latest: &str) -> bool {
     let parse_ver = |v: &str| -> u32 {
-        v.trim_start_matches('F').trim_start_matches('.').parse::<u32>().unwrap_or(0)
+        v.trim_start_matches('F')
+            .trim_start_matches('.')
+            .parse::<u32>()
+            .unwrap_or(0)
     };
 
     let installed_num = parse_ver(installed);
@@ -88,5 +104,8 @@ fn is_version_newer(installed: &str, latest: &str) -> bool {
 
 fn read_dmi_value(entry: &str) -> String {
     let path = format!("/sys/class/dmi/id/{}", entry);
-    fs::read_to_string(path).unwrap_or_else(|_| "Unknown".to_string()).trim().to_string()
+    fs::read_to_string(path)
+        .unwrap_or_else(|_| "Unknown".to_string())
+        .trim()
+        .to_string()
 }

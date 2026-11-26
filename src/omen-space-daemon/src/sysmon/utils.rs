@@ -2,7 +2,10 @@
 pub fn parse_kb(line: &str) -> f64 {
     let mut parts = line.split_whitespace();
     parts.next();
-    parts.next().and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0)
+    parts
+        .next()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(0.0)
 }
 
 pub fn get_running_process_names() -> Vec<String> {
@@ -24,4 +27,3 @@ pub fn get_running_process_names() -> Vec<String> {
     }
     names
 }
-

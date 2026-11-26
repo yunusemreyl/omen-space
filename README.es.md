@@ -8,7 +8,7 @@
 
   <p>
     <a href="https://github.com/yunusemreyl/omen-space/releases/latest">
-      <img src="https://img.shields.io/badge/Versi%C3%B3n-v2.5.2-e11d48?style=flat-square" alt="Versión v2.5.2" />
+      <img src="https://img.shields.io/badge/Versi%C3%B3n-v2.5.3-e11d48?style=flat-square" alt="Versión v2.5.3" />
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/Licencia-GPL--3.0-10b981?style=flat-square" alt="Licencia" />
@@ -87,11 +87,12 @@ curl -sSL https://raw.githubusercontent.com/yunusemreyl/omen-space/main/install.
 
 ---
 
-## Novedades en v2.5.2
+## Novedades en v2.5.3
 
-- **Corrección de cierre inesperado en Ajustes (`#395`):** Se eliminó el cierre de `omen-gui` cada ~20–30 s tras abrir Ajustes (`settings.rs` ahora usa `ping_daemon_async().await` y `daemon_client::block_with_timeout()` evita entrar al runtime Tokio activo desde hilos con contexto activo).
-- **Corrección de bloqueo máximo EC en `8C77` y lectura de sensor CPU (`#395`):** El monitor de ventiladores ahora prioriza los sensores de paquete CPU `temp1_input` frente a picos de un solo núcleo o nodos ACPI/PCH, añade recuperación automática ante bloqueos máximos del EC (`should_recover_ec_max_latch` + refresco de `platform_profile` y reinicio de `pwm1_enable`), restaura el modo anterior al desactivar Protección Térmica, asigna `omen_v1_unknown_ec_thermal_params` a `8C76`/`8C77`/`8C78` y refresca WMI `0x1A` durante el keep-alive de `PWM_MODE_MANUAL` en `driver/hp-wmi.c`.
-- **Incluye todas las mejoras de `v2.5.1`:** Soporte verificado para `8EDF` y `8D42`, animaciones Primax `0461:4F03`, límites de 4 zonas en `8A17`, fallback MUX en `8DCF` y refactorización modular.
+- **Distribución `TR-Q` y matriz Primax `0xFF13` (`#385`):** Añadida la distribución de teclas turca Q (`TR-Q`) junto a `EN` y `DE` en RGB Studio, mapas físicos de LED `Ralph`/`Cybug` (`0461:4F03`/`4E9A`/`4E9B`/`4F11`/`4F1E`/`4ECB`), color uniforme en `Static`, onda personalizada en `Wave`, sincronización de botones `Off / Key / Zone / All` y respeto de atajos nativos `Fn` en `Hardware Effects`.
+- **Recuperación tras limpieza de ventiladores (`#385`, `#364`):** Refresca `platform_profile` (`WMI 0x1A`) al salir del modo máximo, aplica un ciclo inicial seguro y ajusta la transición `PWM_MODE_MAX -> PWM_MODE_MANUAL` en `driver/hp-wmi.c`.
+- **Código más limpio y modular:** Proxies D-Bus, comparación semver y detección de idioma unificados en `omen-types`; módulos divididos (`i18n/`, `monitoring/`, `updater/`, `fan/protection.rs`), paridad TR/EN/ES verificada por pruebas, `cargo fmt` en CI y limpieza de archivos/código sin uso.
+- **Incluye todas las correcciones de `v2.5.2`:** Corrección de cierre en Ajustes y recuperación del bloqueo máximo EC en `8C77` (`#395`).
 
 ---
 

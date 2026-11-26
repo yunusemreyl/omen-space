@@ -1,19 +1,20 @@
+use crate::i18n;
+use adw::prelude::*;
 use gtk::prelude::*;
 use libadwaita as adw;
-use adw::prelude::*;
 use std::fs;
-use crate::i18n;
 
 /* ─────────────────────────────────────────────────────────────
-   mux.rs — Clean GPU MUX & PRIME Offload Page
-   ───────────────────────────────────────────────────────────── */
+mux.rs — Clean GPU MUX & PRIME Offload Page
+───────────────────────────────────────────────────────────── */
 
 fn get_nvidia_driver_version() -> String {
     if let Ok(content) = fs::read_to_string("/proc/driver/nvidia/version") {
         for line in content.lines() {
             if line.contains("NVRM version:") {
                 for part in line.split_whitespace() {
-                    if part.contains('.') && part.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                    if part.contains('.') && part.chars().next().is_some_and(|c| c.is_ascii_digit())
+                    {
                         return format!("{} (NVIDIA Open Kernel)", part);
                     }
                 }
@@ -25,9 +26,19 @@ fn get_nvidia_driver_version() -> String {
 
 fn detect_active_display_gpu() -> (String, bool, String, String) {
     let specs = crate::daemon_client::get_hardware_specs_sync();
-    let gpu_name = specs.gpu_spec.split("  ·  ").next().unwrap_or("NVIDIA GPU").to_string();
-    let is_amd = specs.cpu_spec.to_lowercase().contains("ryzen") || specs.cpu_spec.to_lowercase().contains("amd");
-    let igpu_name = if is_amd { "AMD Radeon".to_string() } else { "Intel Graphics".to_string() };
+    let gpu_name = specs
+        .gpu_spec
+        .split("  ·  ")
+        .next()
+        .unwrap_or("NVIDIA GPU")
+        .to_string();
+    let is_amd = specs.cpu_spec.to_lowercase().contains("ryzen")
+        || specs.cpu_spec.to_lowercase().contains("amd");
+    let igpu_name = if is_amd {
+        "AMD Radeon".to_string()
+    } else {
+        "Intel Graphics".to_string()
+    };
 
     for pattern in [
         "/sys/class/drm/card[0-9]*-*eDP*/device/vendor",
@@ -101,8 +112,13 @@ pub fn build_page() -> gtk::Box {
     let drv_version = get_nvidia_driver_version();
     let specs = crate::daemon_client::get_hardware_specs_sync();
     let (disp_badge_init, is_discrete_active, gpu_name, igpu_name) = detect_active_display_gpu();
-    let initial_fw_mode = read_firmware_mux_mode_sync()
-        .unwrap_or_else(|| if is_discrete_active { "discrete".to_string() } else { "hybrid".to_string() });
+    let initial_fw_mode = read_firmware_mux_mode_sync().unwrap_or_else(|| {
+        if is_discrete_active {
+            "discrete".to_string()
+        } else {
+            "hybrid".to_string()
+        }
+    });
     let initial_supported = read_supported_modes_sync();
     let initial_supports_advanced = initial_fw_mode == "advanced"
         || initial_supported
@@ -125,22 +141,30 @@ pub fn build_page() -> gtk::Box {
         .spacing(4)
         .hexpand(true)
         .build();
-    hdr_txt.append(&gtk::Label::builder()
-        .label(i18n::t("title_mux"))
-        .css_classes(["page-title"])
-        .halign(gtk::Align::Start)
-        .build());
-    hdr_txt.append(&gtk::Label::builder()
-        .label(i18n::t("mux_desc"))
-        .css_classes(["os-section-desc"])
-        .halign(gtk::Align::Start)
-        .wrap(true)
-        .build());
+    hdr_txt.append(
+        &gtk::Label::builder()
+            .label(i18n::t("title_mux"))
+            .css_classes(["page-title"])
+            .halign(gtk::Align::Start)
+            .build(),
+    );
+    hdr_txt.append(
+        &gtk::Label::builder()
+            .label(i18n::t("mux_desc"))
+            .css_classes(["os-section-desc"])
+            .halign(gtk::Align::Start)
+            .wrap(true)
+            .build(),
+    );
     hdr_row.append(&hdr_txt);
 
     let fw_mode_badge = gtk::Label::builder()
         .label(format_mux_mode_label(&initial_fw_mode))
-        .css_classes(if initial_fw_mode == "discrete" { ["badge-warn"] } else { ["badge-ok"] })
+        .css_classes(if initial_fw_mode == "discrete" {
+            ["badge-warn"]
+        } else {
+            ["badge-ok"]
+        })
         .valign(gtk::Align::Center)
         .build();
     hdr_row.append(&fw_mode_badge);
@@ -153,27 +177,33 @@ pub fn build_page() -> gtk::Box {
         .css_classes(["os-card"])
         .visible(false)
         .build();
-    no_mux_card.append(&gtk::Image::builder()
-        .icon_name("dialog-information-symbolic")
-        .pixel_size(20)
-        .valign(gtk::Align::Center)
-        .build());
+    no_mux_card.append(
+        &gtk::Image::builder()
+            .icon_name("dialog-information-symbolic")
+            .pixel_size(20)
+            .valign(gtk::Align::Center)
+            .build(),
+    );
     let no_mux_txt = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(2)
         .hexpand(true)
         .build();
-    no_mux_txt.append(&gtk::Label::builder()
-        .label(i18n::t("mux_not_available_title"))
-        .css_classes(["chip-title"])
-        .halign(gtk::Align::Start)
-        .build());
-    no_mux_txt.append(&gtk::Label::builder()
-        .label(i18n::t("mux_not_available_desc"))
-        .css_classes(["os-section-desc"])
-        .halign(gtk::Align::Start)
-        .wrap(true)
-        .build());
+    no_mux_txt.append(
+        &gtk::Label::builder()
+            .label(i18n::t("mux_not_available_title"))
+            .css_classes(["chip-title"])
+            .halign(gtk::Align::Start)
+            .build(),
+    );
+    no_mux_txt.append(
+        &gtk::Label::builder()
+            .label(i18n::t("mux_not_available_desc"))
+            .css_classes(["os-section-desc"])
+            .halign(gtk::Align::Start)
+            .wrap(true)
+            .build(),
+    );
     no_mux_card.append(&no_mux_txt);
     page.append(&no_mux_card);
 
@@ -233,26 +263,32 @@ pub fn build_page() -> gtk::Box {
         .css_classes(["os-card"])
         .visible(false)
         .build();
-    warn_card.append(&gtk::Image::builder()
-        .icon_name("dialog-warning-symbolic")
-        .pixel_size(20)
-        .valign(gtk::Align::Center)
-        .build());
+    warn_card.append(
+        &gtk::Image::builder()
+            .icon_name("dialog-warning-symbolic")
+            .pixel_size(20)
+            .valign(gtk::Align::Center)
+            .build(),
+    );
     let warn_txt = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(2)
         .hexpand(true)
         .build();
-    warn_txt.append(&gtk::Label::builder()
-        .label(i18n::t("restart_required"))
-        .css_classes(["chip-title"])
-        .halign(gtk::Align::Start)
-        .build());
-    warn_txt.append(&gtk::Label::builder()
-        .label(i18n::t("restart_desc"))
-        .css_classes(["os-section-desc"])
-        .halign(gtk::Align::Start)
-        .build());
+    warn_txt.append(
+        &gtk::Label::builder()
+            .label(i18n::t("restart_required"))
+            .css_classes(["chip-title"])
+            .halign(gtk::Align::Start)
+            .build(),
+    );
+    warn_txt.append(
+        &gtk::Label::builder()
+            .label(i18n::t("restart_desc"))
+            .css_classes(["os-section-desc"])
+            .halign(gtk::Align::Start)
+            .build(),
+    );
     warn_card.append(&warn_txt);
 
     let reboot_btn = gtk::Button::builder()
@@ -262,8 +298,14 @@ pub fn build_page() -> gtk::Box {
         .build();
     reboot_btn.connect_clicked(|_| {
         if std::path::Path::new("/run/systemd/system").exists() {
-            let _ = std::process::Command::new("systemctl").arg("reboot").spawn();
-        } else if std::process::Command::new("loginctl").arg("reboot").spawn().is_err() {
+            let _ = std::process::Command::new("systemctl")
+                .arg("reboot")
+                .spawn();
+        } else if std::process::Command::new("loginctl")
+            .arg("reboot")
+            .spawn()
+            .is_err()
+        {
             let _ = std::process::Command::new("pkexec").arg("reboot").spawn();
         }
     });
@@ -295,7 +337,11 @@ pub fn build_page() -> gtk::Box {
         .build();
     let disp_routing_badge = gtk::Label::builder()
         .label(&disp_badge_init)
-        .css_classes(if is_discrete_active { ["badge-warn"] } else { ["badge-ok"] })
+        .css_classes(if is_discrete_active {
+            ["badge-warn"]
+        } else {
+            ["badge-ok"]
+        })
         .valign(gtk::Align::Center)
         .build();
     displays_row.add_suffix(&disp_routing_badge);
@@ -307,9 +353,7 @@ pub fn build_page() -> gtk::Box {
         .subtitle(i18n::t("mux_dgpu_power_sub"))
         .visible(false)
         .build();
-    let dgpu_power_val = gtk::Label::builder()
-        .valign(gtk::Align::Center)
-        .build();
+    let dgpu_power_val = gtk::Label::builder().valign(gtk::Align::Center).build();
     dgpu_power_row.add_suffix(&dgpu_power_val);
     hw_group.add(&dgpu_power_row);
 
@@ -382,9 +426,7 @@ pub fn build_page() -> gtk::Box {
                     badge.set_label(if pending { pending_lbl } else { confirmed_lbl });
                     badge.set_css_classes(&[if pending { "badge-warn" } else { css_class }]);
                 } else {
-                    let unsupported = res
-                        .as_deref()
-                        .is_ok_and(|s| s.contains("UNSUPPORTED_MODE"));
+                    let unsupported = res.as_deref().is_ok_and(|s| s.contains("UNSUPPORTED_MODE"));
                     let prev = boot_m.borrow().clone();
                     upd.set(true);
                     match prev.as_str() {
@@ -458,7 +500,10 @@ pub fn build_page() -> gtk::Box {
     glib::spawn_future_local(async move {
         if let Ok(json) = crate::daemon_client::get_gpu_info_async().await {
             if let Ok(info) = serde_json::from_str::<serde_json::Value>(&json) {
-                let available = info.get("available").and_then(|v| v.as_bool()).unwrap_or(true);
+                let available = info
+                    .get("available")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
                 let confirmed_mode = info
                     .get("mode")
                     .and_then(|v| v.as_str())
@@ -469,7 +514,10 @@ pub fn build_page() -> gtk::Box {
                     .unwrap_or(confirmed_mode);
                 let pending_mode = info.get("pending_mode").and_then(|v| v.as_str());
                 let effective_sel = pending_mode.unwrap_or(confirmed_mode);
-                let routing = info.get("routing_mode").and_then(|v| v.as_str()).unwrap_or("hybrid");
+                let routing = info
+                    .get("routing_mode")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("hybrid");
 
                 let supported: Vec<&str> = info
                     .get("supported_modes")
@@ -489,7 +537,9 @@ pub fn build_page() -> gtk::Box {
                     wh_load.set_visible(supported.contains(&"hybrid"));
                     wd_load.set_visible(supported.contains(&"discrete"));
                     wa_load.set_visible(supports_ao || effective_sel == "advanced");
-                    wi_load.set_visible(supported.contains(&"integrated") || effective_sel == "integrated");
+                    wi_load.set_visible(
+                        supported.contains(&"integrated") || effective_sel == "integrated",
+                    );
                 }
 
                 upd_load.set(true);
@@ -503,7 +553,9 @@ pub fn build_page() -> gtk::Box {
                 let is_pending = info
                     .get("reboot_pending")
                     .and_then(|v| v.as_bool())
-                    .unwrap_or_else(|| pending_mode.is_some_and(|p| p != boot_mode) || boot_mode != confirmed_mode);
+                    .unwrap_or_else(|| {
+                        pending_mode.is_some_and(|p| p != boot_mode) || boot_mode != confirmed_mode
+                    });
                 warn_card.set_visible(available && is_pending);
 
                 if is_pending {
@@ -565,7 +617,11 @@ pub fn build_page() -> gtk::Box {
                     } else {
                         "mux_dgpu_active"
                     }));
-                    dgpu_val_load.set_css_classes(if is_suspended { &["badge-ok"] } else { &["badge-warn"] });
+                    dgpu_val_load.set_css_classes(if is_suspended {
+                        &["badge-ok"]
+                    } else {
+                        &["badge-warn"]
+                    });
                     dgpu_row_load.set_visible(true);
                 }
             }
@@ -576,7 +632,11 @@ pub fn build_page() -> gtk::Box {
 }
 
 /// Compact mode card matching `performance_control.rs` proportions.
-fn build_compact_mux_card(icon_path: &str, title: &str, subtitle: &str) -> (gtk::ToggleButton, gtk::Box) {
+fn build_compact_mux_card(
+    icon_path: &str,
+    title: &str,
+    subtitle: &str,
+) -> (gtk::ToggleButton, gtk::Box) {
     let btn = gtk::ToggleButton::builder()
         .css_classes(["chip-card"])
         .build();
@@ -596,22 +656,28 @@ fn build_compact_mux_card(icon_path: &str, title: &str, subtitle: &str) -> (gtk:
         .hexpand(true)
         .valign(gtk::Align::Center)
         .build();
-    text_col.append(&gtk::Label::builder()
-        .label(title)
-        .css_classes(["chip-title"])
-        .halign(gtk::Align::Start)
-        .build());
-    text_col.append(&gtk::Label::builder()
-        .label(subtitle)
-        .css_classes(["chip-sub"])
-        .halign(gtk::Align::Start)
-        .ellipsize(gtk::pango::EllipsizeMode::End)
-        .build());
+    text_col.append(
+        &gtk::Label::builder()
+            .label(title)
+            .css_classes(["chip-title"])
+            .halign(gtk::Align::Start)
+            .build(),
+    );
+    text_col.append(
+        &gtk::Label::builder()
+            .label(subtitle)
+            .css_classes(["chip-sub"])
+            .halign(gtk::Align::Start)
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .build(),
+    );
     row.append(&text_col);
 
     btn.set_child(Some(&row));
 
-    let wrap = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+    let wrap = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .build();
     wrap.append(&btn);
     (btn, wrap)
 }

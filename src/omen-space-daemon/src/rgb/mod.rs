@@ -3,6 +3,7 @@ mod hardware;
 mod hid_per_key;
 pub mod key_layout;
 mod lamparray;
+mod primax_map;
 
 use effects::{compute_anim_color, render_per_key_frame, should_stream_software_frame};
 pub use hardware::{parse_hex_color, scale_hex_color, RgbHardware};
@@ -165,6 +166,26 @@ struct RgbInner {
     mcu_sig: Option<Vec<u8>>,
     wizard: Arc<crate::hid_wizard::HidPerKeyWizard>,
     desktop_rgb: crate::desktop_rgb::DesktopRgbController,
+}
+
+pub(crate) fn static_colors_for_per_key(
+    colors: &[String],
+    brightness: u32,
+    scale_brightness: bool,
+) -> Vec<(u8, u8, u8)> {
+    let primary_hex = colors.first().map(|s| s.as_str()).unwrap_or("0099ED");
+    let (r, g, b) = parse_hex_color(primary_hex);
+    let scaler = if scale_brightness {
+        (brightness as f64 / 100.0).clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    let scaled = (
+        (r as f64 * scaler) as u8,
+        (g as f64 * scaler) as u8,
+        (b as f64 * scaler) as u8,
+    );
+    vec![scaled; HidPerKeyBackend::TOTAL_KEY_COUNT]
 }
 
 #[derive(Clone)]
@@ -397,7 +418,15 @@ impl RgbService {
             // Hardware effects (#322, #355): let the keyboard MCU animate supported modes,
             // but fall through cleanly to software frame streaming when the selected mode has
             // no MCU opcode (e.g. marquee, reactive, ripple, wave, blinking — #385).
+            // On Primax McuSDK2, hw_effects yields control to the keyboard's native Fn preset.
             if has_per_key {
+                if g.config.hw_effects && g.hid_per_key.is_primax_mcu() {
+                    last_per_key_colors.clear();
+                    g.mcu_sig = None;
+                    drop(g);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    continue;
+                }
                 let mcu_rec = if g.config.hw_effects {
                     g.hid_per_key
                         .mcu_effect_for(&mode, speed, &direction, &colors)
@@ -411,7 +440,8 @@ impl RgbService {
                             sig.push(brightness.clamp(1, 100) as u8);
                         }
                         if g.mcu_sig.as_ref() != Some(&sig)
-                            && g.hid_per_key.send_mcu_effect_with_brightness(&rec, brightness)
+                            && g.hid_per_key
+                                .send_mcu_effect_with_brightness(&rec, brightness)
                         {
                             g.mcu_sig = Some(sig);
                         }
@@ -578,16 +608,17 @@ impl RgbService {
         let colors = g.config.colors.clone();
 
         if g.hid_per_key.is_available() {
+            let primax_yield_hw = g.config.hw_effects && g.hid_per_key.is_primax_mcu();
             let mcu_anim_active = g.config.hw_effects
                 && power
                 && brightness > 0
                 && g.hid_per_key
                     .mcu_effect_for(&mode, speed, &g.config.direction, &colors)
                     .is_some();
-            if g.config.hw_effects && g.hid_per_key.is_lamparray() && mcu_anim_active {
+            if primax_yield_hw {
+                // Yield hardware control to the keyboard's native Fn preset.
+            } else if g.config.hw_effects && g.hid_per_key.is_lamparray() && mcu_anim_active {
                 g.hid_per_key.release_lamparray();
-            } else if mcu_anim_active && g.hid_per_key.is_primax_mcu() {
-                // Handled by software_animation_loop via send_mcu_effect_with_brightness
             } else if !power || brightness == 0 {
                 g.hid_per_key.send_enter_per_key_mode(0);
                 g.hid_per_key
@@ -595,14 +626,9 @@ impl RgbService {
             } else {
                 g.hid_per_key.send_enter_per_key_mode(brightness);
                 if mode == "static" {
-                    let static_colors =
-                        if g.hid_per_key.is_lamparray() || g.hid_per_key.is_primax_mcu() {
-                            let scaler = (brightness as f64 / 100.0).clamp(0.0, 1.0);
-                            colors.iter().map(|c| scale_hex_color(c, scaler)).collect()
-                        } else {
-                            colors.clone()
-                        };
-                    g.hid_per_key.set_zone_colors(&static_colors);
+                    let scale = g.hid_per_key.is_lamparray() || g.hid_per_key.is_primax_mcu();
+                    let key_colors = static_colors_for_per_key(&colors, brightness, scale);
+                    g.hid_per_key.write_per_key_colors(&key_colors);
                 } else if mode == "per_key_custom" {
                     let scaler = if g.hid_per_key.is_lamparray() || g.hid_per_key.is_primax_mcu() {
                         (brightness as f64 / 100.0).clamp(0.0, 1.0)
@@ -633,10 +659,12 @@ impl RgbService {
             } else if mode == "static" {
                 let mut parsed_colors = Vec::new();
                 for i in 0..7 {
-                    let hex = colors
-                        .get(10 + i)
-                        .cloned()
-                        .unwrap_or_else(|| colors.first().cloned().unwrap_or_else(|| "FF0000".to_string()));
+                    let hex = colors.get(10 + i).cloned().unwrap_or_else(|| {
+                        colors
+                            .first()
+                            .cloned()
+                            .unwrap_or_else(|| "FF0000".to_string())
+                    });
                     parsed_colors.push(parse_hex_color(&hex));
                 }
                 let _ = g
@@ -766,7 +794,12 @@ impl RgbService {
         "OK".to_string()
     }
 
-    async fn set_global(&self, power_val: bool, brightness_val: i32, direction_str: String) -> String {
+    async fn set_global(
+        &self,
+        power_val: bool,
+        brightness_val: i32,
+        direction_str: String,
+    ) -> String {
         if !VALID_DIRECTIONS.contains(&direction_str.as_str()) {
             return "FAIL".to_string();
         }
@@ -916,8 +949,7 @@ impl RgbService {
             return "FAIL: no HID LampArray".to_string();
         }
         g.calibrating = true;
-        g.calibration_until =
-            Some(std::time::Instant::now() + std::time::Duration::from_secs(600));
+        g.calibration_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(600));
         serde_json::json!({
             "status": "calibrating",
             "lamps": g.hid_per_key.lamp_array_count(),
@@ -954,8 +986,7 @@ impl RgbService {
         }
         let rgb: Vec<(u8, u8, u8)> = colors.iter().map(|hex| parse_hex_color(hex)).collect();
         g.calibrating = true;
-        g.calibration_until =
-            Some(std::time::Instant::now() + std::time::Duration::from_secs(600));
+        g.calibration_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(600));
         if g.hid_per_key.set_lamp_colors(&rgb) {
             "OK".to_string()
         } else {
@@ -1125,7 +1156,7 @@ mod mcu_effect_tests {
     }
 
     #[test]
-    fn mcu_effects_only_on_darfon_or_primax_mcu() {
+    fn mcu_effects_only_on_darfon_not_primax_mcu() {
         let c = vec!["00FF00".to_string()];
         assert!(backend(Some(0x54BF))
             .mcu_effect_for("breathing", 50, "ltr", &c)
@@ -1136,9 +1167,7 @@ mod mcu_effect_tests {
             lamparray: None,
             is_primax_mcu: true,
         };
-        assert!(primax
-            .mcu_effect_for("breathing", 50, "ltr", &c)
-            .is_some());
+        assert!(primax.mcu_effect_for("breathing", 50, "ltr", &c).is_none());
         assert!(backend(None)
             .mcu_effect_for("breathing", 50, "ltr", &c)
             .is_none());
@@ -1172,7 +1201,11 @@ mod lightbar_gate_tests {
     fn known_board_without_light_bar_is_not_written() {
         let caps = crate::capabilities::detect("878A", "", "");
         assert_eq!(caps.product_id, "878A");
-        assert!(!lightbar_allowed_for("878A", &caps, "OMEN Laptop 15-ek0xxx"));
+        assert!(!lightbar_allowed_for(
+            "878A",
+            &caps,
+            "OMEN Laptop 15-ek0xxx"
+        ));
     }
 
     #[test]
@@ -1231,7 +1264,8 @@ mod regression_rgb {
         assert_eq!(&pkt[..7], &[0x00, 0x80, 0x01, 0x00, 0x00, 0x12, 0x34]);
         assert!(HidPerKeyBackend::is_primax_cmd_allowed(0x80));
         assert!(HidPerKeyBackend::is_primax_cmd_allowed(0x05));
-        assert!(HidPerKeyBackend::is_primax_cmd_allowed(0x03));
+        assert!(!HidPerKeyBackend::is_primax_cmd_allowed(0x03));
+        assert!(!HidPerKeyBackend::is_primax_cmd_allowed(0x0C));
         assert!(!HidPerKeyBackend::is_primax_cmd_allowed(0x0A));
         assert!(!HidPerKeyBackend::is_primax_cmd_allowed(0x10));
     }
@@ -1252,7 +1286,112 @@ mod regression_rgb {
         assert_eq!(packet.len(), 65);
         assert_eq!(&packet[..5], &[0x00, 0x07, 0x02, 0x00, 0x00]);
         assert_eq!(packet[5], 64);
-        assert_eq!(packet[64], 64);
+        assert_eq!(packet[5 + 46], 64);
+        assert_eq!(packet[64], 0);
+    }
+
+    #[tokio::test]
+    async fn hw_effects_on_primax_yields_to_native_fn_without_writing_reports() {
+        let path = std::env::temp_dir().join(format!("omen-primax-hw-{}", std::process::id()));
+        let sentinel = [0xAAu8; 65];
+        std::fs::write(&path, sentinel).unwrap();
+        let cfg = RgbConfig {
+            hw_effects: true,
+            power: true,
+            mode: "static".to_string(),
+            ..Default::default()
+        };
+        let inner = Arc::new(Mutex::new(RgbInner {
+            evdev_monitor: crate::evdev_monitor::EvdevMonitor::new(),
+            hw: RgbHardware {
+                driver_path: None,
+                is_new_driver: false,
+                zone_count: 0,
+                available: false,
+                board_id: "TEST".into(),
+            },
+            hid_per_key: HidPerKeyBackend {
+                hidraw_paths: vec![path.to_string_lossy().to_string()],
+                device_pid: Some(0x4F03),
+                lamparray: None,
+                is_primax_mcu: true,
+            },
+            config: cfg,
+            anim_step: 0.0,
+            lightbar_step: 0.0,
+            last_lightbar_level: -1,
+            calibrating: false,
+            calibration_until: None,
+            mcu_sig: None,
+            wizard: Arc::new(crate::hid_wizard::HidPerKeyWizard::new()),
+            desktop_rgb: crate::desktop_rgb::DesktopRgbController::new(),
+        }));
+
+        RgbService::apply_state(inner).await;
+        let after = std::fs::read(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(
+            after, sentinel,
+            "hw_effects on Primax must yield to native Fn preset without writing HID reports"
+        );
+    }
+
+    #[tokio::test]
+    async fn static_mode_on_per_key_applies_primary_color_uniformly_without_mint_bleed() {
+        let path = std::env::temp_dir().join(format!("omen-static-uniform-{}", std::process::id()));
+        std::fs::write(&path, [0u8; 65]).unwrap();
+        let cfg = RgbConfig {
+            mode: "static".to_string(),
+            hw_effects: false,
+            power: true,
+            brightness: 100,
+            colors: vec![
+                "FF0000".into(),
+                "9900FF".into(),
+                "0066FF".into(),
+                "00FFAA".into(),
+                "0099ED".into(),
+                "0099ED".into(),
+                "0099ED".into(),
+                "0099ED".into(),
+            ],
+            ..Default::default()
+        };
+        let inner = Arc::new(Mutex::new(RgbInner {
+            evdev_monitor: crate::evdev_monitor::EvdevMonitor::new(),
+            hw: RgbHardware {
+                driver_path: None,
+                is_new_driver: false,
+                zone_count: 0,
+                available: false,
+                board_id: "TEST".into(),
+            },
+            hid_per_key: HidPerKeyBackend {
+                hidraw_paths: vec![path.to_string_lossy().to_string()],
+                device_pid: Some(0x4F03),
+                lamparray: None,
+                is_primax_mcu: true,
+            },
+            config: cfg,
+            anim_step: 0.0,
+            lightbar_step: 0.0,
+            last_lightbar_level: -1,
+            calibrating: false,
+            calibration_until: None,
+            mcu_sig: None,
+            wizard: Arc::new(crate::hid_wizard::HidPerKeyWizard::new()),
+            desktop_rgb: crate::desktop_rgb::DesktopRgbController::new(),
+        }));
+
+        RgbService::apply_state(inner).await;
+        let b_page2 = std::fs::read(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        // Primary color is FF0000 -> Blue channel MUST be 0 on Right arrow (LED 166 => byte 5+46=51), NOT 0xAA!
+        assert_eq!(
+            b_page2[5 + 46],
+            0,
+            "Static mode must not bleed colors[3] (#00FFAA) onto right-side keys"
+        );
     }
 
     #[test]

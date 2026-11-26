@@ -1,14 +1,14 @@
 mod i18n;
 mod overlay_proc;
 
+use i18n::t;
 use ksni::menu::{CheckmarkItem, StandardItem, SubMenu};
 use ksni::MenuItem;
-use i18n::t;
 use log::{error, info, warn};
+use omen_types::*;
 use std::process::Command;
 use std::sync::OnceLock;
 use zbus::{Connection, Result as ZbusResult};
-use omen_types::*;
 static RUNTIME: OnceLock<tokio::runtime::Handle> = OnceLock::new();
 
 fn spawn_task<F>(f: F)
@@ -93,7 +93,8 @@ fn spawn_gui() {
 /// Serialises overlay toggles so a tray-menu click and a hotkey signal that arrive
 /// together cannot both decide "not running" and start two HUDs.
 static OVERLAY_TOGGLE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-static LAST_OVERLAY_TOGGLE: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+static LAST_OVERLAY_TOGGLE: std::sync::Mutex<Option<std::time::Instant>> =
+    std::sync::Mutex::new(None);
 
 /// Toggle the quick HUD: close it if a live one exists, otherwise start it.
 ///
@@ -102,11 +103,16 @@ static LAST_OVERLAY_TOGGLE: std::sync::Mutex<Option<std::time::Instant>> = std::
 /// `pgrep -x`, which used to make this function "close" a corpse and never open
 /// the HUD.
 fn spawn_overlay() {
-    let _guard = OVERLAY_TOGGLE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = OVERLAY_TOGGLE_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     {
-        let mut last = LAST_OVERLAY_TOGGLE.lock().unwrap_or_else(|e| e.into_inner());
+        let mut last = LAST_OVERLAY_TOGGLE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let now = std::time::Instant::now();
-        if last.is_some_and(|prev| now.duration_since(prev) < std::time::Duration::from_millis(250)) {
+        if last.is_some_and(|prev| now.duration_since(prev) < std::time::Duration::from_millis(250))
+        {
             return;
         }
         *last = Some(now);
@@ -124,7 +130,11 @@ fn spawn_overlay() {
             if rc == 0 {
                 info!("Closed overlay (pid {})", pid);
             } else {
-                warn!("Could not signal overlay pid {}: {}", pid, std::io::Error::last_os_error());
+                warn!(
+                    "Could not signal overlay pid {}: {}",
+                    pid,
+                    std::io::Error::last_os_error()
+                );
             }
         }
         return;
@@ -154,7 +164,11 @@ fn spawn_overlay() {
             .spawn()
         {
             Ok(mut child) => {
-                info!("Started overlay {} (pid {})", candidate.display(), child.id());
+                info!(
+                    "Started overlay {} (pid {})",
+                    candidate.display(),
+                    child.id()
+                );
                 // Reap the child once it exits so it never lingers as a zombie.
                 std::thread::spawn(move || {
                     let _ = child.wait();
@@ -233,7 +247,15 @@ impl ksni::Tray for Tray {
             "integrated" => t("tt_gpu_integrated"),
             _ => t("tt_gpu_hybrid"),
         };
-        let mut desc = format!("{}: {}\n{}: {}\n{}: {}", t("tt_power"), p_label, t("tt_fan"), f_label, t("tt_gpu"), g_label);
+        let mut desc = format!(
+            "{}: {}\n{}: {}\n{}: {}",
+            t("tt_power"),
+            p_label,
+            t("tt_fan"),
+            f_label,
+            t("tt_gpu"),
+            g_label
+        );
         if let Some(ref bat) = self.battery_info {
             desc.push_str(&format!("\n{}: {}", t("tt_battery"), bat));
         }
@@ -404,8 +426,16 @@ impl ksni::Tray for Tray {
                 label: t("exit").into(),
                 icon_name: "application-exit".into(),
                 activate: Box::new(|_| {
-                    let _ = Command::new("pkill").arg("-TERM").arg("-x").arg("omen-gui").output();
-                    let _ = Command::new("pkill").arg("-TERM").arg("-x").arg("omenctl").output();
+                    let _ = Command::new("pkill")
+                        .arg("-TERM")
+                        .arg("-x")
+                        .arg("omen-gui")
+                        .output();
+                    let _ = Command::new("pkill")
+                        .arg("-TERM")
+                        .arg("-x")
+                        .arg("omenctl")
+                        .output();
                     std::process::exit(0);
                 }),
                 ..Default::default()
@@ -415,8 +445,6 @@ impl ksni::Tray for Tray {
         items
     }
 }
-
-
 
 static SHARED_CONN: tokio::sync::Mutex<Option<Connection>> = tokio::sync::Mutex::const_new(None);
 
@@ -461,7 +489,10 @@ async fn fetch_gpu_info() -> Option<TrayGpuInfo> {
         if let Ok(proxy) = MuxProxy::new(&conn).await {
             if let Ok(json_str) = proxy.get_gpu_info().await {
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                    let available = val.get("available").and_then(|v| v.as_bool()).unwrap_or(true);
+                    let available = val
+                        .get("available")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
                     let mode = val
                         .get("mode")
                         .and_then(|v| v.as_str())
@@ -507,8 +538,14 @@ async fn fetch_battery_info() -> Option<Option<String>> {
                             omen_types::BatteryStatus::Full => t("bat_full"),
                             omen_types::BatteryStatus::Unknown => "...",
                         };
-                        let health_str = bat.health_pct.map(|h| format!(" · {:.0}% {}", h, t("battery_health"))).unwrap_or_default();
-                        return Some(Some(format!("{}% ({}){}", bat.charge_pct, status_str, health_str)));
+                        let health_str = bat
+                            .health_pct
+                            .map(|h| format!(" · {:.0}% {}", h, t("battery_health")))
+                            .unwrap_or_default();
+                        return Some(Some(format!(
+                            "{}% ({}){}",
+                            bat.charge_pct, status_str, health_str
+                        )));
                     } else {
                         return Some(None);
                     }
@@ -553,11 +590,14 @@ async fn set_gpu_mode(mode: &str) {
                             .arg(t("gpu_reboot_notify"))
                             .arg("-i")
                             .arg("dialog-warning")
-                            .spawn() {
-                            std::thread::spawn(move || { let _ = child.wait(); });
+                            .spawn()
+                        {
+                            std::thread::spawn(move || {
+                                let _ = child.wait();
+                            });
                         }
                     }
-                },
+                }
                 Err(e) => error!("GPU modu değiştirilemedi: {}", e),
             }
         }
@@ -632,15 +672,17 @@ async fn main() {
 
     // Show our own info-level lines (hotkey received, overlay started/closed) in the
     // journal by default; RUST_LOG still overrides this.
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,omen_tray=info"))
+    env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("warn,omen_tray=info"),
+    )
     .init();
     info!("omen-tray başlatılıyor...");
 
     i18n::init();
 
     RUNTIME
-    .set(tokio::runtime::Handle::current())
-    .expect("Failed to initialize runtime handle");
+        .set(tokio::runtime::Handle::current())
+        .expect("Failed to initialize runtime handle");
 
     // Listen for OMEN key presses from the zero-overhead hotkey monitor immediately,
     // before waiting on the desktop tray watcher.
@@ -680,7 +722,9 @@ async fn main() {
     // does not panic on a 1-second D-Bus NoReply timeout during login.
     wait_for_status_notifier_watcher().await;
 
-    let initial_power = fetch_power_profile().await.unwrap_or_else(|| "balanced".into());
+    let initial_power = fetch_power_profile()
+        .await
+        .unwrap_or_else(|| "balanced".into());
     let initial_fan = fetch_fan_mode().await.unwrap_or_else(|| "auto".into());
     let initial_gpu = fetch_gpu_info().await.unwrap_or_else(|| TrayGpuInfo {
         mode: "hybrid".into(),
@@ -704,11 +748,11 @@ async fn main() {
     // Spawn ksni on a dedicated permanent OS thread so it runs its blocking
     // event loop indefinitely without blocking the Tokio runtime executor.
     std::thread::Builder::new()
-    .name("ksni-tray".into())
-    .spawn(move || {
-        service.spawn();
-    })
-    .expect("Failed to spawn tray service thread");
+        .name("ksni-tray".into())
+        .spawn(move || {
+            service.spawn();
+        })
+        .expect("Failed to spawn tray service thread");
 
     // Main background update loop for refreshing tray tooltip/status states
     loop {

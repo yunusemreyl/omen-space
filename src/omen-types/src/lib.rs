@@ -2,12 +2,16 @@ use serde::{Deserialize, Serialize};
 use zbus::proxy;
 
 pub mod hotkey;
+pub mod i18n;
 
 /// Sampling availability is distinct from PCI runtime power state.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GpuSampleState {
-    Active, Suspended, Deferred, Unavailable,
+    Active,
+    Suspended,
+    Deferred,
+    Unavailable,
     #[default]
     #[serde(other)]
     Unknown,
@@ -184,7 +188,11 @@ pub trait Power {
     async fn set_power_profile(&self, profile: &str) -> zbus::Result<String>;
     async fn get_power_profile(&self) -> zbus::Result<String>;
     async fn set_power_limits(&self, enabled: bool, pl1: i32, pl2: i32) -> zbus::Result<String>;
+    async fn set_undervolt(&self, mv: i32) -> zbus::Result<String>;
+    async fn set_tcc_offset(&self, val: i32) -> zbus::Result<String>;
     async fn set_app_profiles_enabled(&self, enabled: bool) -> zbus::Result<String>;
+    async fn set_app_profiles(&self, profiles_json: &str) -> zbus::Result<String>;
+    async fn ping(&self) -> zbus::Result<String>;
 }
 
 // ── Fan Service Proxy ─────────────────────────────────────────────────────────
@@ -195,12 +203,14 @@ pub trait Power {
 )]
 pub trait Fan {
     async fn set_fan_mode(&self, mode: &str) -> zbus::Result<String>;
+    async fn set_fan_target(&self, fan_num: u32, rpm: u32) -> zbus::Result<String>;
     async fn get_fan_mode(&self) -> zbus::Result<String>;
     async fn get_fan_info(&self) -> zbus::Result<String>;
     async fn save_custom_curve(&self, curve_json: &str) -> zbus::Result<String>;
     async fn save_custom_gpu_curve(&self, curve_json: &str) -> zbus::Result<String>;
     async fn set_thermal_protection(&self, enabled: bool) -> zbus::Result<String>;
-    
+    async fn ping(&self) -> zbus::Result<String>;
+
     #[zbus(signal)]
     fn thermal_protection_alert(&self, active: bool) -> zbus::Result<()>;
 }
@@ -216,7 +226,7 @@ pub trait SysMon {
     async fn get_hardware_specs(&self) -> zbus::Result<String>;
     async fn generate_diagnostic_report(&self) -> zbus::Result<String>;
     async fn generate_rgb_issue(&self) -> zbus::Result<String>;
-    
+
     #[zbus(signal)]
     fn telemetry_updated(&self, json_stats: &str) -> zbus::Result<()>;
 }
@@ -230,16 +240,36 @@ pub trait SysMon {
 pub trait Rgb {
     async fn set_color(&self, zone_val: i32, hex_color: &str) -> zbus::Result<String>;
     async fn set_mode(&self, mode_str: &str, speed_val: i32) -> zbus::Result<String>;
-    async fn set_global(&self, power_val: bool, brightness_val: i32, direction_str: &str) -> zbus::Result<String>;
+    async fn set_global(
+        &self,
+        power_val: bool,
+        brightness_val: i32,
+        direction_str: &str,
+    ) -> zbus::Result<String>;
     async fn set_lightbar_color(&self, zone_val: i32, hex_color: &str) -> zbus::Result<String>;
-    async fn set_lightbar_global(&self, power_val: bool, brightness_val: i32, mode_str: &str, speed_val: i32) -> zbus::Result<String>;
+    async fn set_lightbar_global(
+        &self,
+        power_val: bool,
+        brightness_val: i32,
+        mode_str: &str,
+        speed_val: i32,
+    ) -> zbus::Result<String>;
     async fn get_state(&self) -> zbus::Result<String>;
+    async fn set_zone_count_override(&self, zone_count: i32) -> zbus::Result<String>;
     async fn set_per_key_colors(&self, colors_json: &str) -> zbus::Result<String>;
     async fn set_hw_effects(&self, enabled: bool) -> zbus::Result<String>;
+    async fn set_win_lock(&self, locked: bool) -> zbus::Result<String>;
+    async fn start_lamp_calibration(&self) -> zbus::Result<String>;
+    async fn stop_lamp_calibration(&self) -> zbus::Result<String>;
+    async fn get_lamp_map(&self) -> zbus::Result<String>;
+    async fn set_lamp_colors(&self, colors_json: &str) -> zbus::Result<String>;
+    async fn test_single_key(&self, index: i32) -> zbus::Result<String>;
     async fn start_per_key_wizard(&self) -> zbus::Result<String>;
     async fn light_key_index(&self, index: u32, hex_color: &str) -> zbus::Result<String>;
     async fn record_key_mapping(&self, index: u32, key_name: &str) -> zbus::Result<String>;
     async fn export_keymap_report(&self) -> zbus::Result<String>;
+    async fn save_per_key_map(&self, map_json: &str) -> zbus::Result<String>;
+    async fn ping(&self) -> zbus::Result<String>;
 }
 
 // ── Platform Service Proxy ───────────────────────────────────────────────────
@@ -249,13 +279,32 @@ pub trait Rgb {
     default_path = "/org/hp/omen/Platform"
 )]
 pub trait Platform {
+    async fn get_system_info(&self) -> zbus::Result<String>;
+    async fn get_state(&self) -> zbus::Result<String>;
+    async fn set_keyboard_fixes(&self, prtsc: bool, f1: bool) -> zbus::Result<String>;
     async fn set_battery_care(&self, limit: u32) -> zbus::Result<String>;
-    async fn set_battery_limit_config(&self, enabled: bool, stop: u32, start: u32, off_hold: bool) -> zbus::Result<String>;
+    async fn set_battery_limit_config(
+        &self,
+        enabled: bool,
+        stop: u32,
+        start: u32,
+        off_hold: bool,
+    ) -> zbus::Result<String>;
     async fn set_battery_bypass(&self, enabled: bool) -> zbus::Result<String>;
     async fn get_battery_limit_state(&self) -> zbus::Result<String>;
+    async fn clean_memory(&self) -> zbus::Result<String>;
+    async fn generate_hardware_dump(&self) -> zbus::Result<String>;
+    async fn get_hardware_dump_json(&self) -> zbus::Result<String>;
+    async fn run_wmi_diagnostics(&self) -> zbus::Result<String>;
     async fn run_fan_cleaning(&self) -> zbus::Result<String>;
-    async fn toggle_overlay(&self) -> zbus::Result<String>;
+    async fn check_conflicts(&self) -> zbus::Result<String>;
+    async fn analyze_acpi(&self) -> zbus::Result<String>;
     async fn generate_triage_bundle(&self) -> zbus::Result<String>;
+    async fn check_bios_update(&self) -> zbus::Result<String>;
+    async fn check_app_update(&self) -> zbus::Result<String>;
+    async fn apply_app_update(&self) -> zbus::Result<String>;
+    async fn toggle_overlay(&self) -> zbus::Result<String>;
+    async fn ping(&self) -> zbus::Result<String>;
     #[zbus(signal)]
     fn macro_key_pressed(&self, key_name: &str) -> zbus::Result<()>;
 }
@@ -269,6 +318,8 @@ pub trait Platform {
 pub trait Mux {
     async fn set_gpu_mode(&self, mode: &str) -> zbus::Result<String>;
     async fn get_gpu_info(&self) -> zbus::Result<String>;
+    async fn set_mux_backend(&self, backend: &str) -> zbus::Result<String>;
+    async fn ping(&self) -> zbus::Result<String>;
 }
 
 // ── Undervolt Service Proxy ──────────────────────────────────────────────────
@@ -281,6 +332,9 @@ pub trait Undervolt {
     async fn set_offset(&self, plane: &str, offset_mv: i32) -> zbus::Result<String>;
     async fn set_tcc_offset(&self, val: i32) -> zbus::Result<String>;
     async fn get_state(&self) -> zbus::Result<String>;
+    async fn read_offsets(&self) -> zbus::Result<String>;
+    async fn ping(&self) -> zbus::Result<String>;
+    async fn confirm(&self) -> zbus::Result<String>;
 }
 
 // ── AppProfiles Service Proxy ──────────────────────────────────────────────────
@@ -291,14 +345,21 @@ pub trait Undervolt {
 )]
 pub trait AppProfiles {
     async fn get_profiles(&self) -> zbus::Result<String>;
-    async fn add_profile(&self, process_name: &str, power_profile: &str, fan_mode: &str) -> zbus::Result<String>;
+    async fn add_profile(
+        &self,
+        process_name: &str,
+        power_profile: &str,
+        fan_mode: &str,
+    ) -> zbus::Result<String>;
     async fn remove_profile(&self, process_name: &str) -> zbus::Result<String>;
 }
 
 // ── Graphical Session Environment Auto-Repair ─────────────────────────────────
 
 #[cfg(unix)]
-fn connect_unix_nonblocking(path: &std::path::Path) -> std::result::Result<libc::c_int, libc::c_int> {
+fn connect_unix_nonblocking(
+    path: &std::path::Path,
+) -> std::result::Result<libc::c_int, libc::c_int> {
     use std::os::unix::ffi::OsStrExt;
     let bytes = path.as_os_str().as_bytes();
     if bytes.is_empty() || bytes.contains(&0) {
@@ -324,10 +385,13 @@ fn connect_unix_nonblocking(path: &std::path::Path) -> std::result::Result<libc:
         )
     };
     if fd < 0 {
-        return Err(std::io::Error::last_os_error().raw_os_error().unwrap_or(libc::EINVAL));
+        return Err(std::io::Error::last_os_error()
+            .raw_os_error()
+            .unwrap_or(libc::EINVAL));
     }
 
-    let addr_len = (std::mem::offset_of!(libc::sockaddr_un, sun_path) + bytes.len() + 1) as libc::socklen_t;
+    let addr_len =
+        (std::mem::offset_of!(libc::sockaddr_un, sun_path) + bytes.len() + 1) as libc::socklen_t;
     let rc = unsafe {
         libc::connect(
             fd,
@@ -338,7 +402,9 @@ fn connect_unix_nonblocking(path: &std::path::Path) -> std::result::Result<libc:
     if rc == 0 {
         Ok(fd)
     } else {
-        let err = std::io::Error::last_os_error().raw_os_error().unwrap_or(libc::ECONNREFUSED);
+        let err = std::io::Error::last_os_error()
+            .raw_os_error()
+            .unwrap_or(libc::ECONNREFUSED);
         unsafe {
             libc::close(fd);
         }
@@ -551,40 +617,195 @@ pub fn is_commit_sha(value: &str) -> bool {
     value.len() == 40 && value.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedSemver<'a> {
+    core: Vec<u32>,
+    pre: Option<&'a str>,
+}
+
+fn parse_semver(raw: &str) -> Option<ParsedSemver<'_>> {
+    let trimmed = raw.trim();
+    let no_v = trimmed
+        .strip_prefix('v')
+        .or_else(|| trimmed.strip_prefix('V'))
+        .unwrap_or(trimmed);
+    let without_build = no_v.split('+').next().unwrap_or("");
+    let (core_str, pre) = match without_build.split_once('-') {
+        Some((c, p)) => {
+            if p.is_empty() {
+                return None;
+            }
+            (c, Some(p))
+        }
+        None => (without_build, None),
+    };
+    if core_str.is_empty() {
+        return None;
+    }
+    let mut core = Vec::new();
+    for seg in core_str.split('.') {
+        if seg.is_empty() || !seg.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        core.push(seg.parse::<u32>().ok()?);
+    }
+    Some(ParsedSemver { core, pre })
+}
+
+fn compare_prerelease(a: &str, b: &str) -> std::cmp::Ordering {
+    let mut ai = a.split('.');
+    let mut bi = b.split('.');
+    loop {
+        match (ai.next(), bi.next()) {
+            (None, None) => return std::cmp::Ordering::Equal,
+            (None, Some(_)) => return std::cmp::Ordering::Less,
+            (Some(_), None) => return std::cmp::Ordering::Greater,
+            (Some(sa), Some(sb)) => {
+                let ord = match (sa.parse::<u64>(), sb.parse::<u64>()) {
+                    (Ok(na), Ok(nb)) => na.cmp(&nb),
+                    (Ok(_), Err(_)) => std::cmp::Ordering::Less,
+                    (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
+                    (Err(_), Err(_)) => sa.cmp(sb),
+                };
+                if ord != std::cmp::Ordering::Equal {
+                    return ord;
+                }
+            }
+        }
+    }
+}
+
+/// Returns `true` if `remote` represents a strictly newer semantic version than `current`.
+pub fn is_newer_semver(current: &str, remote: &str) -> bool {
+    let (Some(c), Some(r)) = (parse_semver(current), parse_semver(remote)) else {
+        return false;
+    };
+    let len = c.core.len().max(r.core.len());
+    for i in 0..len {
+        let rv = *r.core.get(i).unwrap_or(&0);
+        let cv = *c.core.get(i).unwrap_or(&0);
+        if rv > cv {
+            return true;
+        }
+        if cv > rv {
+            return false;
+        }
+    }
+    match (c.pre, r.pre) {
+        (Some(_), None) => true,
+        (None, Some(_)) => false,
+        (None, None) => false,
+        (Some(cp), Some(rp)) => compare_prerelease(rp, cp) == std::cmp::Ordering::Greater,
+    }
+}
+
+#[cfg(test)]
+mod semver_tests {
+    use super::is_newer_semver;
+
+    #[test]
+    fn handles_equal_and_patch_minor_major_bumps() {
+        assert!(!is_newer_semver("2.1.8", "2.1.8"));
+        assert!(!is_newer_semver("2.1.8", "2.1.7"));
+        assert!(is_newer_semver("2.1.7", "2.1.8"));
+        assert!(is_newer_semver("2.1.8", "2.2.0"));
+        assert!(is_newer_semver("2.9.9", "3.0.0"));
+        assert!(is_newer_semver("2.1", "2.1.1"));
+        assert!(!is_newer_semver("2.1.0", "2.1"));
+    }
+
+    #[test]
+    fn handles_v_prefix_and_prerelease_suffixes() {
+        assert!(is_newer_semver("2.1.7", "v2.1.8"));
+        assert!(is_newer_semver("v2.1.7", "2.1.8"));
+        assert!(!is_newer_semver("2.1.8", "v2.1.7"));
+        assert!(!is_newer_semver("2.1.8", "v2.1.8"));
+
+        assert!(!is_newer_semver("2.5.2", "2.5.2-rc1"));
+        assert!(!is_newer_semver("2.5.2", "2.5.2-beta"));
+        assert!(is_newer_semver("2.5.2-rc1", "2.5.2"));
+        assert!(is_newer_semver("2.5.2", "2.5.3-rc1"));
+        assert!(is_newer_semver("2.5.2-beta.1", "2.5.2-rc.1"));
+        assert!(!is_newer_semver("2.5.2-rc.1", "2.5.2-beta.1"));
+    }
+
+    #[test]
+    fn rejects_invalid_version_strings() {
+        for invalid in ["", " ", "unknown", "v", "2.5.", "2.5.x", "1.2.3-"] {
+            assert!(!is_newer_semver("2.5.2", invalid), "remote={invalid}");
+            assert!(!is_newer_semver(invalid, "2.5.3"), "current={invalid}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod update_metadata_tests {
-    #[test] fn reject_missing_short_and_nonhex_commit_ids() {
-        assert!(super::is_commit_sha("6a5adaed55a6f74b14a489ec31d355727ac45c22"));
-        for invalid in ["", "unknown", "6a5adae", "API rate limit exceeded", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"] {
+    #[test]
+    fn reject_missing_short_and_nonhex_commit_ids() {
+        assert!(super::is_commit_sha(
+            "6a5adaed55a6f74b14a489ec31d355727ac45c22"
+        ));
+        for invalid in [
+            "",
+            "unknown",
+            "6a5adae",
+            "API rate limit exceeded",
+            "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        ] {
             assert!(!super::is_commit_sha(invalid));
         }
     }
 }
 
 /// Require the GitHub commit object rather than accepting rate-limit/error JSON.
-pub fn parse_commit_metadata(raw: &str) -> Result<(String,String),String> {
-    let v:serde_json::Value=serde_json::from_str(raw).map_err(|e|e.to_string())?;
-    let sha=v["sha"].as_str().filter(|s|is_commit_sha(s)).ok_or("Missing or invalid upstream commit SHA")?;
-    Ok((sha.to_string(),v["commit"]["message"].as_str().unwrap_or("").to_string()))
+pub fn parse_commit_metadata(raw: &str) -> Result<(String, String), String> {
+    let v: serde_json::Value = serde_json::from_str(raw).map_err(|e| e.to_string())?;
+    let sha = v["sha"]
+        .as_str()
+        .filter(|s| is_commit_sha(s))
+        .ok_or("Missing or invalid upstream commit SHA")?;
+    Ok((
+        sha.to_string(),
+        v["commit"]["message"].as_str().unwrap_or("").to_string(),
+    ))
 }
 /// Compare API errors must never become a zero-commits-behind success.
-pub fn parse_comparison_ahead(raw: &str) -> Result<u32,String> {
-    let v:serde_json::Value=serde_json::from_str(raw).map_err(|e|e.to_string())?;
-    if !matches!(v["status"].as_str(),Some("ahead"|"behind"|"diverged"|"identical")) {
+pub fn parse_comparison_ahead(raw: &str) -> Result<u32, String> {
+    let v: serde_json::Value = serde_json::from_str(raw).map_err(|e| e.to_string())?;
+    if !matches!(
+        v["status"].as_str(),
+        Some("ahead" | "behind" | "diverged" | "identical")
+    ) {
         return Err("Missing or invalid comparison status".into());
     }
-    u32::try_from(v["ahead_by"].as_u64().ok_or("Missing comparison count")?).map_err(|e|e.to_string())
+    u32::try_from(v["ahead_by"].as_u64().ok_or("Missing comparison count")?)
+        .map_err(|e| e.to_string())
 }
 #[cfg(test)]
 mod github_response_tests {
     use super::*;
-    #[test] fn api_error_objects_never_report_up_to_date() {
-        for raw in [r#"{"message":"API rate limit exceeded"}"#,r#"{"sha":""}"#,r#"{"status":"ahead"}"#,"not json"] {
-            assert!(parse_commit_metadata(raw).is_err());assert!(parse_comparison_ahead(raw).is_err());
+    #[test]
+    fn api_error_objects_never_report_up_to_date() {
+        for raw in [
+            r#"{"message":"API rate limit exceeded"}"#,
+            r#"{"sha":""}"#,
+            r#"{"status":"ahead"}"#,
+            "not json",
+        ] {
+            assert!(parse_commit_metadata(raw).is_err());
+            assert!(parse_comparison_ahead(raw).is_err());
         }
-        assert!(parse_commit_metadata(r#"{"sha":"6a5adaed55a6f74b14a489ec31d355727ac45c22"}"#).is_ok());
-        assert_eq!(parse_comparison_ahead(r#"{"status":"identical","ahead_by":0}"#).unwrap(),0);
-        assert_eq!(parse_comparison_ahead(r#"{"status":"ahead","ahead_by":2}"#).unwrap(),2);
+        assert!(
+            parse_commit_metadata(r#"{"sha":"6a5adaed55a6f74b14a489ec31d355727ac45c22"}"#).is_ok()
+        );
+        assert_eq!(
+            parse_comparison_ahead(r#"{"status":"identical","ahead_by":0}"#).unwrap(),
+            0
+        );
+        assert_eq!(
+            parse_comparison_ahead(r#"{"status":"ahead","ahead_by":2}"#).unwrap(),
+            2
+        );
     }
 }
 
@@ -606,7 +827,8 @@ mod unix_socket_probe_tests {
         ));
         let _ = std::fs::remove_file(&sock_path);
 
-        let srv_fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) };
+        let srv_fd =
+            unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) };
         assert!(srv_fd >= 0);
 
         let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
@@ -616,9 +838,11 @@ mod unix_socket_probe_tests {
         for (dst, &b) in addr.sun_path.iter_mut().zip(bytes.iter()) {
             *dst = b as libc::c_char;
         }
-        let addr_len = (std::mem::offset_of!(libc::sockaddr_un, sun_path) + bytes.len() + 1) as libc::socklen_t;
+        let addr_len = (std::mem::offset_of!(libc::sockaddr_un, sun_path) + bytes.len() + 1)
+            as libc::socklen_t;
 
-        let bound = unsafe { libc::bind(srv_fd, (&addr as *const libc::sockaddr_un).cast(), addr_len) };
+        let bound =
+            unsafe { libc::bind(srv_fd, (&addr as *const libc::sockaddr_un).cast(), addr_len) };
         assert_eq!(bound, 0, "bind failed: {}", std::io::Error::last_os_error());
         assert_eq!(unsafe { libc::listen(srv_fd, 1) }, 0);
 
@@ -633,13 +857,19 @@ mod unix_socket_probe_tests {
                 Err(_) => break,
             }
         }
-        assert!(!clients.is_empty(), "expected at least one client in backlog");
+        assert!(
+            !clients.is_empty(),
+            "expected at least one client in backlog"
+        );
 
         // Probe on full backlog must return false immediately instead of hanging in unix_wait_for_peer.
         let t0 = Instant::now();
         let alive = is_unix_socket_alive(&sock_path);
         let elapsed = t0.elapsed();
-        assert!(elapsed < Duration::from_millis(200), "probe took too long: {elapsed:?}");
+        assert!(
+            elapsed < Duration::from_millis(200),
+            "probe took too long: {elapsed:?}"
+        );
         assert!(!alive, "full backlog should return false immediately");
 
         for fd in clients {
@@ -652,6 +882,8 @@ mod unix_socket_probe_tests {
         }
         let _ = std::fs::remove_file(&sock_path);
 
-        assert!(!is_unix_socket_alive(std::path::Path::new("/tmp/omen-nonexistent-sock-99999")));
+        assert!(!is_unix_socket_alive(std::path::Path::new(
+            "/tmp/omen-nonexistent-sock-99999"
+        )));
     }
 }

@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use log::{info, warn};
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 const OWN_DKMS_PACKAGE: &str = "hp-omen-extra";
@@ -8,15 +8,21 @@ const OWN_DKMS_PACKAGE: &str = "hp-omen-extra";
 /// package on kernel upgrades and the last one wins, silently replacing our hp-wmi.
 pub fn conflicting_hpwmi_dkms_packages(dkms_root: &Path) -> Vec<String> {
     let mut found = Vec::new();
-    let Ok(pkgs) = std::fs::read_dir(dkms_root) else { return found };
+    let Ok(pkgs) = std::fs::read_dir(dkms_root) else {
+        return found;
+    };
     for pkg in pkgs.flatten() {
         let pkg_name = pkg.file_name().to_string_lossy().to_string();
         if pkg_name == OWN_DKMS_PACKAGE {
             continue;
         }
-        let Ok(versions) = std::fs::read_dir(pkg.path()) else { continue };
+        let Ok(versions) = std::fs::read_dir(pkg.path()) else {
+            continue;
+        };
         for ver in versions.flatten() {
-            let Ok(conf) = std::fs::read_to_string(ver.path().join("source/dkms.conf")) else { continue };
+            let Ok(conf) = std::fs::read_to_string(ver.path().join("source/dkms.conf")) else {
+                continue;
+            };
             let builds_hpwmi = conf.lines().any(|line| {
                 let line = line.trim();
                 line.starts_with("BUILT_MODULE_NAME[")
@@ -26,7 +32,11 @@ pub fn conflicting_hpwmi_dkms_packages(dkms_root: &Path) -> Vec<String> {
                         .unwrap_or(false)
             });
             if builds_hpwmi {
-                found.push(format!("{}/{}", pkg_name, ver.file_name().to_string_lossy()));
+                found.push(format!(
+                    "{}/{}",
+                    pkg_name,
+                    ver.file_name().to_string_lossy()
+                ));
             }
         }
     }
@@ -46,11 +56,23 @@ pub struct ConflictDetector;
 impl ConflictDetector {
     pub fn check_conflicts() -> ConflictReport {
         let known_conflicts = vec![
-            ("nbfc", "Notebook FanControl (nbfc) daemon running — may conflict with HP WMI fan writes"),
-            ("throttled", "Lenovo/Generic throttled service running — may race with CPU thermal limits"),
-            ("ryzenadj", "Background ryzenadj loop active — may collide with SMU power limit writes"),
+            (
+                "nbfc",
+                "Notebook FanControl (nbfc) daemon running — may conflict with HP WMI fan writes",
+            ),
+            (
+                "throttled",
+                "Lenovo/Generic throttled service running — may race with CPU thermal limits",
+            ),
+            (
+                "ryzenadj",
+                "Background ryzenadj loop active — may collide with SMU power limit writes",
+            ),
             ("hp-health", "Legacy HP Health service active"),
-            ("oghaagent", "HP OMEN Gaming Hub background service (Wine/Proton) active"),
+            (
+                "oghaagent",
+                "HP OMEN Gaming Hub background service (Wine/Proton) active",
+            ),
         ];
 
         let running_procs = crate::sysmon::get_running_process_names();
@@ -73,7 +95,10 @@ impl ConflictDetector {
 
         let has_conflicts = !conflicts_found.is_empty();
         let warning_message = if has_conflicts {
-            format!("Warning: {} potential conflict(s) with thermal/power/driver software detected.", conflicts_found.len())
+            format!(
+                "Warning: {} potential conflict(s) with thermal/power/driver software detected.",
+                conflicts_found.len()
+            )
         } else {
             "No thermal or EC control software conflicts detected. Coexistence clear.".to_string()
         };

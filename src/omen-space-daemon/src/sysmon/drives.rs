@@ -29,8 +29,9 @@ const MAX_STACK_DEPTH: usize = 8;
 /// Block device name prefixes that are never a physical internal drive: loop and RAM disks,
 /// compressed RAM (zram swap), device-mapper / md / ZFS volumes, optical, floppy, network and
 /// null block devices.
-const EXCLUDED_PREFIXES: [&str; 11] =
-    ["loop", "ram", "zram", "dm-", "md", "sr", "fd", "nbd", "nullb", "zd", "rbd"];
+const EXCLUDED_PREFIXES: [&str; 11] = [
+    "loop", "ram", "zram", "dm-", "md", "sr", "fd", "nbd", "nullb", "zd", "rbd",
+];
 
 // ── Enumeration ──────────────────────────────────────────────────────────────
 
@@ -197,7 +198,9 @@ pub fn unescape_mount_field(field: &str) -> String {
     while i < bytes.len() {
         if bytes[i] == b'\\'
             && i + 3 < bytes.len()
-            && bytes[i + 1..=i + 3].iter().all(|b| (b'0'..=b'7').contains(b))
+            && bytes[i + 1..=i + 3]
+                .iter()
+                .all(|b| (b'0'..=b'7').contains(b))
         {
             let value = (bytes[i + 1] - b'0') as u32 * 64
                 + (bytes[i + 2] - b'0') as u32 * 8
@@ -284,7 +287,11 @@ fn physical_disk_of(sys_root: &Path, name: &str, depth: usize) -> Option<String>
     if top.exists() {
         // Whole device. dm/md devices list what they are built on under `slaves/`.
         let mut slaves: Vec<String> = fs::read_dir(top.join("slaves"))
-            .map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+            .map(|rd| {
+                rd.flatten()
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
             .unwrap_or_default();
         slaves.sort_by_key(|a| name_order_key(a));
         return match slaves.first() {
@@ -305,35 +312,11 @@ fn physical_disk_of(sys_root: &Path, name: &str, depth: usize) -> Option<String>
 /// The physical disk a mount lives on, or `None` for virtual/unknown sources.
 pub fn resolve_physical_disk(sys_root: &Path, mount: &MountEntry) -> Option<String> {
     let name = block_name_from_source(sys_root, &mount.source)
-        .filter(|n| sys_root.join("class/block").join(n).exists() || sys_root.join("block").join(n).exists())
+        .filter(|n| {
+            sys_root.join("class/block").join(n).exists() || sys_root.join("block").join(n).exists()
+        })
         .or_else(|| block_name_from_devnum(sys_root, &mount.dev))?;
     physical_disk_of(sys_root, &name, 0)
-}
-
-/// Block device size in bytes from sysfs (`class/block/<dev>/size` or `block/<disk>/<part>/size`).
-/// Used as a fallback when a partition is present in `mountinfo` but `statvfs` returns `None`
-/// (e.g. FUSE/`ntfs-3g` mounts without `allow_other` where root gets `EACCES`, or mounts outside
-/// the service sandbox).
-#[allow(dead_code)]
-fn block_size_bytes(sys_root: &Path, mount: &MountEntry) -> Option<u64> {
-    let name = block_name_from_source(sys_root, &mount.source)
-        .filter(|n| sys_root.join("class/block").join(n).exists() || sys_root.join("block").join(n).exists())
-        .or_else(|| block_name_from_devnum(sys_root, &mount.dev))?;
-    let size_path = if sys_root.join("class/block").join(&name).join("size").exists() {
-        sys_root.join("class/block").join(&name).join("size")
-    } else if sys_root.join("block").join(&name).join("size").exists() {
-        sys_root.join("block").join(&name).join("size")
-    } else {
-        fs::read_dir(sys_root.join("block"))
-            .ok()?
-            .flatten()
-            .find_map(|e| {
-                let p = e.path().join(&name).join("size");
-                p.exists().then_some(p)
-            })?
-    };
-    let sectors: u64 = read_trimmed(&size_path)?.parse().ok()?;
-    (sectors > 0).then(|| sectors.saturating_mul(SECTOR_BYTES))
 }
 
 // ── Usage ────────────────────────────────────────────────────────────────────
@@ -348,7 +331,10 @@ pub struct FsUsage {
 /// Ordering key that prefers `/` over `/boot` over `/var/log` (fewest path components, then
 /// shortest text).
 fn mount_rank(mountpoint: &str) -> (usize, usize) {
-    (mountpoint.split('/').filter(|c| !c.is_empty()).count(), mountpoint.len())
+    (
+        mountpoint.split('/').filter(|c| !c.is_empty()).count(),
+        mountpoint.len(),
+    )
 }
 
 /// Per-drive usage, one entry per drive in `drives` (same order). Mounts are grouped by source
@@ -364,7 +350,11 @@ pub fn drive_usage(
 ) -> Vec<DriveUsage> {
     let mut usage: Vec<DriveUsage> = drives
         .iter()
-        .map(|d| DriveUsage { name: d.name.clone(), usage_complete: Some(true), ..Default::default() })
+        .map(|d| DriveUsage {
+            name: d.name.clone(),
+            usage_complete: Some(true),
+            ..Default::default()
+        })
         .collect();
 
     let mut order: Vec<&str> = Vec::new();
@@ -391,7 +381,9 @@ pub fn drive_usage(
         // btrfs subvolumes (or the service sandbox's own bind mounts such as
         // `/etc/omen-space`) do not crowd out the partitions that matter.
         if let Some(shortest) = group.iter().min_by_key(|m| mount_rank(&m.mountpoint)) {
-            if slot.mounts.len() < MAX_REPORTED_MOUNTS && !slot.mounts.contains(&shortest.mountpoint) {
+            if slot.mounts.len() < MAX_REPORTED_MOUNTS
+                && !slot.mounts.contains(&shortest.mountpoint)
+            {
                 slot.mounts.push(shortest.mountpoint.clone());
             }
         }
@@ -418,8 +410,17 @@ pub fn legacy_ssd_spec(drives: &[DriveInfo]) -> String {
     let Some(first) = drives.first() else {
         return String::new();
     };
-    let model = if first.model.is_empty() { first.kind.label() } else { first.model.as_str() };
-    format!("{}  ·  {} GB {}", model, size_gb(first.size_bytes), first.kind.label())
+    let model = if first.model.is_empty() {
+        first.kind.label()
+    } else {
+        first.model.as_str()
+    };
+    format!(
+        "{}  ·  {} GB {}",
+        model,
+        size_gb(first.size_bytes),
+        first.kind.label()
+    )
 }
 
 /// `(used_gb, total_gb, fraction)` of the first drive, for the old scalar `disk_*` fields.
@@ -430,7 +431,11 @@ pub fn legacy_disk_fields(usage: &[DriveUsage]) -> (f64, f64, f64) {
     };
     let used = first.used_bytes as f64 / 1e9;
     let total = first.total_bytes as f64 / 1e9;
-    let frac = if first.total_bytes > 0 { (used / total).clamp(0.0, 1.0) } else { 0.0 };
+    let frac = if first.total_bytes > 0 {
+        (used / total).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
     (used, total, frac)
 }
 
@@ -446,7 +451,12 @@ pub fn current_usage(drives: &[DriveInfo]) -> Vec<DriveUsage> {
     let text = fs::read_to_string("/proc/1/mountinfo")
         .or_else(|_| fs::read_to_string("/proc/self/mountinfo"))
         .unwrap_or_default();
-    drive_usage(drives, &parse_mountinfo(&text), Path::new("/sys"), &statvfs_bytes)
+    drive_usage(
+        drives,
+        &parse_mountinfo(&text),
+        Path::new("/sys"),
+        &statvfs_bytes,
+    )
 }
 
 /// Refresh the drive-related fields of a (possibly cached) specs struct in place.
@@ -469,7 +479,10 @@ fn statvfs_one(mountpoint: &str) -> Option<FsUsage> {
         return None;
     }
     let free = (stat.f_bfree as u64).saturating_mul(frsize);
-    Some(FsUsage { used: total.saturating_sub(free), total })
+    Some(FsUsage {
+        used: total.saturating_sub(free),
+        total,
+    })
 }
 
 fn statvfs_bytes(mountpoint: &str) -> Option<FsUsage> {
@@ -497,7 +510,8 @@ mod tests {
 
     impl Tree {
         fn new(tag: &str) -> Self {
-            let root = std::env::temp_dir().join(format!("omen-drives-{}-{}", std::process::id(), tag));
+            let root =
+                std::env::temp_dir().join(format!("omen-drives-{}-{}", std::process::id(), tag));
             let _ = fs::remove_dir_all(&root);
             for d in ["block", "class/block", "dev/block"] {
                 fs::create_dir_all(root.join(d)).unwrap();
@@ -521,22 +535,36 @@ mod tests {
             fs::create_dir_all(dir.join("queue")).unwrap();
             fs::write(dir.join("size"), format!("{sectors}\n")).unwrap();
             fs::write(dir.join("removable"), "0\n").unwrap();
-            fs::write(dir.join("queue/rotational"), if rotational { "1\n" } else { "0\n" }).unwrap();
+            fs::write(
+                dir.join("queue/rotational"),
+                if rotational { "1\n" } else { "0\n" },
+            )
+            .unwrap();
             symlink(&ctrl, dir.join("device")).unwrap();
             symlink(&dir, self.root.join("block").join(name)).unwrap();
             symlink(&dir, self.root.join("class/block").join(name)).unwrap();
         }
 
         fn hw_attr(&self, hw: &str, file: &str, value: &str) {
-            fs::write(self.root.join("devices").join(hw).join(file), format!("{value}\n")).unwrap();
+            fs::write(
+                self.root.join("devices").join(hw).join(file),
+                format!("{value}\n"),
+            )
+            .unwrap();
         }
 
         fn disk_attr(&self, name: &str, file: &str, value: &str) {
-            fs::write(self.root.join("block").join(name).join(file), format!("{value}\n")).unwrap();
+            fs::write(
+                self.root.join("block").join(name).join(file),
+                format!("{value}\n"),
+            )
+            .unwrap();
         }
 
         fn partition(&self, disk: &str, name: &str, number: u32) {
-            let dir = fs::canonicalize(self.root.join("block").join(disk)).unwrap().join(name);
+            let dir = fs::canonicalize(self.root.join("block").join(disk))
+                .unwrap()
+                .join(name);
             fs::create_dir_all(&dir).unwrap();
             fs::write(dir.join("partition"), format!("{number}\n")).unwrap();
             symlink(&dir, self.root.join("class/block").join(name)).unwrap();
@@ -572,8 +600,20 @@ mod tests {
     /// second, plus zram swap. Sizes and model strings (with the kernel's padding) are real.
     fn this_machine(tag: &str) -> Tree {
         let t = Tree::new(tag);
-        t.disk("nvme0n1", NVME0_HW, 2_000_409_264, false, Some("SAMSUNG MZVL81T0HFLB-00BH1              "));
-        t.disk("nvme1n1", NVME1_HW, 3_907_029_168, false, Some("Sabrent Rocket Q4                       "));
+        t.disk(
+            "nvme0n1",
+            NVME0_HW,
+            2_000_409_264,
+            false,
+            Some("SAMSUNG MZVL81T0HFLB-00BH1              "),
+        );
+        t.disk(
+            "nvme1n1",
+            NVME1_HW,
+            3_907_029_168,
+            false,
+            Some("Sabrent Rocket Q4                       "),
+        );
         t.partition("nvme0n1", "nvme0n1p1", 1);
         t.partition("nvme0n1", "nvme0n1p2", 2);
         t.partition("nvme1n1", "nvme1n1p1", 1);
@@ -600,7 +640,15 @@ mod tests {
 
     fn table(rows: &[(&str, u64, u64)]) -> HashMap<String, FsUsage> {
         rows.iter()
-            .map(|(mp, used, total)| (mp.to_string(), FsUsage { used: *used, total: *total }))
+            .map(|(mp, used, total)| {
+                (
+                    mp.to_string(),
+                    FsUsage {
+                        used: *used,
+                        total: *total,
+                    },
+                )
+            })
             .collect()
     }
 
@@ -612,7 +660,10 @@ mod tests {
         let drives = list_internal_drives(t.sys());
         assert_eq!(drives.len(), 2, "zram0 must not be listed: {drives:?}");
         assert_eq!(drives[0].name, "nvme0n1");
-        assert_eq!(drives[0].model, "SAMSUNG MZVL81T0HFLB-00BH1", "kernel padding must be trimmed");
+        assert_eq!(
+            drives[0].model, "SAMSUNG MZVL81T0HFLB-00BH1",
+            "kernel padding must be trimmed"
+        );
         assert_eq!(drives[0].kind, DriveKind::Nvme);
         assert_eq!(drives[0].size_bytes, 1_024_209_543_168);
         assert_eq!(drives[1].name, "nvme1n1");
@@ -623,37 +674,111 @@ mod tests {
     #[test]
     fn sata_ssd_and_hdd_are_told_apart_by_rotational() {
         let t = Tree::new("sata");
-        t.disk("sda", "pci0000:00/0000:00:17.0/ata1/host0/target0:0:0/0:0:0:0", 976_773_168, false, Some("Samsung SSD  860 EVO 500GB"));
-        t.disk("sdb", "pci0000:00/0000:00:17.0/ata2/host1/target1:0:0/1:0:0:0", 3_907_029_168, true, Some("WDC WD20SPZX-22UA7T0"));
+        t.disk(
+            "sda",
+            "pci0000:00/0000:00:17.0/ata1/host0/target0:0:0/0:0:0:0",
+            976_773_168,
+            false,
+            Some("Samsung SSD  860 EVO 500GB"),
+        );
+        t.disk(
+            "sdb",
+            "pci0000:00/0000:00:17.0/ata2/host1/target1:0:0/1:0:0:0",
+            3_907_029_168,
+            true,
+            Some("WDC WD20SPZX-22UA7T0"),
+        );
         let drives = list_internal_drives(t.sys());
-        assert_eq!((drives[0].kind, drives[0].model.as_str()), (DriveKind::Ssd, "Samsung SSD 860 EVO 500GB"));
-        assert_eq!((drives[1].kind, drives[1].name.as_str()), (DriveKind::Hdd, "sdb"));
-        assert_eq!(DriveKind::Hdd.label(), "HDD", "an HDD must never be labelled SSD");
+        assert_eq!(
+            (drives[0].kind, drives[0].model.as_str()),
+            (DriveKind::Ssd, "Samsung SSD 860 EVO 500GB")
+        );
+        assert_eq!(
+            (drives[1].kind, drives[1].name.as_str()),
+            (DriveKind::Hdd, "sdb")
+        );
+        assert_eq!(
+            DriveKind::Hdd.label(),
+            "HDD",
+            "an HDD must never be labelled SSD"
+        );
     }
 
     #[test]
     fn emmc_is_listed_from_its_name_and_boot_partitions_and_sd_cards_are_not() {
         let t = Tree::new("mmc");
-        t.disk("mmcblk0", "platform/soc/mmc_host/mmc0/mmc0:0001", 15_269_888, false, None);
+        t.disk(
+            "mmcblk0",
+            "platform/soc/mmc_host/mmc0/mmc0:0001",
+            15_269_888,
+            false,
+            None,
+        );
         t.hw_attr("platform/soc/mmc_host/mmc0/mmc0:0001", "type", "MMC");
         t.hw_attr("platform/soc/mmc_host/mmc0/mmc0:0001", "name", "DG4064");
-        t.disk("mmcblk0boot0", "platform/soc/mmc_host/mmc0/mmc0:0001", 8192, false, None);
-        t.disk("mmcblk0rpmb", "platform/soc/mmc_host/mmc0/mmc0:0001", 128, false, None);
-        t.disk("mmcblk1", "platform/soc/mmc_host/mmc1/mmc1:aaaa", 62_333_952, false, None);
+        t.disk(
+            "mmcblk0boot0",
+            "platform/soc/mmc_host/mmc0/mmc0:0001",
+            8192,
+            false,
+            None,
+        );
+        t.disk(
+            "mmcblk0rpmb",
+            "platform/soc/mmc_host/mmc0/mmc0:0001",
+            128,
+            false,
+            None,
+        );
+        t.disk(
+            "mmcblk1",
+            "platform/soc/mmc_host/mmc1/mmc1:aaaa",
+            62_333_952,
+            false,
+            None,
+        );
         t.hw_attr("platform/soc/mmc_host/mmc1/mmc1:aaaa", "type", "SD");
         let drives = list_internal_drives(t.sys());
         assert_eq!(drives.len(), 1, "{drives:?}");
-        assert_eq!((drives[0].name.as_str(), drives[0].kind, drives[0].model.as_str()), ("mmcblk0", DriveKind::Emmc, "DG4064"));
+        assert_eq!(
+            (
+                drives[0].name.as_str(),
+                drives[0].kind,
+                drives[0].model.as_str()
+            ),
+            ("mmcblk0", DriveKind::Emmc, "DG4064")
+        );
     }
 
     #[test]
     fn usb_and_removable_disks_are_hidden() {
         let t = Tree::new("usb");
-        t.disk("sda", "pci0000:00/0000:00:17.0/ata1/host0/target0:0:0/0:0:0:0", 1_000_000, false, Some("Internal SSD"));
-        t.disk("sdb", "pci0000:00/0000:00:14.0/usb1/1-2/1-2:1.0/host4/target4:0:0/4:0:0:0", 1_000_000, false, Some("Portable SSD"));
-        t.disk("sdc", "pci0000:00/0000:00:17.0/ata3/host2/target2:0:0/2:0:0:0", 1_000_000, false, Some("Card Reader"));
+        t.disk(
+            "sda",
+            "pci0000:00/0000:00:17.0/ata1/host0/target0:0:0/0:0:0:0",
+            1_000_000,
+            false,
+            Some("Internal SSD"),
+        );
+        t.disk(
+            "sdb",
+            "pci0000:00/0000:00:14.0/usb1/1-2/1-2:1.0/host4/target4:0:0/4:0:0:0",
+            1_000_000,
+            false,
+            Some("Portable SSD"),
+        );
+        t.disk(
+            "sdc",
+            "pci0000:00/0000:00:17.0/ata3/host2/target2:0:0/2:0:0:0",
+            1_000_000,
+            false,
+            Some("Card Reader"),
+        );
         t.disk_attr("sdc", "removable", "1");
-        let names: Vec<_> = list_internal_drives(t.sys()).into_iter().map(|d| d.name).collect();
+        let names: Vec<_> = list_internal_drives(t.sys())
+            .into_iter()
+            .map(|d| d.name)
+            .collect();
         assert_eq!(names, vec!["sda"]);
     }
 
@@ -661,15 +786,36 @@ mod tests {
     fn virtual_optical_empty_and_multipath_devices_are_hidden() {
         let t = Tree::new("virt");
         t.disk("nvme0n1", NVME0_HW, 1_000_000, false, Some("Real NVMe"));
-        t.disk("nvme0c0n1", NVME0_HW, 1_000_000, false, Some("Multipath head"));
+        t.disk(
+            "nvme0c0n1",
+            NVME0_HW,
+            1_000_000,
+            false,
+            Some("Multipath head"),
+        );
         t.disk_attr("nvme0c0n1", "hidden", "1");
-        t.disk("sr0", "pci0000:00/0000:00:17.0/ata4/host3/target3:0:0/3:0:0:0", 2_097_151, false, Some("DVD"));
+        t.disk(
+            "sr0",
+            "pci0000:00/0000:00:17.0/ata4/host3/target3:0:0/3:0:0:0",
+            2_097_151,
+            false,
+            Some("DVD"),
+        );
         t.disk("loop0", "virtual/block/loop0", 1_000_000, false, None);
         t.disk("ram0", "virtual/block/ram0", 65_536, false, None);
         t.disk("nbd0", "virtual/block/nbd0", 1_000_000, false, None);
-        t.disk("sdz", "pci0000:00/0000:00:17.0/ata5/host4/target4:0:0/4:0:0:0", 0, false, Some("Empty tray"));
+        t.disk(
+            "sdz",
+            "pci0000:00/0000:00:17.0/ata5/host4/target4:0:0/4:0:0:0",
+            0,
+            false,
+            Some("Empty tray"),
+        );
         t.dm("dm-0", "cryptroot", "nvme0n1");
-        let names: Vec<_> = list_internal_drives(t.sys()).into_iter().map(|d| d.name).collect();
+        let names: Vec<_> = list_internal_drives(t.sys())
+            .into_iter()
+            .map(|d| d.name)
+            .collect();
         assert_eq!(names, vec!["nvme0n1"]);
     }
 
@@ -681,8 +827,14 @@ mod tests {
         }
         t.disk("sdaa", "pci/sdaa", 1_000_000, false, Some("SATA"));
         t.disk("sdb", "pci/sdb", 1_000_000, false, Some("SATA"));
-        let names: Vec<_> = list_internal_drives(t.sys()).into_iter().map(|d| d.name).collect();
-        assert_eq!(names, vec!["nvme0n1", "nvme0n2", "nvme2n1", "nvme10n1", "sdb", "sdaa"]);
+        let names: Vec<_> = list_internal_drives(t.sys())
+            .into_iter()
+            .map(|d| d.name)
+            .collect();
+        assert_eq!(
+            names,
+            vec!["nvme0n1", "nvme0n2", "nvme2n1", "nvme10n1", "sdb", "sdaa"]
+        );
     }
 
     #[test]
@@ -692,7 +844,11 @@ mod tests {
         let d = list_internal_drives(t.sys());
         assert_eq!(d.len(), 1);
         assert_eq!(d[0].model, "");
-        assert_eq!(legacy_ssd_spec(&d), "NVMe  ·  1 GB NVMe", "falls back to the kind when the model is unknown");
+        assert_eq!(
+            legacy_ssd_spec(&d),
+            "NVMe  ·  1 GB NVMe",
+            "falls back to the kind when the model is unknown"
+        );
     }
 
     #[test]
@@ -707,16 +863,30 @@ mod tests {
         assert_eq!(unescape_mount_field(r"/mnt/My\040Games"), "/mnt/My Games");
         assert_eq!(unescape_mount_field(r"a\011b\134c"), "a\tb\\c");
         assert_eq!(unescape_mount_field(r"/plain"), "/plain");
-        assert_eq!(unescape_mount_field(r"bad\9escape\04"), r"bad\9escape\04", "malformed escapes stay as they are");
+        assert_eq!(
+            unescape_mount_field(r"bad\9escape\04"),
+            r"bad\9escape\04",
+            "malformed escapes stay as they are"
+        );
     }
 
     #[test]
     fn mountinfo_keeps_only_block_device_filesystems() {
         let mounts = parse_mountinfo(THIS_MACHINE_MOUNTINFO);
-        assert_eq!(mounts.len(), 9, "7 btrfs subvolumes + /boot + /mnt/games: {mounts:?}");
+        assert_eq!(
+            mounts.len(),
+            9,
+            "7 btrfs subvolumes + /boot + /mnt/games: {mounts:?}"
+        );
         assert!(mounts.iter().all(|m| m.source.starts_with("/dev/nvme")));
-        let games = mounts.iter().find(|m| m.mountpoint == "/mnt/games").unwrap();
-        assert_eq!((games.fstype.as_str(), games.dev.as_str()), ("ext4", "259:2"));
+        let games = mounts
+            .iter()
+            .find(|m| m.mountpoint == "/mnt/games")
+            .unwrap();
+        assert_eq!(
+            (games.fstype.as_str(), games.dev.as_str()),
+            ("ext4", "259:2")
+        );
     }
 
     #[test]
@@ -741,11 +911,29 @@ mod tests {
     fn partitions_and_whole_disk_filesystems_resolve_to_their_disk() {
         let t = this_machine("resolve");
         t.disk("sda", "pci/sda", 1_000_000, false, Some("Whole disk fs"));
-        let m = |src: &str, dev: &str| MountEntry { dev: dev.into(), mountpoint: "/x".into(), fstype: "ext4".into(), source: src.into() };
-        assert_eq!(resolve_physical_disk(t.sys(), &m("/dev/nvme0n1p2", "0:33")).as_deref(), Some("nvme0n1"));
-        assert_eq!(resolve_physical_disk(t.sys(), &m("/dev/nvme1n1p1", "259:2")).as_deref(), Some("nvme1n1"));
-        assert_eq!(resolve_physical_disk(t.sys(), &m("/dev/sda", "8:0")).as_deref(), Some("sda"));
-        assert_eq!(resolve_physical_disk(t.sys(), &m("/dev/zram0", "254:0")).as_deref(), Some("zram0"), "resolves, but is not an internal drive so it never gets a row");
+        let m = |src: &str, dev: &str| MountEntry {
+            dev: dev.into(),
+            mountpoint: "/x".into(),
+            fstype: "ext4".into(),
+            source: src.into(),
+        };
+        assert_eq!(
+            resolve_physical_disk(t.sys(), &m("/dev/nvme0n1p2", "0:33")).as_deref(),
+            Some("nvme0n1")
+        );
+        assert_eq!(
+            resolve_physical_disk(t.sys(), &m("/dev/nvme1n1p1", "259:2")).as_deref(),
+            Some("nvme1n1")
+        );
+        assert_eq!(
+            resolve_physical_disk(t.sys(), &m("/dev/sda", "8:0")).as_deref(),
+            Some("sda")
+        );
+        assert_eq!(
+            resolve_physical_disk(t.sys(), &m("/dev/zram0", "254:0")).as_deref(),
+            Some("zram0"),
+            "resolves, but is not an internal drive so it never gets a row"
+        );
         assert_eq!(resolve_physical_disk(t.sys(), &m("/dev/nope", "0:1")), None);
     }
 
@@ -754,10 +942,24 @@ mod tests {
         let t = this_machine("luks");
         t.dm("dm-0", "luks-1234", "nvme0n1p2");
         t.dm("dm-1", "vg0-root", "dm-0");
-        let m = |src: &str| MountEntry { dev: "254:1".into(), mountpoint: "/".into(), fstype: "ext4".into(), source: src.into() };
-        assert_eq!(resolve_physical_disk(t.sys(), &m("/dev/mapper/luks-1234")).as_deref(), Some("nvme0n1"));
-        assert_eq!(resolve_physical_disk(t.sys(), &m("/dev/mapper/vg0-root")).as_deref(), Some("nvme0n1"));
-        assert_eq!(resolve_physical_disk(t.sys(), &m("/dev/dm-1")).as_deref(), Some("nvme0n1"));
+        let m = |src: &str| MountEntry {
+            dev: "254:1".into(),
+            mountpoint: "/".into(),
+            fstype: "ext4".into(),
+            source: src.into(),
+        };
+        assert_eq!(
+            resolve_physical_disk(t.sys(), &m("/dev/mapper/luks-1234")).as_deref(),
+            Some("nvme0n1")
+        );
+        assert_eq!(
+            resolve_physical_disk(t.sys(), &m("/dev/mapper/vg0-root")).as_deref(),
+            Some("nvme0n1")
+        );
+        assert_eq!(
+            resolve_physical_disk(t.sys(), &m("/dev/dm-1")).as_deref(),
+            Some("nvme0n1")
+        );
     }
 
     #[test]
@@ -765,7 +967,12 @@ mod tests {
         let t = Tree::new("cycle");
         t.dm("dm-0", "a", "dm-1");
         t.dm("dm-1", "b", "dm-0");
-        let m = MountEntry { dev: "254:0".into(), mountpoint: "/".into(), fstype: "ext4".into(), source: "/dev/dm-0".into() };
+        let m = MountEntry {
+            dev: "254:0".into(),
+            mountpoint: "/".into(),
+            fstype: "ext4".into(),
+            source: "/dev/dm-0".into(),
+        };
         assert_eq!(resolve_physical_disk(t.sys(), &m), None);
     }
 
@@ -773,8 +980,16 @@ mod tests {
     fn dev_root_falls_back_to_the_mount_major_minor() {
         let t = this_machine("devroot");
         t.devnum("259:4", "nvme0n1p2");
-        let m = MountEntry { dev: "259:4".into(), mountpoint: "/".into(), fstype: "ext4".into(), source: "/dev/root".into() };
-        assert_eq!(resolve_physical_disk(t.sys(), &m).as_deref(), Some("nvme0n1"));
+        let m = MountEntry {
+            dev: "259:4".into(),
+            mountpoint: "/".into(),
+            fstype: "ext4".into(),
+            source: "/dev/root".into(),
+        };
+        assert_eq!(
+            resolve_physical_disk(t.sys(), &m).as_deref(),
+            Some("nvme0n1")
+        );
     }
 
     // ── usage ──
@@ -799,12 +1014,23 @@ mod tests {
 
         assert_eq!(usage.len(), 2);
         assert_eq!(usage[0].name, "nvme0n1");
-        assert_eq!(usage[0].used_bytes, 46_900_000_000 + 628_000_000, "root + /boot, subvolumes not repeated");
+        assert_eq!(
+            usage[0].used_bytes,
+            46_900_000_000 + 628_000_000,
+            "root + /boot, subvolumes not repeated"
+        );
         assert_eq!(usage[0].total_bytes, 1_019_900_000_000 + 4_298_000_000);
         assert_eq!(usage[1].name, "nvme1n1");
-        assert_eq!((usage[1].used_bytes, usage[1].total_bytes), (218_836_664_320, 1_967_845_998_592));
+        assert_eq!(
+            (usage[1].used_bytes, usage[1].total_bytes),
+            (218_836_664_320, 1_967_845_998_592)
+        );
         assert_eq!(calls.get(), 3, "one statvfs per source, not per mount");
-        assert_eq!(usage[0].mounts, vec!["/", "/boot"], "one mountpoint per filesystem, not one per subvolume");
+        assert_eq!(
+            usage[0].mounts,
+            vec!["/", "/boot"],
+            "one mountpoint per filesystem, not one per subvolume"
+        );
         assert_eq!(usage[1].mounts, vec!["/mnt/games"]);
     }
 
@@ -819,9 +1045,13 @@ mod tests {
 518 404 0:33 /@/var/lib/omen-space-daemon /var/lib/omen-space-daemon rw - btrfs /dev/nvme0n1p2 rw,subvol=/@
 527 404 259:3 / /boot ro - vfat /dev/nvme0n1p1 rw
 ");
-        let usage = drive_usage(&list_internal_drives(t.sys()), &mounts, t.sys(), &|_| Some(FsUsage { used: 1, total: 2 }));
+        let usage = drive_usage(&list_internal_drives(t.sys()), &mounts, t.sys(), &|_| {
+            Some(FsUsage { used: 1, total: 2 })
+        });
         assert_eq!(usage[0].mounts, vec!["/", "/boot"]);
-        assert!(mount_rank("/") < mount_rank("/boot") && mount_rank("/boot") < mount_rank("/var/log"));
+        assert!(
+            mount_rank("/") < mount_rank("/boot") && mount_rank("/boot") < mount_rank("/var/log")
+        );
     }
 
     #[test]
@@ -829,12 +1059,16 @@ mod tests {
         let t = Tree::new("fallthrough");
         t.disk("sda", "pci/sda", 1_000_000, false, Some("SATA"));
         t.partition("sda", "sda1", 1);
-        let mounts = parse_mountinfo("\
+        let mounts = parse_mountinfo(
+            "\
 10 1 8:1 / /mnt/hidden rw - ext4 /dev/sda1 rw
 11 1 8:1 / /mnt/visible rw - ext4 /dev/sda1 rw
-");
+",
+        );
         let fs_table = table(&[("/mnt/visible", 5, 10)]); // /mnt/hidden fails, as under ProtectHome
-        let usage = drive_usage(&list_internal_drives(t.sys()), &mounts, t.sys(), &|mp| fs_table.get(mp).copied());
+        let usage = drive_usage(&list_internal_drives(t.sys()), &mounts, t.sys(), &|mp| {
+            fs_table.get(mp).copied()
+        });
         assert_eq!((usage[0].used_bytes, usage[0].total_bytes), (5, 10));
     }
 
@@ -844,7 +1078,9 @@ mod tests {
         t.dm("dm-0", "cryptroot", "nvme0n1p2");
         let mounts = parse_mountinfo("40 1 254:0 / / rw - ext4 /dev/mapper/cryptroot rw\n");
         let fs_table = table(&[("/", 100, 400)]);
-        let usage = drive_usage(&list_internal_drives(t.sys()), &mounts, t.sys(), &|mp| fs_table.get(mp).copied());
+        let usage = drive_usage(&list_internal_drives(t.sys()), &mounts, t.sys(), &|mp| {
+            fs_table.get(mp).copied()
+        });
         assert_eq!((usage[0].used_bytes, usage[0].total_bytes), (100, 400));
         assert_eq!(usage[1].total_bytes, 0);
     }
@@ -852,30 +1088,53 @@ mod tests {
     #[test]
     fn a_drive_with_nothing_mounted_reports_zero_and_external_disks_are_ignored() {
         let t = this_machine("unmounted");
-        t.disk("sdb", "pci0000:00/0000:00:14.0/usb1/1-1/host5/target5:0:0/5:0:0:0", 1_000_000, false, Some("Stick"));
+        t.disk(
+            "sdb",
+            "pci0000:00/0000:00:14.0/usb1/1-1/host5/target5:0:0/5:0:0:0",
+            1_000_000,
+            false,
+            Some("Stick"),
+        );
         t.partition("sdb", "sdb1", 1);
         let mounts = parse_mountinfo("60 1 8:17 / /run/media/stick rw - vfat /dev/sdb1 rw\n");
-        let usage = drive_usage(&list_internal_drives(t.sys()), &mounts, t.sys(), &|_| Some(FsUsage { used: 1, total: 2 }));
-        assert_eq!(usage.len(), 2, "one entry per internal drive, none for the USB stick");
-        assert!(usage.iter().all(|u| u.total_bytes == 0 && u.mounts.is_empty()));
+        let usage = drive_usage(&list_internal_drives(t.sys()), &mounts, t.sys(), &|_| {
+            Some(FsUsage { used: 1, total: 2 })
+        });
+        assert_eq!(
+            usage.len(),
+            2,
+            "one entry per internal drive, none for the USB stick"
+        );
+        assert!(usage
+            .iter()
+            .all(|u| u.total_bytes == 0 && u.mounts.is_empty()));
     }
-
 
     #[test]
     fn missing_filesystem_statistics_do_not_look_like_empty_block_capacity() {
-        let t=Tree::new("unreadable-regression");t.disk("sda","pci/sda",1_000_000,false,Some("SATA"));
-        let mounts=parse_mountinfo("10 1 8:0 / /mnt/private rw - ext4 /dev/sda rw\n");
-        let usage=drive_usage(&list_internal_drives(t.sys()),&mounts,t.sys(),&|_|None);
-        assert_eq!((usage[0].used_bytes,usage[0].total_bytes),(0,0));
-        assert_eq!(usage[0].usage_complete,Some(false));
+        let t = Tree::new("unreadable-regression");
+        t.disk("sda", "pci/sda", 1_000_000, false, Some("SATA"));
+        let mounts = parse_mountinfo("10 1 8:0 / /mnt/private rw - ext4 /dev/sda rw\n");
+        let usage = drive_usage(&list_internal_drives(t.sys()), &mounts, t.sys(), &|_| None);
+        assert_eq!((usage[0].used_bytes, usage[0].total_bytes), (0, 0));
+        assert_eq!(usage[0].usage_complete, Some(false));
     }
     #[test]
     fn mixed_readable_and_unreadable_filesystems_are_explicitly_partial() {
-        let t=this_machine("partial-regression");
+        let t = this_machine("partial-regression");
         let mounts=parse_mountinfo("10 1 259:2 / / rw - ext4 /dev/nvme0n1p2 rw\n11 1 259:1 / /boot rw - vfat /dev/nvme0n1p1 rw\n");
-        let usage=drive_usage(&list_internal_drives(t.sys()),&mounts,t.sys(),&|p|if p=="/" {Some(FsUsage{used:100,total:400})}else{None});
-        assert_eq!((usage[0].used_bytes,usage[0].total_bytes),(100,400));
-        assert_eq!(usage[0].usage_complete,Some(false));
+        let usage = drive_usage(&list_internal_drives(t.sys()), &mounts, t.sys(), &|p| {
+            if p == "/" {
+                Some(FsUsage {
+                    used: 100,
+                    total: 400,
+                })
+            } else {
+                None
+            }
+        });
+        assert_eq!((usage[0].used_bytes, usage[0].total_bytes), (100, 400));
+        assert_eq!(usage[0].usage_complete, Some(false));
     }
 
     // ── legacy fields ──
@@ -884,24 +1143,48 @@ mod tests {
     fn legacy_ssd_spec_keeps_the_exact_old_text_for_the_first_drive() {
         let t = this_machine("legacy");
         let drives = list_internal_drives(t.sys());
-        assert_eq!(legacy_ssd_spec(&drives), "SAMSUNG MZVL81T0HFLB-00BH1  ·  1024 GB NVMe");
+        assert_eq!(
+            legacy_ssd_spec(&drives),
+            "SAMSUNG MZVL81T0HFLB-00BH1  ·  1024 GB NVMe"
+        );
         assert_eq!(legacy_ssd_spec(&[]), "");
-        let hdd = DriveInfo { name: "sdb".into(), model: "WDC WD20SPZX".into(), kind: DriveKind::Hdd, size_bytes: 2_000_398_934_016 };
+        let hdd = DriveInfo {
+            name: "sdb".into(),
+            model: "WDC WD20SPZX".into(),
+            kind: DriveKind::Hdd,
+            size_bytes: 2_000_398_934_016,
+        };
         assert_eq!(legacy_ssd_spec(&[hdd]), "WDC WD20SPZX  ·  2000 GB HDD");
     }
 
     #[test]
     fn legacy_disk_fields_describe_the_first_drive_in_decimal_gb() {
         let usage = vec![
-            DriveUsage { name: "a".into(), used_bytes: 48_000_000_000, total_bytes: 1_024_000_000_000, mounts: vec![], ..Default::default() },
-            DriveUsage { name: "b".into(), used_bytes: 9, total_bytes: 10, mounts: vec![], ..Default::default() },
+            DriveUsage {
+                name: "a".into(),
+                used_bytes: 48_000_000_000,
+                total_bytes: 1_024_000_000_000,
+                mounts: vec![],
+                ..Default::default()
+            },
+            DriveUsage {
+                name: "b".into(),
+                used_bytes: 9,
+                total_bytes: 10,
+                mounts: vec![],
+                ..Default::default()
+            },
         ];
         let (used, total, frac) = legacy_disk_fields(&usage);
         assert!((used - 48.0).abs() < 1e-9 && (total - 1024.0).abs() < 1e-9);
         assert!((frac - 48.0 / 1024.0).abs() < 1e-9);
         assert_eq!(legacy_disk_fields(&[]), (0.0, 0.0, 0.0));
         let unmounted = [DriveUsage::default()];
-        assert_eq!(legacy_disk_fields(&unmounted), (0.0, 0.0, 0.0), "no NaN from a zero total");
+        assert_eq!(
+            legacy_disk_fields(&unmounted),
+            (0.0, 0.0, 0.0),
+            "no NaN from a zero total"
+        );
     }
 
     // ── wire compatibility (old daemon <-> new GUI, and the reverse) ──
@@ -913,7 +1196,10 @@ mod tests {
     fn json_from_an_old_daemon_still_parses_with_no_drives() {
         let specs: HardwareSpecs = serde_json::from_str(OLD_SPECS).expect("old specs must parse");
         assert_eq!(specs.product_name, "OMEN Gaming Laptop 16-ap0xxx");
-        assert!(specs.drives.is_empty(), "a missing list must default to empty, not fail the parse");
+        assert!(
+            specs.drives.is_empty(),
+            "a missing list must default to empty, not fail the parse"
+        );
         assert!(specs.ssd_spec.contains("SAMSUNG"));
         let stats: SystemStats = serde_json::from_str(OLD_STATS).expect("old stats must parse");
         assert_eq!(stats.cpu_temp, 55);
@@ -928,18 +1214,36 @@ mod tests {
         specs.drives = list_internal_drives(t.sys());
         specs.ssd_spec = legacy_ssd_spec(&specs.drives);
         let json = serde_json::to_string(&specs).unwrap();
-        assert!(json.contains(r#""ssd_spec":"SAMSUNG MZVL81T0HFLB-00BH1  ·  1024 GB NVMe""#), "old GUIs still read this: {json}");
+        assert!(
+            json.contains(r#""ssd_spec":"SAMSUNG MZVL81T0HFLB-00BH1  ·  1024 GB NVMe""#),
+            "old GUIs still read this: {json}"
+        );
         assert!(json.contains(r#""kind":"nvme""#));
-        assert_eq!(serde_json::from_str::<HardwareSpecs>(&json).unwrap().drives, specs.drives);
+        assert_eq!(
+            serde_json::from_str::<HardwareSpecs>(&json).unwrap().drives,
+            specs.drives
+        );
 
         let stats = SystemStats {
-            drives: vec![DriveUsage { name: "nvme0n1".into(), used_bytes: 48, total_bytes: 1024, mounts: vec!["/".into()], ..Default::default() }],
+            drives: vec![DriveUsage {
+                name: "nvme0n1".into(),
+                used_bytes: 48,
+                total_bytes: 1024,
+                mounts: vec!["/".into()],
+                ..Default::default()
+            }],
             disk_total_gb: 1.0,
             ..Default::default()
         };
         let json = serde_json::to_string(&stats).unwrap();
-        assert!(json.contains("\"disk_total_gb\""), "old GUIs still read the scalar fields");
-        assert_eq!(serde_json::from_str::<SystemStats>(&json).unwrap().drives, stats.drives);
+        assert!(
+            json.contains("\"disk_total_gb\""),
+            "old GUIs still read the scalar fields"
+        );
+        assert_eq!(
+            serde_json::from_str::<SystemStats>(&json).unwrap().drives,
+            stats.drives
+        );
     }
 
     #[test]
@@ -949,12 +1253,21 @@ mod tests {
             ssd_spec: String,
             product_name: String,
         }
-        let mut specs = HardwareSpecs { ssd_spec: "x".into(), product_name: "p".into(), ..Default::default() };
+        let mut specs = HardwareSpecs {
+            ssd_spec: "x".into(),
+            product_name: "p".into(),
+            ..Default::default()
+        };
         specs.drives.push(DriveInfo::default());
-        let old: OldSpecs = serde_json::from_str(&serde_json::to_string(&specs).unwrap()).expect("unknown `drives` must be ignored");
-        assert_eq!((old.ssd_spec.as_str(), old.product_name.as_str()), ("x", "p"));
+        let old: OldSpecs = serde_json::from_str(&serde_json::to_string(&specs).unwrap())
+            .expect("unknown `drives` must be ignored");
+        assert_eq!(
+            (old.ssd_spec.as_str(), old.product_name.as_str()),
+            ("x", "p")
+        );
 
-        let future: DriveInfo = serde_json::from_str(r#"{"name":"x","kind":"optane","extra":1}"#).expect("unknown kind and fields must not fail");
+        let future: DriveInfo = serde_json::from_str(r#"{"name":"x","kind":"optane","extra":1}"#)
+            .expect("unknown kind and fields must not fail");
         assert_eq!(future.kind, DriveKind::Other);
     }
 
@@ -967,7 +1280,11 @@ mod tests {
         let usage = current_usage(&drives);
         println!("drives: {}", serde_json::to_string_pretty(&drives).unwrap());
         println!("usage:  {}", serde_json::to_string_pretty(&usage).unwrap());
-        println!("legacy: {:?} {:?}", legacy_ssd_spec(&drives), legacy_disk_fields(&usage));
+        println!(
+            "legacy: {:?} {:?}",
+            legacy_ssd_spec(&drives),
+            legacy_disk_fields(&usage)
+        );
         assert_eq!(drives.len(), usage.len());
     }
 }

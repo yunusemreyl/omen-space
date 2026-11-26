@@ -1,16 +1,25 @@
-use gtk::prelude::*;
-use libadwaita as adw;
-use adw::prelude::*;
 use crate::daemon_client::{self, DaemonStatus, SystemStats};
 use crate::i18n;
+use adw::prelude::*;
+use gtk::prelude::*;
+use libadwaita as adw;
 
 // GLib futures do not enter a Tokio runtime. Run process I/O on the shared
 // runtime and await only its join handle on the GTK main context.
-async fn command_output(program: &'static str, args: &[&str]) -> std::io::Result<std::process::Output> {
+async fn command_output(
+    program: &'static str,
+    args: &[&str],
+) -> std::io::Result<std::process::Output> {
     let args: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
-    daemon_client::get_runtime().spawn(async move {
-        tokio::process::Command::new(program).args(args).output().await
-    }).await.map_err(std::io::Error::other)?
+    daemon_client::get_runtime()
+        .spawn(async move {
+            tokio::process::Command::new(program)
+                .args(args)
+                .output()
+                .await
+        })
+        .await
+        .map_err(std::io::Error::other)?
 }
 
 fn is_systemd_running() -> bool {
@@ -125,7 +134,12 @@ pub(crate) fn build_github_issue_url(title: &str, report: &str, max_url_bytes: u
         _ => lo,
     };
 
-    format!("{}{}{}", prefix, encode(&report[..slice_end]), encoded_notice)
+    format!(
+        "{}{}{}",
+        prefix,
+        encode(&report[..slice_end]),
+        encoded_notice
+    )
 }
 
 /// Opens the unified Full System Dump dialog and lets the user submit it to GitHub in one click.
@@ -198,7 +212,10 @@ pub fn open_full_dump_dialog(parent: &adw::ApplicationWindow, issue_title: &str)
                             &report_copy,
                             GITHUB_URL_MAX_BYTES,
                         );
-                        let _ = gtk::gio::AppInfo::launch_default_for_uri(&url, None::<&gtk::gio::AppLaunchContext>);
+                        let _ = gtk::gio::AppInfo::launch_default_for_uri(
+                            &url,
+                            None::<&gtk::gio::AppLaunchContext>,
+                        );
                         d.close();
                     } else {
                         d.close();
@@ -215,18 +232,8 @@ pub fn open_full_dump_dialog(parent: &adw::ApplicationWindow, issue_title: &str)
     });
 }
 
-/// Builds the comprehensive, unified Debug Center page.
-#[allow(dead_code)]
-pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
-    build_page_inner(window, false)
-}
-
 /// Builds Debug Center without duplicating the outer page title when embedded inside Settings.
 pub fn build_embedded(window: &adw::ApplicationWindow) -> gtk::Box {
-    build_page_inner(window, true)
-}
-
-fn build_page_inner(window: &adw::ApplicationWindow, embedded: bool) -> gtk::Box {
     let root_box = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .spacing(16)
@@ -244,24 +251,14 @@ fn build_page_inner(window: &adw::ApplicationWindow, embedded: bool) -> gtk::Box
         .spacing(12)
         .build();
 
-    if !embedded {
-        let title_label = gtk::Label::builder()
-            .label(i18n::t("title_debug"))
-            .css_classes(["page-title"])
-            .halign(gtk::Align::Start)
-            .hexpand(true)
-            .build();
-        header_row.append(&title_label);
-    } else {
-        let desc_inline = gtk::Label::builder()
-            .label(i18n::t("debug_desc"))
-            .css_classes(["os-section-desc"])
-            .halign(gtk::Align::Start)
-            .hexpand(true)
-            .wrap(true)
-            .build();
-        header_row.append(&desc_inline);
-    }
+    let desc_inline = gtk::Label::builder()
+        .label(i18n::t("debug_desc"))
+        .css_classes(["os-section-desc"])
+        .halign(gtk::Align::Start)
+        .hexpand(true)
+        .wrap(true)
+        .build();
+    header_row.append(&desc_inline);
 
     // Daemon status pill matching Performance page
     let status_pill = gtk::Box::builder()
@@ -284,9 +281,15 @@ fn build_page_inner(window: &adw::ApplicationWindow, embedded: bool) -> gtk::Box
 
     // Restart daemon button (systemd + OpenRC compatible, #361)
     let restart_tooltip = if is_systemd_running() {
-        format!("{} (pkexec systemctl restart omen-space-daemon)", i18n::t("debug_restart_daemon"))
+        format!(
+            "{} (pkexec systemctl restart omen-space-daemon)",
+            i18n::t("debug_restart_daemon")
+        )
     } else if is_openrc_running() {
-        format!("{} (pkexec rc-service omen-space-daemon restart)", i18n::t("debug_restart_daemon"))
+        format!(
+            "{} (pkexec rc-service omen-space-daemon restart)",
+            i18n::t("debug_restart_daemon")
+        )
     } else {
         i18n::t("debug_restart_daemon").to_string()
     };
@@ -316,32 +319,21 @@ fn build_page_inner(window: &adw::ApplicationWindow, embedded: bool) -> gtk::Box
     });
     header_row.append(&restart_btn);
     title_box.append(&header_row);
-
-    if !embedded {
-        let desc_label = gtk::Label::builder()
-            .label(i18n::t("debug_desc"))
-            .css_classes(["os-section-desc"])
-            .halign(gtk::Align::Start)
-            .build();
-        title_box.append(&desc_label);
-    }
     root_box.append(&title_box);
 
     // Listen to daemon status transitions to update badge
     let daemon_dot_c = daemon_dot.clone();
     let daemon_text_c = daemon_text.clone();
-    daemon_client::subscribe_daemon_status(move |status| {
-        match status {
-            DaemonStatus::Online => {
-                daemon_dot_c.remove_css_class("daemon-dot-off");
-                daemon_dot_c.add_css_class("daemon-dot-on");
-                daemon_text_c.set_label(i18n::t("debug_daemon_online"));
-            }
-            DaemonStatus::Offline => {
-                daemon_dot_c.remove_css_class("daemon-dot-on");
-                daemon_dot_c.add_css_class("daemon-dot-off");
-                daemon_text_c.set_label(i18n::t("debug_daemon_offline"));
-            }
+    daemon_client::subscribe_daemon_status(move |status| match status {
+        DaemonStatus::Online => {
+            daemon_dot_c.remove_css_class("daemon-dot-off");
+            daemon_dot_c.add_css_class("daemon-dot-on");
+            daemon_text_c.set_label(i18n::t("debug_daemon_online"));
+        }
+        DaemonStatus::Offline => {
+            daemon_dot_c.remove_css_class("daemon-dot-on");
+            daemon_dot_c.add_css_class("daemon-dot-off");
+            daemon_text_c.set_label(i18n::t("debug_daemon_offline"));
         }
     });
 
@@ -404,11 +396,27 @@ fn build_page_inner(window: &adw::ApplicationWindow, embedded: bool) -> gtk::Box
     let is_verified = daemon_client::is_board_verified_sync(&board_id);
     let board_row = adw::ActionRow::builder()
         .title(i18n::t("debug_board_id"))
-        .subtitle(format!("{} — {}", specs.product_name, if board_id.is_empty() { "Unknown" } else { &board_id }))
+        .subtitle(format!(
+            "{} — {}",
+            specs.product_name,
+            if board_id.is_empty() {
+                "Unknown"
+            } else {
+                &board_id
+            }
+        ))
         .build();
     let badge_label = gtk::Label::builder()
-        .label(i18n::t(if is_verified { "debug_board_verified" } else { "debug_board_unverified" }))
-        .css_classes([if is_verified { "badge-ok" } else { "badge-warn" }])
+        .label(i18n::t(if is_verified {
+            "debug_board_verified"
+        } else {
+            "debug_board_unverified"
+        }))
+        .css_classes([if is_verified {
+            "badge-ok"
+        } else {
+            "badge-warn"
+        }])
         .valign(gtk::Align::Center)
         .margin_end(8)
         .build();
@@ -449,7 +457,11 @@ fn build_page_inner(window: &adw::ApplicationWindow, embedded: bool) -> gtk::Box
         .subtitle(format!(
             "hp-wmi: {} | hp-omen-extra: {} | ec_sys: {}",
             if has_hp_wmi { "Loaded" } else { "Missing" },
-            if has_hp_omen_extra { "Loaded" } else { "Not Loaded" },
+            if has_hp_omen_extra {
+                "Loaded"
+            } else {
+                "Not Loaded"
+            },
             ec_sys_status,
         ))
         .build();
@@ -579,7 +591,10 @@ fn build_page_inner(window: &adw::ApplicationWindow, embedded: bool) -> gtk::Box
         if let Some(ref bat) = stats.battery {
             bat_row_c.set_subtitle(&format!(
                 "Charge: {}% | Care Limit: {}% | Status: {:?} | Power: {:.1} W",
-                bat.charge_pct, bat.charge_limit_pct.unwrap_or(100), bat.status, bat.power_w
+                bat.charge_pct,
+                bat.charge_limit_pct.unwrap_or(100),
+                bat.status,
+                bat.power_w
             ));
         } else {
             bat_row_c.set_subtitle(i18n::t("debug_no_battery"));
@@ -603,7 +618,11 @@ fn build_page_inner(window: &adw::ApplicationWindow, embedded: bool) -> gtk::Box
         "/var/lib/omen-space-daemon/rapl_baseline.json",
     ] {
         let exists = std::path::Path::new(p).exists();
-        paths_found.push(format!("{}: {}", p, if exists { "EXISTS" } else { "NOT FOUND" }));
+        paths_found.push(format!(
+            "{}: {}",
+            p,
+            if exists { "EXISTS" } else { "NOT FOUND" }
+        ));
     }
     if let Ok(entries) = std::fs::read_dir("/sys/class/hwmon") {
         for entry in entries.flatten() {
@@ -635,7 +654,11 @@ fn build_page_inner(window: &adw::ApplicationWindow, embedded: bool) -> gtk::Box
         .subtitle(i18n::t("fan_cleaning_sub"))
         .activatable(true)
         .build();
-    fan_clean_row.add_suffix(&gtk::Image::builder().icon_name("weather-storm-symbolic").build());
+    fan_clean_row.add_suffix(
+        &gtk::Image::builder()
+            .icon_name("weather-storm-symbolic")
+            .build(),
+    );
 
     let win_clone_clean = window.clone();
     fan_clean_row.connect_activated(move |_| {
@@ -677,8 +700,14 @@ fn build_page_inner(window: &adw::ApplicationWindow, embedded: bool) -> gtk::Box
         .valign(gtk::Align::Center)
         .build();
 
-    let btn_fan_max = gtk::Button::builder().label(i18n::t("debug_fan_max_btn")).css_classes(["destructive-action"]).build();
-    let btn_fan_auto = gtk::Button::builder().label(i18n::t("debug_fan_auto_btn")).css_classes(["suggested-action"]).build();
+    let btn_fan_max = gtk::Button::builder()
+        .label(i18n::t("debug_fan_max_btn"))
+        .css_classes(["destructive-action"])
+        .build();
+    let btn_fan_auto = gtk::Button::builder()
+        .label(i18n::t("debug_fan_auto_btn"))
+        .css_classes(["suggested-action"])
+        .build();
 
     btn_fan_max.connect_clicked(|_| {
         daemon_client::set_fan_mode_sync("max".to_string());
@@ -738,7 +767,9 @@ fn build_page_inner(window: &adw::ApplicationWindow, embedded: bool) -> gtk::Box
 
     let spin_idx = gtk::SpinButton::with_range(0.0, 103.0, 1.0);
     spin_idx.set_value(0.0);
-    let btn_light_key = gtk::Button::builder().label(i18n::t("debug_test_key_btn")).build();
+    let btn_light_key = gtk::Button::builder()
+        .label(i18n::t("debug_test_key_btn"))
+        .build();
     let spin_idx_c = spin_idx.clone();
     btn_light_key.connect_clicked(move |_| {
         let idx = spin_idx_c.value() as u32;
@@ -777,7 +808,8 @@ fn build_page_inner(window: &adw::ApplicationWindow, embedded: bool) -> gtk::Box
                             let time = std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .unwrap_or_default()
-                                .as_secs() % 10000;
+                                .as_secs()
+                                % 10000;
                             badge_c.set_label(&format!("EVENT: {} (T+{})", key, time));
                             badge_c.set_css_classes(&["badge-ok", "os-mono"]);
                         }
@@ -833,7 +865,9 @@ fn build_page_inner(window: &adw::ApplicationWindow, embedded: bool) -> gtk::Box
                         let idx = row * 16 + col;
                         let b = bytes.get(idx).copied().unwrap_or(0);
                         out.push_str(&format!("{:02X} ", b));
-                        if col == 7 { out.push(' '); }
+                        if col == 7 {
+                            out.push(' ');
+                        }
                         if (32..=126).contains(&b) {
                             ascii.push(b as char);
                         } else {
@@ -843,7 +877,9 @@ fn build_page_inner(window: &adw::ApplicationWindow, embedded: bool) -> gtk::Box
                     out.push_str(&format!(" |{}|\n", ascii));
                 }
             } else {
-                out.push_str("EC sysfs node not directly accessible (/sys/kernel/debug/ec/ec0/io).\n");
+                out.push_str(
+                    "EC sysfs node not directly accessible (/sys/kernel/debug/ec/ec0/io).\n",
+                );
                 out.push_str("Querying daemon for EC snapshot...\n\n");
                 if let Ok(rep) = daemon_client::generate_diagnostic_report_async().await {
                     let mut in_ec = false;
@@ -909,11 +945,23 @@ fn build_page_inner(window: &adw::ApplicationWindow, embedded: bool) -> gtk::Box
             let mut out = String::new();
             out.push_str("=== omen-space-daemon logs (last 40 lines) ===\n");
             if is_systemd_running() {
-                if let Ok(output) = command_output("journalctl", &["-u", "omen-space-daemon", "-n", "40", "--no-pager"]).await {
+                if let Ok(output) = command_output(
+                    "journalctl",
+                    &["-u", "omen-space-daemon", "-n", "40", "--no-pager"],
+                )
+                .await
+                {
                     out.push_str(&String::from_utf8_lossy(&output.stdout));
                 }
             } else if let Ok(text) = std::fs::read_to_string("/var/log/omen-space-daemon.log") {
-                for line in text.lines().rev().take(40).collect::<Vec<_>>().into_iter().rev() {
+                for line in text
+                    .lines()
+                    .rev()
+                    .take(40)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                {
                     out.push_str(line);
                     out.push('\n');
                 }
@@ -921,7 +969,10 @@ fn build_page_inner(window: &adw::ApplicationWindow, embedded: bool) -> gtk::Box
             out.push_str("\n=== Kernel dmesg (hp_wmi / hp-omen) ===\n");
             if let Ok(output) = command_output("dmesg", &[]).await {
                 let text = String::from_utf8_lossy(&output.stdout);
-                for line in text.lines().filter(|l| l.contains("hp_wmi") || l.contains("hp-wmi") || l.contains("omen")) {
+                for line in text
+                    .lines()
+                    .filter(|l| l.contains("hp_wmi") || l.contains("hp-wmi") || l.contains("omen"))
+                {
                     out.push_str(line);
                     out.push('\n');
                 }
@@ -948,7 +999,9 @@ mod process_tests {
     #[test]
     fn process_io_can_be_awaited_from_glib_without_a_tokio_reactor() {
         let context = glib::MainContext::new();
-        let output = context.block_on(super::command_output("true", &[])).unwrap();
+        let output = context
+            .block_on(super::command_output("true", &[]))
+            .unwrap();
         assert!(output.status.success());
     }
 

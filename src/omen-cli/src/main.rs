@@ -1,7 +1,6 @@
-use clap::{Parser, Subcommand};
 use anyhow::Result;
+use clap::{Parser, Subcommand};
 
-mod dbus_proxy;
 mod commands;
 mod fetch;
 mod i18n;
@@ -51,7 +50,7 @@ pub enum Commands {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let conn = if let Ok(sys_conn) = zbus::Connection::system().await {
-        if let Ok(proxy) = dbus_proxy::PlatformProxy::new(&sys_conn).await {
+        if let Ok(proxy) = omen_types::PlatformProxy::new(&sys_conn).await {
             if proxy.ping().await.is_ok() {
                 sys_conn
             } else if let Ok(sess_conn) = zbus::Connection::session().await {
@@ -83,7 +82,9 @@ async fn main() -> Result<()> {
 async fn run_command(cmd: &Commands, conn: &zbus::Connection) -> Result<()> {
     match cmd {
         Commands::Fetch => fetch::print_omen_fetch(conn).await?,
-        Commands::Battery => commands::system::handle(&commands::system::SystemCommand::Battery, conn).await?,
+        Commands::Battery => {
+            commands::system::handle(&commands::system::SystemCommand::Battery, conn).await?
+        }
         Commands::Rgb { cmd } => commands::rgb::handle(cmd, conn).await?,
         Commands::Fan { cmd } => commands::fan::handle(cmd, conn).await?,
         Commands::Power { cmd } => commands::power::handle(cmd, conn).await?,

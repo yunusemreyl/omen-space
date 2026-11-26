@@ -3546,6 +3546,7 @@ static int hp_wmi_hwmon_write(struct device *dev, enum hwmon_sensor_types type,
 {
 	struct hp_wmi_hwmon_priv *priv = dev_get_drvdata(dev);
 	int rpm, ret = 0;
+	bool from_max;
 
 	mutex_lock(&priv->hwmon_lock);
 
@@ -3592,32 +3593,41 @@ static int hp_wmi_hwmon_write(struct device *dev, enum hwmon_sensor_types type,
 			if (priv->mode == PWM_MODE_MANUAL)
 				break; /* already in MANUAL, preserve target_rpms */
 
+			from_max = (priv->mode == PWM_MODE_MAX);
+
 			/*
 			 * Leaving MAX boost straight to MANUAL leaves the EC's
 			 * hardware max-fan latch active on some OMEN boards
 			 * (e.g. 8C77, #395).  Clear it and restore thermal
 			 * policy before entering manual RPM control.
 			 */
-			if (priv->mode == PWM_MODE_MAX)
+			if (from_max)
 				hp_wmi_fan_speed_max_reset(priv);
 
 			/*
 			 * Seed target RPMs from the current fan speed so the
-			 * transition to manual mode is smooth.
+			 * transition to manual mode is smooth.  When leaving
+			 * MAX boost, fans are still coasting down near max RPM,
+			 * so seed min_rpm instead of reading stale coast-down RPM.
 			 */
-			if (priv->uses_victus_s_fan_commands)
-				rpm = hp_wmi_get_fan_speed_victus_s(0);
-			else
-				rpm = hp_wmi_get_fan_speed(0);
-			if (rpm >= 0)
-				priv->target_rpms[0] = rpm;
+			if (from_max) {
+				priv->target_rpms[0] = (u16)priv->min_rpm * 100;
+				priv->target_rpms[1] = (u16)priv->min_rpm * 100;
+			} else {
+				if (priv->uses_victus_s_fan_commands)
+					rpm = hp_wmi_get_fan_speed_victus_s(0);
+				else
+					rpm = hp_wmi_get_fan_speed(0);
+				if (rpm >= 0)
+					priv->target_rpms[0] = rpm;
 
-			if (priv->uses_victus_s_fan_commands)
-				rpm = hp_wmi_get_fan_speed_victus_s(1);
-			else
-				rpm = hp_wmi_get_fan_speed(1);
-			if (rpm >= 0)
-				priv->target_rpms[1] = rpm;
+				if (priv->uses_victus_s_fan_commands)
+					rpm = hp_wmi_get_fan_speed_victus_s(1);
+				else
+					rpm = hp_wmi_get_fan_speed(1);
+				if (rpm >= 0)
+					priv->target_rpms[1] = rpm;
+			}
 
 			priv->mode = PWM_MODE_MANUAL;
 			ret = hp_wmi_apply_fan_settings(priv);

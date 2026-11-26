@@ -36,7 +36,11 @@ where
     // Avoid entering Runtime::block_on directly from any active Tokio context (both
     // main()'s Runtime::enter guard and worker tasks spawned onto get_runtime()).
     if tokio::runtime::Handle::try_current().is_ok() {
-        std::thread::spawn(run).join().ok().flatten().unwrap_or(default)
+        std::thread::spawn(run)
+            .join()
+            .ok()
+            .flatten()
+            .unwrap_or(default)
     } else {
         run().unwrap_or(default)
     }
@@ -265,7 +269,9 @@ pub fn set_global_sync(power_val: bool, brightness_val: i32, direction_str: &str
         }
         if let Ok(conn) = get_conn().await {
             if let Ok(proxy) = RgbProxy::new(&conn).await {
-                let _ = proxy.set_global(power_val, brightness_val, &direction).await;
+                let _ = proxy
+                    .set_global(power_val, brightness_val, &direction)
+                    .await;
             }
         }
     });
@@ -311,20 +317,6 @@ pub async fn run_fan_cleaning_async() -> Result<String, Box<dyn std::error::Erro
     Ok(proxy.run_fan_cleaning().await?)
 }
 
-#[allow(dead_code)]
-pub async fn get_diagnostics_async(
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let conn = get_conn().await?;
-    let proxy = SysMonProxy::new(&conn).await?;
-    Ok(proxy.get_diagnostics().await?)
-}
-
-#[allow(dead_code)]
-pub fn get_diagnostics_sync() -> SystemStats {
-    let json_str = block_with_timeout(500, "{}".to_string(), get_diagnostics_async());
-    serde_json::from_str(&json_str).unwrap_or_default()
-}
-
 // ── Daemon Status ─────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, PartialEq)]
@@ -338,8 +330,7 @@ static TELEMETRY_SENDERS: OnceLock<std::sync::Mutex<Vec<glib::Sender<SystemStats
 static DAEMON_STATUS_SENDERS: OnceLock<std::sync::Mutex<Vec<glib::Sender<DaemonStatus>>>> =
     OnceLock::new();
 static CURRENT_DAEMON_STATUS: OnceLock<std::sync::Mutex<Option<DaemonStatus>>> = OnceLock::new();
-static TELEMETRY_STARTED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+static TELEMETRY_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[allow(deprecated)]
 pub fn subscribe_daemon_status<F>(mut callback: F)
@@ -441,8 +432,8 @@ where
     }
 }
 
-pub async fn get_hardware_specs_async(
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn get_hardware_specs_async() -> Result<String, Box<dyn std::error::Error + Send + Sync>>
+{
     let conn = get_conn().await?;
     let proxy = SysMonProxy::new(&conn).await?;
     Ok(proxy.get_hardware_specs().await?)
@@ -452,20 +443,6 @@ pub async fn generate_diagnostic_report_async() -> Result<String, Box<dyn std::e
     let conn = get_conn().await?;
     let proxy = SysMonProxy::new(&conn).await?;
     Ok(proxy.generate_diagnostic_report().await?)
-}
-
-#[allow(dead_code)]
-pub async fn generate_triage_bundle_async() -> Result<String, Box<dyn std::error::Error>> {
-    let conn = get_conn().await?;
-    let proxy = PlatformProxy::new(&conn).await?;
-    Ok(proxy.generate_triage_bundle().await?)
-}
-
-#[allow(dead_code)]
-pub async fn generate_rgb_issue_async() -> Result<String, Box<dyn std::error::Error>> {
-    let conn = get_conn().await?;
-    let proxy = SysMonProxy::new(&conn).await?;
-    Ok(proxy.generate_rgb_issue().await?)
 }
 
 pub fn get_hardware_specs_sync() -> HardwareSpecs {
@@ -508,8 +485,7 @@ pub fn set_color_sync(zone_val: i32, hex_color: String) {
     });
 }
 
-pub async fn get_power_profile_async(
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+pub async fn get_power_profile_async() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let res = get_power_profile_raw_async().await?;
     if let Ok(val) = serde_json::from_str::<serde_json::Value>(&res) {
         if let Some(active) = val.get("active").and_then(|v| v.as_str()) {
@@ -540,7 +516,6 @@ pub fn get_fan_mode_sync() -> String {
     block_with_timeout(500, "auto".to_string(), get_fan_mode_async())
 }
 
-#[allow(dead_code)]
 pub async fn get_fan_info_async() -> Result<String, Box<dyn std::error::Error>> {
     let conn = get_conn().await?;
     let proxy = FanProxy::new(&conn).await?;
@@ -571,27 +546,6 @@ pub async fn set_gpu_mode_async(mode: String) -> Result<String, Box<dyn std::err
     }
 }
 
-#[allow(dead_code)]
-pub fn set_gpu_mode_sync(mode: String) {
-    get_runtime().spawn(async move {
-        let Ok(conn) = get_conn().await else { return };
-        match MuxProxy::new(&conn).await {
-            Ok(proxy) => {
-                if let Err(e) = proxy.set_gpu_mode(&mode).await {
-                    notify_dbus_error(crate::i18n::t("dbus_err_ctx_mux"), &e).await;
-                }
-            }
-            Err(_) => {
-                notify_dbus_error(
-                    crate::i18n::t("dbus_err_ctx_mux_conn"),
-                    crate::i18n::t("dbus_err_daemon_down"),
-                )
-                .await;
-            }
-        }
-    });
-}
-
 pub async fn get_gpu_info_async() -> Result<String, Box<dyn std::error::Error>> {
     let conn = get_conn().await?;
     let proxy = MuxProxy::new(&conn).await?;
@@ -608,14 +562,19 @@ pub async fn set_offset_async(
     get_runtime().spawn(async move {
         let res: Result<String, String> = async {
             let conn = get_conn().await.map_err(|e| e.to_string())?;
-            let proxy = UndervoltProxy::new(&conn).await.map_err(|e| e.to_string())?;
+            let proxy = UndervoltProxy::new(&conn)
+                .await
+                .map_err(|e| e.to_string())?;
             let r = proxy
                 .set_offset(&plane, mv)
                 .await
                 .map_err(|e| e.to_string())?;
             if r.starts_with("FAIL") {
-                notify_dbus_error(&format!("{} ({})", crate::i18n::t("dbus_err_ctx_uv"), plane), &r)
-                    .await;
+                notify_dbus_error(
+                    &format!("{} ({})", crate::i18n::t("dbus_err_ctx_uv"), plane),
+                    &r,
+                )
+                .await;
             }
             Ok(r)
         }
@@ -774,13 +733,12 @@ mod runtime_safety_tests {
             assert_eq!(block_with_timeout(100, 0, async { Ok::<i32, ()>(22) }), 22);
         }
 
-        let res = get_runtime()
-            .block_on(async {
-                get_runtime()
-                    .spawn(async { block_with_timeout(100, 0, async { Ok::<i32, ()>(33) }) })
-                    .await
-                    .unwrap()
-            });
+        let res = get_runtime().block_on(async {
+            get_runtime()
+                .spawn(async { block_with_timeout(100, 0, async { Ok::<i32, ()>(33) }) })
+                .await
+                .unwrap()
+        });
         assert_eq!(res, 33);
     }
 }

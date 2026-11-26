@@ -1,8 +1,8 @@
-use clap::Subcommand;
-use zbus::Connection;
 use anyhow::Result;
-use crate::dbus_proxy::RgbProxy;
+use clap::Subcommand;
 use comfy_table::Table;
+use omen_types::RgbProxy;
+use zbus::Connection;
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum RgbCommand {
@@ -50,7 +50,11 @@ pub async fn handle(cmd: &RgbCommand, conn: &Connection) -> Result<()> {
             let res = proxy.set_color(*zone, hex).await?;
             println!("Response: {}", res);
         }
-        RgbCommand::SetGlobal { power, brightness, direction } => {
+        RgbCommand::SetGlobal {
+            power,
+            brightness,
+            direction,
+        } => {
             let res = proxy.set_global(*power, *brightness, direction).await?;
             println!("Response: {}", res);
         }

@@ -1,7 +1,7 @@
-use clap::Subcommand;
-use zbus::Connection;
 use anyhow::Result;
-use crate::dbus_proxy::PlatformProxy;
+use clap::Subcommand;
+use omen_types::PlatformProxy;
+use zbus::Connection;
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum SystemCommand {
@@ -15,9 +15,7 @@ pub enum SystemCommand {
         f1: bool,
     },
     /// Set battery charge limit (50 to 100; 100 disables)
-    BatteryCare {
-        limit: u32,
-    },
+    BatteryCare { limit: u32 },
     /// Configure hysteretic battery charge limiter (50-95 stop, or 100 to disable)
     BatteryLimit {
         /// Stop charging percentage (50..=95, or 100 to disable)
@@ -70,26 +68,36 @@ pub async fn handle(cmd: &SystemCommand, conn: &Connection) -> Result<()> {
             let res = proxy.set_battery_care(*limit).await?;
             println!("Response: {}", res);
         }
-        SystemCommand::BatteryLimit { stop, start, off_hold } => {
+        SystemCommand::BatteryLimit {
+            stop,
+            start,
+            off_hold,
+        } => {
             let enabled = *stop < 100;
             let s_stop = if enabled { (*stop).clamp(50, 95) } else { 100 };
             let s_start = start.unwrap_or_else(|| s_stop.saturating_sub(5).max(20));
-            let res = proxy.set_battery_limit_config(enabled, s_stop, s_start, *off_hold).await?;
+            let res = proxy
+                .set_battery_limit_config(enabled, s_stop, s_start, *off_hold)
+                .await?;
             println!("Response: {}", res);
         }
         SystemCommand::BatteryBypass { mode } => {
-            let enabled = matches!(mode.trim().to_ascii_lowercase().as_str(), "on" | "1" | "true" | "yes");
+            let enabled = matches!(
+                mode.trim().to_ascii_lowercase().as_str(),
+                "on" | "1" | "true" | "yes"
+            );
             let res = proxy.set_battery_bypass(enabled).await?;
             println!("Response: {}", res);
         }
         SystemCommand::Battery => {
-            let sysmon = crate::dbus_proxy::SysMonProxy::new(conn).await?;
+            let sysmon = omen_types::SysMonProxy::new(conn).await?;
             let diag_str = sysmon.get_diagnostics().await?;
             let limit_json: serde_json::Value = match proxy.get_battery_limit_state().await {
                 Ok(s) => serde_json::from_str(&s).unwrap_or(serde_json::Value::Null),
                 Err(_) => serde_json::Value::Null,
             };
-            let json: serde_json::Value = serde_json::from_str(&diag_str).unwrap_or(serde_json::Value::Null);
+            let json: serde_json::Value =
+                serde_json::from_str(&diag_str).unwrap_or(serde_json::Value::Null);
             if let Some(bat) = json.get("battery").filter(|b| !b.is_null()) {
                 let name = bat["name"].as_str().unwrap_or("BAT0");
                 println!("\x1b[1;36m=== Battery Telemetry ({}) ===\x1b[0m", name);
@@ -102,15 +110,39 @@ pub async fn handle(cmd: &SystemCommand, conn: &Connection) -> Result<()> {
                     _ => ("\x1b[1;37m", status_raw),
                 };
                 let ac_online = bat["ac_online"].as_bool().unwrap_or(false);
-                println!("  \x1b[1mStatus:\x1b[0m         {}{}\x1b[0m (AC Online: {})", status_color, status_name, ac_online);
-                println!("  \x1b[1mCurrent Charge:\x1b[0m {}%", bat["charge_pct"].as_u64().unwrap_or(0));
+                println!(
+                    "  \x1b[1mStatus:\x1b[0m         {}{}\x1b[0m (AC Online: {})",
+                    status_color, status_name, ac_online
+                );
+                println!(
+                    "  \x1b[1mCurrent Charge:\x1b[0m {}%",
+                    bat["charge_pct"].as_u64().unwrap_or(0)
+                );
                 if let Some(h) = bat["health_pct"].as_f64() {
-                    let health_color = if h >= 80.0 { "\x1b[1;32m" } else if h >= 60.0 { "\x1b[1;33m" } else { "\x1b[1;31m" };
-                    println!("  \x1b[1mBattery Health:\x1b[0m {}{:.1}%\x1b[0m", health_color, h);
+                    let health_color = if h >= 80.0 {
+                        "\x1b[1;32m"
+                    } else if h >= 60.0 {
+                        "\x1b[1;33m"
+                    } else {
+                        "\x1b[1;31m"
+                    };
+                    println!(
+                        "  \x1b[1mBattery Health:\x1b[0m {}{:.1}%\x1b[0m",
+                        health_color, h
+                    );
                 }
-                if let (Some(now), Some(full)) = (bat["energy_now_wh"].as_f64(), bat["energy_full_wh"].as_f64()) {
-                    let des_str = bat["energy_design_wh"].as_f64().map(|d| format!(" / {:.2} Wh design", d)).unwrap_or_default();
-                    println!("  \x1b[1mCapacity:\x1b[0m       {:.2} / {:.2} Wh{}", now, full, des_str);
+                if let (Some(now), Some(full)) = (
+                    bat["energy_now_wh"].as_f64(),
+                    bat["energy_full_wh"].as_f64(),
+                ) {
+                    let des_str = bat["energy_design_wh"]
+                        .as_f64()
+                        .map(|d| format!(" / {:.2} Wh design", d))
+                        .unwrap_or_default();
+                    println!(
+                        "  \x1b[1mCapacity:\x1b[0m       {:.2} / {:.2} Wh{}",
+                        now, full, des_str
+                    );
                 }
                 if let Some(cycles) = bat["cycle_count"].as_u64() {
                     println!("  \x1b[1mCycle Count:\x1b[0m    {}", cycles);

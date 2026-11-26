@@ -85,7 +85,10 @@ impl Default for HotkeySpec {
     fn default() -> Self {
         Self {
             key_code: 60, // KEY_F2
-            modifiers: HotkeyModifiers { shift: true, ..Default::default() },
+            modifiers: HotkeyModifiers {
+                shift: true,
+                ..Default::default()
+            },
             label: "F2".to_string(),
         }
     }
@@ -96,13 +99,21 @@ impl HotkeySpec {
         let label = evdev_key_name(key_code)
             .map(str::to_string)
             .unwrap_or_else(|| format!("Key{key_code}"));
-        Self { key_code, modifiers, label }
+        Self {
+            key_code,
+            modifiers,
+            label,
+        }
     }
 
     /// Build from an explicit display label (what the GUI records from GTK).
     pub fn with_label(key_code: u16, modifiers: HotkeyModifiers, label: impl Into<String>) -> Self {
         let label = sanitize_label(label.into(), key_code);
-        Self { key_code, modifiers, label }
+        Self {
+            key_code,
+            modifiers,
+            label,
+        }
     }
 
     /// Human readable form, e.g. `"Ctrl+Shift+F5"`.
@@ -218,8 +229,8 @@ fn sanitize_label(label: String, code: u16) -> String {
 }
 
 const F_KEYS: [&str; 24] = [
-    "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "F13", "F14",
-    "F15", "F16", "F17", "F18", "F19", "F20", "F21", "F22", "F23", "F24",
+    "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "F13", "F14", "F15",
+    "F16", "F17", "F18", "F19", "F20", "F21", "F22", "F23", "F24",
 ];
 
 const DIGITS: [&str; 10] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
@@ -278,12 +289,24 @@ const NAMED_KEYS: &[(u16, &str, &[&str])] = &[
     (113, "Mute", &["XF86AudioMute", "Mute"]),
     (114, "VolumeDown", &["XF86AudioLowerVolume", "VolumeDown"]),
     (115, "VolumeUp", &["XF86AudioRaiseVolume", "VolumeUp"]),
-    (164, "PlayPause", &["XF86AudioPlay", "XF86AudioPause", "PlayPause"]),
+    (
+        164,
+        "PlayPause",
+        &["XF86AudioPlay", "XF86AudioPause", "PlayPause"],
+    ),
     (165, "Previous", &["XF86AudioPrev", "Previous"]),
     (167, "Next", &["XF86AudioNext", "Next"]),
     (166, "Stop", &["XF86AudioStop", "Stop"]),
-    (224, "BrightnessDown", &["XF86MonBrightnessDown", "BrightnessDown"]),
-    (225, "BrightnessUp", &["XF86MonBrightnessUp", "BrightnessUp"]),
+    (
+        224,
+        "BrightnessDown",
+        &["XF86MonBrightnessDown", "BrightnessDown"],
+    ),
+    (
+        225,
+        "BrightnessUp",
+        &["XF86MonBrightnessUp", "BrightnessUp"],
+    ),
     (142, "Sleep", &["XF86Sleep", "Sleep"]),
     (143, "WakeUp", &["XF86WakeUp", "WakeUp"]),
     (140, "Calculator", &["XF86Calculator", "Calculator"]),
@@ -462,7 +485,12 @@ mod tests {
         assert_eq!(spec.key_code, 63);
         assert_eq!(
             spec.modifiers,
-            HotkeyModifiers { ctrl: true, alt: true, shift: true, meta: true }
+            HotkeyModifiers {
+                ctrl: true,
+                alt: true,
+                shift: true,
+                meta: true
+            }
         );
         assert_eq!(spec.display(), "Ctrl+Alt+Shift+Super+F5");
 
@@ -498,7 +526,11 @@ mod tests {
     fn settings_round_trip_prefers_physical_code() {
         let spec = HotkeySpec::with_label(
             63,
-            HotkeyModifiers { ctrl: true, shift: true, ..Default::default() },
+            HotkeyModifiers {
+                ctrl: true,
+                shift: true,
+                ..Default::default()
+            },
             "F5",
         );
         let mut json = json!({});
@@ -520,11 +552,19 @@ mod tests {
 
     #[test]
     fn typing_keys_need_a_modifier() {
-        for code in [59u16, 60, 87, 88, 183, 194, 110, 113, 139, 148, 149, 164, 200, 202, 224, 256] {
-            assert!(allows_no_modifier(code), "code {code} should be allowed alone");
+        for code in [
+            59u16, 60, 87, 88, 183, 194, 110, 113, 139, 148, 149, 164, 200, 202, 224, 256,
+        ] {
+            assert!(
+                allows_no_modifier(code),
+                "code {code} should be allowed alone"
+            );
         }
         for code in [30u16, 2, 57, 28, 15, 1, 14, 103] {
-            assert!(!allows_no_modifier(code), "code {code} must require a modifier");
+            assert!(
+                !allows_no_modifier(code),
+                "code {code} must require a modifier"
+            );
         }
     }
 

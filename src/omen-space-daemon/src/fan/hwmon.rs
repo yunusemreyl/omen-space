@@ -26,7 +26,9 @@ pub async fn sysfs_exists<P: AsRef<Path>>(path: P) -> bool {
 }
 
 pub async fn sysfs_write<P: AsRef<Path>, S: AsRef<str>>(path: P, val: S) -> bool {
-    tokio::fs::write(path, val.as_ref().as_bytes()).await.is_ok()
+    tokio::fs::write(path, val.as_ref().as_bytes())
+        .await
+        .is_ok()
 }
 
 pub async fn find_hp_hwmon() -> Option<PathBuf> {
@@ -160,14 +162,31 @@ pub async fn has_pwm_node(state: &FanState) -> bool {
     }
 }
 
+/// Re-apply the active kernel `platform_profile` (triggering WMI 0x1A) so firmware
+/// clears latched thermal/fan state.
+pub async fn refresh_active_platform_profile() {
+    for p in [
+        "/sys/firmware/acpi/platform_profile",
+        "/sys/devices/platform/hp-wmi/platform_profile",
+    ] {
+        if let Ok(active) = tokio::fs::read_to_string(p).await {
+            let trimmed = active.trim();
+            if !trimmed.is_empty() && sysfs_write(p, trimmed).await {
+                break;
+            }
+        }
+    }
+}
+
 /// Clear the EC's sticky max-boost latch (`pwm1_enable = 0`) by transitioning through
-/// `pwm1_enable = 2` (`PWM_MODE_AUTO`), which invokes `hp_wmi_fan_speed_max_reset` /
-/// `omen_thermal_profile_set` in firmware before switching back to manual duty (#364, #395).
+/// `pwm1_enable = 2` (`PWM_MODE_AUTO`), refreshing the active platform profile (WMI 0x1A),
+/// and waiting 150 ms for firmware handoff before switching back to manual duty (#364, #395).
 pub async fn leave_max_boost(hwmon: &Path) {
     let pwm_enable_path = hwmon.join("pwm1_enable");
-    if sysfs_read(&pwm_enable_path, 2).await == 0 {
+    if sysfs_exists(&pwm_enable_path).await {
         let _ = sysfs_write(&pwm_enable_path, "2").await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(60)).await;
+        refresh_active_platform_profile().await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
     }
 }
 

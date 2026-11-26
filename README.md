@@ -8,7 +8,7 @@
 
   <p>
     <a href="https://github.com/yunusemreyl/omen-space/releases/latest">
-      <img src="https://img.shields.io/badge/Release-v2.5.2-e11d48?style=flat-square" alt="Release v2.5.2" />
+      <img src="https://img.shields.io/badge/Release-v2.5.3-e11d48?style=flat-square" alt="Release v2.5.3" />
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/License-GPL--3.0-10b981?style=flat-square" alt="License" />
@@ -131,11 +131,12 @@ sudo ./setup.sh uninstall   # Remove daemon, UI, and DKMS modules cleanly
 
 ---
 
-## What's New in v2.5.2
+## What's New in v2.5.3
 
-- **Settings Heartbeat Crash Fix (`#395`):** Eliminated the ~20–30 s `omen-gui` abort triggered after opening Settings (`settings.rs` now uses async `ping_daemon_async().await`, and `daemon_client::block_with_timeout()` safely offloads whenever an active Tokio context is present).
-- **`8C77` EC Max-Fan Latch & CPU Package Sensor Fix (`#395`):** Switched fan temperature monitoring to prefer real CPU package `temp1_input` sensors over single-core/ACPI spikes, added automatic EC max-fan latch recovery (`should_recover_ec_max_latch` + `platform_profile` refresh & `pwm1_enable` reset), restored prior fan modes immediately when disabling Thermal Protection, moved `8C76`/`8C77`/`8C78` to `omen_v1_unknown_ec_thermal_params`, and refreshed WMI `0x1A` during `PWM_MODE_MANUAL` keep-alives in `driver/hp-wmi.c`.
-- **Includes all `v2.5.1` fixes:** Verified `8EDF` (`hp_omen_extra` backlight preservation + `-22` fix), `8D42`, Primax `0461:4F03` `Marquee`/`Reactive`/`Ripple` + Zone 4 fix, `8A17` 4-zone boundaries, `8DCF` MUX readback fallback, and modular daemon/GUI refactoring.
+- **Turkish Q (`TR-Q`) Layout & Primax `0xFF13` Matrix (`#385`):** Added the `TR-Q` keycap layout alongside `EN` and `DE` in RGB Studio, mapped physical `Ralph`/`Cybug` LED matrices (`0461:4F03`/`4E9A`/`4E9B`/`4F11`/`4F1E`/`4ECB`), fixed Per-Key `Static` uniform color & `Wave (Custom Colors)`, synced `Off / Key / Zone / All` toggles, and yielded cleanly to native `Fn` presets when `Hardware Effects` is active.
+- **Fan Dust Cleaning & Max-Boost Exit Recovery (`#385`, `#364`):** Refreshes active `platform_profile` (`WMI 0x1A`) during `leave_max_boost`, drops directly to a safe initial manual duty, and seeds `PWM_MODE_MAX -> PWM_MODE_MANUAL` targets cleanly in `driver/hp-wmi.c`.
+- **Cleaner, Modular Codebase:** Unified D-Bus proxies, semver checks, and locale detection in `omen-types`; modularized `i18n/`, `monitoring/`, `updater/`, and `fan/protection.rs`; enforced TR/EN/ES translation parity and `cargo fmt` in CI; and removed unused assets and dead code.
+- **Includes all `v2.5.2` fixes:** Settings heartbeat crash fix and `8C77` EC max-fan latch recovery (`#395`).
 
 ---
 

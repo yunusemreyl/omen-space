@@ -15,7 +15,8 @@ use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 
-pub const HP_WMI_BATTERY_CHARGE_MODE_PATH: &str = "/sys/devices/platform/hp-wmi/battery_charge_mode";
+pub const HP_WMI_BATTERY_CHARGE_MODE_PATH: &str =
+    "/sys/devices/platform/hp-wmi/battery_charge_mode";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -231,7 +232,10 @@ impl HysteresisLimiter {
         match writer.set_mode(mode) {
             Ok(()) => {
                 if self.last_written_mode != Some(mode) || self.failing {
-                    info!("BatteryLimiter [{reason}]: cap={capacity}% -> {}", mode.as_str());
+                    info!(
+                        "BatteryLimiter [{reason}]: cap={capacity}% -> {}",
+                        mode.as_str()
+                    );
                 }
                 self.last_written_mode = Some(mode);
                 self.failing = false;
@@ -239,7 +243,10 @@ impl HysteresisLimiter {
             }
             Err(e) => {
                 if !self.failing {
-                    warn!("BatteryLimiter [{reason}]: cap={capacity}% -> {} failed: {e}", mode.as_str());
+                    warn!(
+                        "BatteryLimiter [{reason}]: cap={capacity}% -> {} failed: {e}",
+                        mode.as_str()
+                    );
                 }
                 self.failing = true;
                 false
@@ -267,7 +274,8 @@ impl HysteresisLimiter {
         *cfg = sanitized;
 
         if !cfg.enabled {
-            if (self.state != LimiterState::Disabled || self.last_written_mode != Some(ChargeMode::Auto))
+            if (self.state != LimiterState::Disabled
+                || self.last_written_mode != Some(ChargeMode::Auto))
                 && self.write_mode(writer, ChargeMode::Auto, "disable", reading.capacity)
             {
                 self.state = LimiterState::Disabled;
@@ -316,7 +324,12 @@ impl HysteresisLimiter {
         match self.state {
             LimiterState::Charging => {
                 if reading.capacity >= cfg.stop_pct {
-                    if self.write_mode(writer, ChargeMode::Inhibit, "stop_reached", reading.capacity) {
+                    if self.write_mode(
+                        writer,
+                        ChargeMode::Inhibit,
+                        "stop_reached",
+                        reading.capacity,
+                    ) {
                         self.state = LimiterState::Limiting;
                     }
                 } else if reading.capacity <= cfg.start_pct {
@@ -325,11 +338,17 @@ impl HysteresisLimiter {
             }
             LimiterState::Limiting => {
                 if reading.capacity <= cfg.start_pct {
-                    if self.write_mode(writer, ChargeMode::Auto, "resume_charge", reading.capacity) {
+                    if self.write_mode(writer, ChargeMode::Auto, "resume_charge", reading.capacity)
+                    {
                         self.state = LimiterState::Charging;
                     }
                 } else if reading.capacity >= cfg.stop_pct {
-                    self.write_mode(writer, ChargeMode::Inhibit, "reassert_inhibit", reading.capacity);
+                    self.write_mode(
+                        writer,
+                        ChargeMode::Inhibit,
+                        "reassert_inhibit",
+                        reading.capacity,
+                    );
                 }
             }
             LimiterState::Disabled | LimiterState::Starting | LimiterState::Bypassed => {}
@@ -416,25 +435,65 @@ mod tests {
         let mut c = cfg(80, 75);
 
         // Starting below start_pct enables charging (`Auto`).
-        lim.tick(BatteryReading { capacity: 60, on_ac: true, is_full: false }, &mut c, &mut fw);
+        lim.tick(
+            BatteryReading {
+                capacity: 60,
+                on_ac: true,
+                is_full: false,
+            },
+            &mut c,
+            &mut fw,
+        );
         assert_eq!(lim.state, LimiterState::Charging);
         assert_eq!(fw.calls.last().copied(), Some(ChargeMode::Auto));
 
         // At 78% inside deadband while Charging: stays Charging.
-        lim.tick(BatteryReading { capacity: 78, on_ac: true, is_full: false }, &mut c, &mut fw);
+        lim.tick(
+            BatteryReading {
+                capacity: 78,
+                on_ac: true,
+                is_full: false,
+            },
+            &mut c,
+            &mut fw,
+        );
         assert_eq!(lim.state, LimiterState::Charging);
 
         // Reaching stop_pct (80%) switches to Limiting (`Inhibit`).
-        lim.tick(BatteryReading { capacity: 80, on_ac: true, is_full: false }, &mut c, &mut fw);
+        lim.tick(
+            BatteryReading {
+                capacity: 80,
+                on_ac: true,
+                is_full: false,
+            },
+            &mut c,
+            &mut fw,
+        );
         assert_eq!(lim.state, LimiterState::Limiting);
         assert_eq!(fw.calls.last().copied(), Some(ChargeMode::Inhibit));
 
         // Dropping to 77% inside deadband stays Limiting.
-        lim.tick(BatteryReading { capacity: 77, on_ac: true, is_full: false }, &mut c, &mut fw);
+        lim.tick(
+            BatteryReading {
+                capacity: 77,
+                on_ac: true,
+                is_full: false,
+            },
+            &mut c,
+            &mut fw,
+        );
         assert_eq!(lim.state, LimiterState::Limiting);
 
         // Dropping to start_pct (75%) resumes Charging (`Auto`).
-        lim.tick(BatteryReading { capacity: 75, on_ac: true, is_full: false }, &mut c, &mut fw);
+        lim.tick(
+            BatteryReading {
+                capacity: 75,
+                on_ac: true,
+                is_full: false,
+            },
+            &mut c,
+            &mut fw,
+        );
         assert_eq!(lim.state, LimiterState::Charging);
         assert_eq!(fw.calls.last().copied(), Some(ChargeMode::Auto));
     }
@@ -445,11 +504,27 @@ mod tests {
         let mut fw = FakeWriter::new();
         let mut c = cfg(80, 75);
 
-        lim.tick(BatteryReading { capacity: 82, on_ac: true, is_full: false }, &mut c, &mut fw);
+        lim.tick(
+            BatteryReading {
+                capacity: 82,
+                on_ac: true,
+                is_full: false,
+            },
+            &mut c,
+            &mut fw,
+        );
         assert_eq!(fw.calls.len(), 1);
 
         // Running on battery should not emit WMI writes even below start_pct.
-        lim.tick(BatteryReading { capacity: 50, on_ac: false, is_full: false }, &mut c, &mut fw);
+        lim.tick(
+            BatteryReading {
+                capacity: 50,
+                on_ac: false,
+                is_full: false,
+            },
+            &mut c,
+            &mut fw,
+        );
         assert_eq!(fw.calls.len(), 1);
         assert_eq!(lim.state, LimiterState::Limiting);
     }
@@ -460,16 +535,40 @@ mod tests {
         let mut fw = FakeWriter::new();
         let mut c = cfg(80, 75);
 
-        lim.tick(BatteryReading { capacity: 80, on_ac: true, is_full: false }, &mut c, &mut fw);
+        lim.tick(
+            BatteryReading {
+                capacity: 80,
+                on_ac: true,
+                is_full: false,
+            },
+            &mut c,
+            &mut fw,
+        );
         assert_eq!(lim.state, LimiterState::Limiting);
 
         c.bypass = true;
-        assert!(!lim.tick(BatteryReading { capacity: 85, on_ac: true, is_full: false }, &mut c, &mut fw));
+        assert!(!lim.tick(
+            BatteryReading {
+                capacity: 85,
+                on_ac: true,
+                is_full: false
+            },
+            &mut c,
+            &mut fw
+        ));
         assert_eq!(lim.state, LimiterState::Bypassed);
         assert_eq!(fw.calls.last().copied(), Some(ChargeMode::Auto));
 
         // Reaching full charge automatically clears one-shot bypass and resumes limiting.
-        let cleared = lim.tick(BatteryReading { capacity: 100, on_ac: true, is_full: true }, &mut c, &mut fw);
+        let cleared = lim.tick(
+            BatteryReading {
+                capacity: 100,
+                on_ac: true,
+                is_full: true,
+            },
+            &mut c,
+            &mut fw,
+        );
         assert!(cleared);
         assert!(!c.bypass);
         assert_eq!(lim.state, LimiterState::Limiting);
@@ -482,14 +581,38 @@ mod tests {
         let mut fw = FakeWriter::new();
         let mut c = cfg(80, 75);
 
-        lim.tick(BatteryReading { capacity: 70, on_ac: true, is_full: false }, &mut c, &mut fw);
+        lim.tick(
+            BatteryReading {
+                capacity: 70,
+                on_ac: true,
+                is_full: false,
+            },
+            &mut c,
+            &mut fw,
+        );
         assert_eq!(lim.state, LimiterState::Charging);
 
         fw.fail_next = true;
-        lim.tick(BatteryReading { capacity: 80, on_ac: true, is_full: false }, &mut c, &mut fw);
+        lim.tick(
+            BatteryReading {
+                capacity: 80,
+                on_ac: true,
+                is_full: false,
+            },
+            &mut c,
+            &mut fw,
+        );
         assert_eq!(lim.state, LimiterState::Charging);
 
-        lim.tick(BatteryReading { capacity: 80, on_ac: true, is_full: false }, &mut c, &mut fw);
+        lim.tick(
+            BatteryReading {
+                capacity: 80,
+                on_ac: true,
+                is_full: false,
+            },
+            &mut c,
+            &mut fw,
+        );
         assert_eq!(lim.state, LimiterState::Limiting);
         assert_eq!(fw.calls.last().copied(), Some(ChargeMode::Inhibit));
     }
@@ -500,10 +623,18 @@ mod tests {
         let mut fw = FakeWriter::new();
         let mut c = cfg(80, 75);
 
-        let high = Some(BatteryReading { capacity: 79, on_ac: false, is_full: false });
+        let high = Some(BatteryReading {
+            capacity: 79,
+            on_ac: false,
+            is_full: false,
+        });
         assert_eq!(lim.on_shutdown(high, &c, &mut fw), Some(ChargeMode::Hold));
 
-        let low = Some(BatteryReading { capacity: 40, on_ac: false, is_full: false });
+        let low = Some(BatteryReading {
+            capacity: 40,
+            on_ac: false,
+            is_full: false,
+        });
         assert_eq!(lim.on_shutdown(low, &c, &mut fw), Some(ChargeMode::Auto));
 
         c.off_hold = false;

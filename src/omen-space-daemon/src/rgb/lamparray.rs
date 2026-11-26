@@ -51,10 +51,6 @@ pub struct LampArrayBackend {
     pub path: String,
     pub lamps: Vec<LampInfo>,
     pub width_um: u32,
-    #[allow(dead_code)]
-    pub height_um: u32,
-    #[allow(dead_code)]
-    pub min_interval_us: u32,
     acquired: Arc<AtomicBool>,
     fd: Arc<Mutex<Option<std::fs::File>>>,
 }
@@ -90,8 +86,7 @@ impl LampArrayBackend {
     ];
 
     fn hidioc(nr: u8, size: usize) -> libc::c_ulong {
-        ((3u64 << 30) | ((size as u64) << 16) | ((b'H' as u64) << 8) | (nr as u64))
-            as libc::c_ulong
+        ((3u64 << 30) | ((size as u64) << 16) | ((b'H' as u64) << 8) | (nr as u64)) as libc::c_ulong
     }
 
     fn get_feature(file: &std::fs::File, report_id: u8, size: usize) -> std::io::Result<Vec<u8>> {
@@ -104,13 +99,8 @@ impl LampArrayBackend {
         }
         let mut buf = vec![0u8; size];
         buf[0] = report_id;
-        let rc = unsafe {
-            libc::ioctl(
-                file.as_raw_fd(),
-                Self::hidioc(0x07, size),
-                buf.as_mut_ptr(),
-            )
-        };
+        let rc =
+            unsafe { libc::ioctl(file.as_raw_fd(), Self::hidioc(0x07, size), buf.as_mut_ptr()) };
         if rc < 0 {
             Err(std::io::Error::last_os_error())
         } else {
@@ -215,8 +205,6 @@ impl LampArrayBackend {
             path: path.to_string(),
             lamps,
             width_um,
-            height_um,
-            min_interval_us,
             acquired: Arc::new(AtomicBool::new(false)),
             fd: Arc::new(Mutex::new(None)),
         })
@@ -341,7 +329,11 @@ impl LampArrayBackend {
             .collect()
     }
 
-    pub fn key_colors(&self, key_colors: &[(u8, u8, u8)], total_key_count: usize) -> Vec<(u8, u8, u8)> {
+    pub fn key_colors(
+        &self,
+        key_colors: &[(u8, u8, u8)],
+        total_key_count: usize,
+    ) -> Vec<(u8, u8, u8)> {
         let n = self.lamps.len();
         if key_colors.is_empty() {
             return vec![(0, 0, 0); n];

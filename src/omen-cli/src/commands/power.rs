@@ -1,15 +1,13 @@
-use clap::Subcommand;
-use zbus::Connection;
 use anyhow::Result;
-use crate::dbus_proxy::{PowerProxy, MuxProxy};
+use clap::Subcommand;
 use comfy_table::Table;
+use omen_types::{MuxProxy, PowerProxy};
+use zbus::Connection;
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum PowerCommand {
     /// Set power profile (power-saver, balanced, performance)
-    SetProfile {
-        profile: String,
-    },
+    SetProfile { profile: String },
     /// Set CPU power limits PL1 & PL2 in Watts
     SetLimits {
         #[arg(long)]
@@ -20,13 +18,9 @@ pub enum PowerCommand {
         pl2: i32,
     },
     /// Apply CPU undervolt offset in mV (e.g. -50)
-    Undervolt {
-        mv: i32,
-    },
+    Undervolt { mv: i32 },
     /// Set GPU Mux mode (hybrid, discrete, advanced, integrated)
-    SetMux {
-        mode: String,
-    },
+    SetMux { mode: String },
     /// Get current power profile and limits
     Info,
 }
@@ -49,7 +43,10 @@ pub async fn handle(cmd: &PowerCommand, conn: &Connection) -> Result<()> {
         }
         PowerCommand::SetMux { mode } => {
             let mode_lower = mode.to_lowercase();
-            if !matches!(mode_lower.as_str(), "hybrid" | "discrete" | "advanced" | "integrated") {
+            if !matches!(
+                mode_lower.as_str(),
+                "hybrid" | "discrete" | "advanced" | "integrated"
+            ) {
                 eprintln!("{} {}", crate::i18n::t("mux_invalid"), mode);
                 std::process::exit(1);
             }
@@ -62,13 +59,13 @@ pub async fn handle(cmd: &PowerCommand, conn: &Connection) -> Result<()> {
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&res) {
                 let mut table = Table::new();
                 table.set_header(vec!["Key", "Value"]);
-                
+
                 if let Some(obj) = json.as_object() {
                     for (k, v) in obj {
                         table.add_row(vec![k, &v.to_string()]);
                     }
                 }
-                
+
                 println!("{}", table);
             } else {
                 println!("{}", res);

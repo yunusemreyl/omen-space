@@ -33,11 +33,7 @@ pub fn scale_hex_color(hex: &str, scaler: f64) -> String {
     )
 }
 
-pub fn lightbar_allowed_for(
-    board_id: &str,
-    caps: &ModelCapabilities,
-    product_name: &str,
-) -> bool {
+pub fn lightbar_allowed_for(board_id: &str, caps: &ModelCapabilities, product_name: &str) -> bool {
     if caps.disable_wmi_rgb {
         return false;
     }
@@ -175,7 +171,8 @@ impl RgbHardware {
             .unwrap_or_default()
             .trim()
             .to_uppercase();
-        let prod_name = std::fs::read_to_string("/sys/class/dmi/id/product_name").unwrap_or_default();
+        let prod_name =
+            std::fs::read_to_string("/sys/class/dmi/id/product_name").unwrap_or_default();
         let specs = crate::sysmon::get_hardware_specs();
         let caps = crate::capabilities::detect(&board_id, prod_name.trim(), &specs.cpu_spec);
         if caps.disable_wmi_rgb {
@@ -268,8 +265,10 @@ impl RgbHardware {
                     i
                 };
                 if actual < count {
-                    mapped_colors[actual] =
-                        colors.get(i).cloned().unwrap_or_else(|| "000000".to_string());
+                    mapped_colors[actual] = colors
+                        .get(i)
+                        .cloned()
+                        .unwrap_or_else(|| "000000".to_string());
                 }
             }
             let payload = mapped_colors.join(" ");
@@ -350,7 +349,8 @@ impl RgbHardware {
     }
 
     pub fn lightbar_write_allowed(&self) -> bool {
-        let prod_name = std::fs::read_to_string("/sys/class/dmi/id/product_name").unwrap_or_default();
+        let prod_name =
+            std::fs::read_to_string("/sys/class/dmi/id/product_name").unwrap_or_default();
         let caps = crate::capabilities::detect(&self.board_id, "", "");
         lightbar_allowed_for(&self.board_id, &caps, &prod_name)
     }

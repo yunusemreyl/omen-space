@@ -1,12 +1,12 @@
+use crate::{daemon_client, i18n};
+use adw::prelude::*;
 use gtk::prelude::*;
 use libadwaita as adw;
-use adw::prelude::*;
 use serde::Deserialize;
-use crate::{i18n, daemon_client};
 
 /* ─────────────────────────────────────────────────────────────
-   appprofiles.rs — Per-application performance profiles
-   ───────────────────────────────────────────────────────────── */
+appprofiles.rs — Per-application performance profiles
+───────────────────────────────────────────────────────────── */
 
 #[derive(Deserialize)]
 struct AppProfile {
@@ -27,16 +27,20 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
         .spacing(4)
         .margin_bottom(4)
         .build();
-    hdr.append(&gtk::Label::builder()
-        .label(i18n::t("title_app_profiles"))
-        .css_classes(["page-title"])
-        .halign(gtk::Align::Start)
-        .build());
-    hdr.append(&gtk::Label::builder()
-        .label(i18n::t("app_profiles_desc"))
-        .css_classes(["os-section-desc"])
-        .halign(gtk::Align::Start)
-        .build());
+    hdr.append(
+        &gtk::Label::builder()
+            .label(i18n::t("title_app_profiles"))
+            .css_classes(["page-title"])
+            .halign(gtk::Align::Start)
+            .build(),
+    );
+    hdr.append(
+        &gtk::Label::builder()
+            .label(i18n::t("app_profiles_desc"))
+            .css_classes(["os-section-desc"])
+            .halign(gtk::Align::Start)
+            .build(),
+    );
     page.append(&hdr);
 
     // ── Enable switch ─────────────────────────────────────────
@@ -58,17 +62,22 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
         .subtitle(i18n::t("enable_profiles_sub"))
         .active(init_enabled)
         .build();
-    
+
     enable_row.connect_active_notify(|row| {
         let is_active = row.is_active();
         if let Ok(home) = std::env::var("HOME") {
             let path = format!("{}/.config/omenspace/settings.json", home);
             let mut json = serde_json::json!({});
             if let Ok(js) = std::fs::read_to_string(&path) {
-                if let Ok(j) = serde_json::from_str::<serde_json::Value>(&js) { json = j; }
+                if let Ok(j) = serde_json::from_str::<serde_json::Value>(&js) {
+                    json = j;
+                }
             }
             json["app_profiles_enabled"] = serde_json::json!(is_active);
-            let _ = std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap_or_default());
+            let _ = std::fs::write(
+                &path,
+                serde_json::to_string_pretty(&json).unwrap_or_default(),
+            );
         }
         crate::daemon_client::set_app_profiles_enabled_sync(is_active);
     });
@@ -89,13 +98,13 @@ pub fn build_page(window: &adw::ApplicationWindow) -> gtk::Box {
         .subtitle(i18n::t("add_profile_sub"))
         .activatable(true)
         .build();
-    add_row.add_prefix(&gtk::Image::builder()
-        .icon_name("list-add-symbolic")
-        .pixel_size(20)
-        .build());
-    add_row.add_suffix(&gtk::Image::builder()
-        .icon_name("go-next-symbolic")
-        .build());
+    add_row.add_prefix(
+        &gtk::Image::builder()
+            .icon_name("list-add-symbolic")
+            .pixel_size(20)
+            .build(),
+    );
+    add_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
     add_group.add(&add_row);
     page.append(&add_group);
 
@@ -148,11 +157,19 @@ async fn reload_profiles(container: &gtk::Box) {
             for profile in profiles {
                 let row = adw::ActionRow::builder()
                     .title(&profile.process_name)
-                    .subtitle(format!("{}: {}  ·  {}: {}", i18n::t("profile_fmt"), profile.power_profile, i18n::t("fan_fmt"), profile.fan_mode))
+                    .subtitle(format!(
+                        "{}: {}  ·  {}: {}",
+                        i18n::t("profile_fmt"),
+                        profile.power_profile,
+                        i18n::t("fan_fmt"),
+                        profile.fan_mode
+                    ))
                     .build();
 
                 let icon = match profile.process_name.as_str() {
-                    "cyberpunk2077" | "cs2" | "dota2" | "eldenring" | "witcher3" | "steam" => "applications-games-symbolic",
+                    "cyberpunk2077" | "cs2" | "dota2" | "eldenring" | "witcher3" | "steam" => {
+                        "applications-games-symbolic"
+                    }
                     "code" => "text-editor-symbolic",
                     "firefox" => "web-browser-symbolic",
                     "spotify" => "multimedia-audio-player-symbolic",
@@ -160,13 +177,23 @@ async fn reload_profiles(container: &gtk::Box) {
                     _ => "application-x-executable",
                 };
 
-                row.add_prefix(&gtk::Image::builder().icon_name(icon).pixel_size(24).valign(gtk::Align::Center).build());
+                row.add_prefix(
+                    &gtk::Image::builder()
+                        .icon_name(icon)
+                        .pixel_size(24)
+                        .valign(gtk::Align::Center)
+                        .build(),
+                );
 
                 let perf_badge = gtk::Label::builder()
                     .label(&profile.power_profile)
-                    .css_classes(if profile.power_profile == "Performance" { ["badge-warn"] }
-                                 else if profile.power_profile == "Eco"    { ["badge-ok"]   }
-                                 else                                      { ["os-section-desc"] })
+                    .css_classes(if profile.power_profile == "Performance" {
+                        ["badge-warn"]
+                    } else if profile.power_profile == "Eco" {
+                        ["badge-ok"]
+                    } else {
+                        ["os-section-desc"]
+                    })
                     .valign(gtk::Align::Center)
                     .build();
                 row.add_suffix(&perf_badge);
@@ -194,7 +221,7 @@ async fn reload_profiles(container: &gtk::Box) {
             }
         }
     }
-    
+
     container.append(&group);
 }
 
@@ -210,12 +237,22 @@ fn show_add_modal(window: &adw::ApplicationWindow, container: &gtk::Box) {
     dialog.set_default_response(Some("add"));
     dialog.set_close_response("cancel");
 
-    let vbox = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).margin_top(12).build();
+    let vbox = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .margin_top(12)
+        .build();
 
-    let entry_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(8).build();
-    let entry = gtk::Entry::builder().placeholder_text("Process Name (e.g. firefox)").hexpand(true).build();
+    let entry_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(8)
+        .build();
+    let entry = gtk::Entry::builder()
+        .placeholder_text("Process Name (e.g. firefox)")
+        .hexpand(true)
+        .build();
     entry_box.append(&entry);
-    
+
     let browse_btn = gtk::Button::builder()
         .icon_name("system-search-symbolic")
         .tooltip_text(i18n::t("browse_apps"))
@@ -223,7 +260,7 @@ fn show_add_modal(window: &adw::ApplicationWindow, container: &gtk::Box) {
         .build();
     entry_box.append(&browse_btn);
     vbox.append(&entry_box);
-    
+
     let w_clone = window.clone();
     let e_clone = entry.clone();
     browse_btn.connect_clicked(move |_| {
@@ -231,10 +268,16 @@ fn show_add_modal(window: &adw::ApplicationWindow, container: &gtk::Box) {
     });
 
     let power_model = gtk::StringList::new(&["Eco", "Balanced", "Performance"]);
-    let power_combo = adw::ComboRow::builder().title(i18n::t("profile_fmt")).model(&power_model).build();
+    let power_combo = adw::ComboRow::builder()
+        .title(i18n::t("profile_fmt"))
+        .model(&power_model)
+        .build();
     let fan_model = gtk::StringList::new(&["Auto", "Max", "Custom"]);
-    let fan_combo = adw::ComboRow::builder().title(i18n::t("fan_fmt")).model(&fan_model).build();
-    
+    let fan_combo = adw::ComboRow::builder()
+        .title(i18n::t("fan_fmt"))
+        .model(&fan_model)
+        .build();
+
     let pref_group = adw::PreferencesGroup::new();
     pref_group.add(&power_combo);
     pref_group.add(&fan_combo);
@@ -248,12 +291,22 @@ fn show_add_modal(window: &adw::ApplicationWindow, container: &gtk::Box) {
             let proc = entry.text().to_string();
             if !proc.is_empty() {
                 let p_idx = power_combo.selected();
-                let p_str = match p_idx { 0 => "Eco", 1 => "Balanced", _ => "Performance" }.to_string();
+                let p_str = match p_idx {
+                    0 => "Eco",
+                    1 => "Balanced",
+                    _ => "Performance",
+                }
+                .to_string();
                 let f_idx = fan_combo.selected();
-                let f_str = match f_idx { 0 => "Auto", 1 => "Max", _ => "Custom" }.to_string();
-                
+                let f_str = match f_idx {
+                    0 => "Auto",
+                    1 => "Max",
+                    _ => "Custom",
+                }
+                .to_string();
+
                 daemon_client::add_app_profile_sync(proc, p_str, f_str);
-                
+
                 let c2 = c.clone();
                 glib::spawn_future_local(async move {
                     glib::timeout_future_seconds(1).await;
@@ -272,20 +325,26 @@ fn show_app_picker_modal(parent_window: &impl IsA<gtk::Window>, target_entry: &g
         .heading(i18n::t("select_app"))
         .transient_for(parent_window)
         .build();
-    
+
     dialog.add_response("cancel", i18n::t("cancel"));
     dialog.set_close_response("cancel");
-    
-    let vbox = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).margin_top(12).build();
-    
-    let search_entry = gtk::SearchEntry::builder().placeholder_text(i18n::t("search_apps")).build();
+
+    let vbox = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(12)
+        .margin_top(12)
+        .build();
+
+    let search_entry = gtk::SearchEntry::builder()
+        .placeholder_text(i18n::t("search_apps"))
+        .build();
     vbox.append(&search_entry);
-    
+
     let listbox = gtk::ListBox::builder()
         .selection_mode(gtk::SelectionMode::None)
         .css_classes(["boxed-list"])
         .build();
-        
+
     let scroll = gtk::ScrolledWindow::builder()
         .min_content_height(350)
         .max_content_height(350)
@@ -294,7 +353,7 @@ fn show_app_picker_modal(parent_window: &impl IsA<gtk::Window>, target_entry: &g
         .child(&listbox)
         .build();
     vbox.append(&scroll);
-    
+
     let apps = gtk::gio::AppInfo::all();
     let mut valid_apps = Vec::new();
     for app in apps {
@@ -303,31 +362,38 @@ fn show_app_picker_modal(parent_window: &impl IsA<gtk::Window>, target_entry: &g
         }
     }
     valid_apps.sort_by_key(|a| a.name().to_lowercase());
-    
+
     for app in valid_apps {
         let name = app.name().to_string();
         let exec_full = app.executable().to_string_lossy().to_string();
         let exec_parts: Vec<&str> = exec_full.split_whitespace().collect();
         let bin_name = if !exec_parts.is_empty() {
-            std::path::Path::new(exec_parts[0]).file_name().unwrap_or_default().to_string_lossy().to_string()
+            std::path::Path::new(exec_parts[0])
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string()
         } else {
             exec_full.clone()
         };
-        
+
         let row = adw::ActionRow::builder()
             .title(&name)
             .subtitle(&bin_name)
             .activatable(true)
             .build();
-            
+
         if let Some(icon) = app.icon() {
-            let img = gtk::Image::builder().icon_size(gtk::IconSize::Large).valign(gtk::Align::Center).build();
+            let img = gtk::Image::builder()
+                .icon_size(gtk::IconSize::Large)
+                .valign(gtk::Align::Center)
+                .build();
             img.set_from_gicon(&icon);
             row.add_prefix(&img);
         }
-        
+
         row.set_widget_name(&name);
-        
+
         let target = target_entry.clone();
         let d = dialog.clone();
         let bin_n = bin_name.clone();
@@ -335,15 +401,17 @@ fn show_app_picker_modal(parent_window: &impl IsA<gtk::Window>, target_entry: &g
             target.set_text(&bin_n);
             d.close();
         });
-        
+
         listbox.append(&row);
     }
-    
+
     let search_clone = search_entry.clone();
     listbox.set_filter_func(move |row| {
         let text = search_clone.text().to_string().to_lowercase();
-        if text.is_empty() { return true; }
-        
+        if text.is_empty() {
+            return true;
+        }
+
         let action_row = if let Some(child) = row.child() {
             if let Ok(ar) = child.downcast::<adw::ActionRow>() {
                 ar
@@ -357,12 +425,12 @@ fn show_app_picker_modal(parent_window: &impl IsA<gtk::Window>, target_entry: &g
         let sub = action_row.subtitle().unwrap_or_default().to_lowercase();
         title.contains(&text) || sub.contains(&text)
     });
-    
+
     let lb = listbox.clone();
     search_entry.connect_search_changed(move |_| {
         lb.invalidate_filter();
     });
-    
+
     dialog.set_extra_child(Some(&vbox));
     dialog.present();
 }

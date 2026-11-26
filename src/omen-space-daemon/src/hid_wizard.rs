@@ -1,11 +1,11 @@
+use crate::notifier::DesktopNotifier;
+use log::info;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use log::info;
-use crate::notifier::DesktopNotifier;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct KeymapExport {
@@ -50,20 +50,22 @@ impl HidPerKeyWizard {
             "OMENSpace RGB Wizard Started",
             "HID Per-Key RGB Calibration Wizard started. Key Index 0 is illuminated in White.",
             0,
-        ).await;
+        )
+        .await;
 
         serde_json::json!({
             "status": "Wizard Started",
             "current_index": 0,
             "total_keys": 104,
             "instruction": "Identify which physical key on your keyboard is currently illuminated."
-        }).to_string()
+        })
+        .to_string()
     }
 
     pub async fn light_key_index(&self, index: usize, hex_color: &str) -> String {
         let (r, g, b) = parse_hex_color(hex_color);
         info!("Lighting key index {} with RGB({}, {}, {})", index, r, g, b);
-        
+
         let success = crate::rgb::test_single_key_static(index, r, g, b).await;
         {
             let mut idx = self.current_index.lock().await;
@@ -74,7 +76,8 @@ impl HidPerKeyWizard {
             "success": success,
             "current_index": index,
             "color": hex_color
-        }).to_string()
+        })
+        .to_string()
     }
 
     pub async fn record_key_mapping(&self, index: usize, physical_label: &str) -> String {
@@ -101,7 +104,8 @@ impl HidPerKeyWizard {
             "recorded": { "index": index, "label": label },
             "next_index": next_index,
             "total_recorded": self.calibrated_map.lock().await.len()
-        }).to_string()
+        })
+        .to_string()
     }
 
     pub async fn export_keymap(&self) -> String {
@@ -131,7 +135,10 @@ impl HidPerKeyWizard {
 
         // Generate Markdown table summary
         let mut md_lines = vec![
-            format!("# HID Per-Key RGB Keymap Calibration Report - {}", product_name),
+            format!(
+                "# HID Per-Key RGB Keymap Calibration Report - {}",
+                product_name
+            ),
             format!("- **Board ID:** {}", board_id),
             format!("- **Total Keys Calibrated:** {}", map.len()),
             String::new(),
@@ -151,9 +158,13 @@ impl HidPerKeyWizard {
 
         DesktopNotifier::send_notification(
             "OMENSpace Keymap Calibration Exported",
-            &format!("Saved {} mapped keys to /tmp/hid-perkey-map.json", map.len()),
+            &format!(
+                "Saved {} mapped keys to /tmp/hid-perkey-map.json",
+                map.len()
+            ),
             0,
-        ).await;
+        )
+        .await;
 
         // Auto open directory in user desktop file manager & launch GitHub issue browser
         let product_name_clone = product_name.clone();
@@ -181,10 +192,16 @@ fn parse_hex_color(hex: &str) -> (u8, u8, u8) {
 
 fn read_dmi_value(entry: &str) -> String {
     let path = format!("/sys/class/dmi/id/{}", entry);
-    fs::read_to_string(path).unwrap_or_else(|_| "Unknown".to_string()).trim().to_string()
+    fs::read_to_string(path)
+        .unwrap_or_else(|_| "Unknown".to_string())
+        .trim()
+        .to_string()
 }
 
 fn chrono_secs() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }

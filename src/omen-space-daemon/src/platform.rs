@@ -1,3 +1,5 @@
+use glob::glob;
+use log::{info, warn};
 /// Platform service - matches Python platform_service.py feature-for-feature.
 ///
 /// D-Bus interface: com.yyl.hpmanager.platform (backward compat) +
@@ -20,17 +22,21 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use zbus::interface;
-use log::{info, warn};
-use glob::glob;
 
 const CONFIG_PATH: &str = "/etc/omen-space/platform.json";
 const HWDB_PATH: &str = "/etc/udev/hwdb.d/90-hp-keyboard-fixes.hwdb";
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 
-fn default_battery_start() -> u32 { 75 }
-fn default_true() -> bool { true }
-fn default_100() -> u32 { 100 }
+fn default_battery_start() -> u32 {
+    75
+}
+fn default_true() -> bool {
+    true
+}
+fn default_100() -> u32 {
+    100
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(default)]
@@ -124,12 +130,19 @@ fn is_nixos() -> bool {
 
 fn find_best_cpu_temp_path() -> Option<String> {
     const RANK_DRV: &[(&str, i32)] = &[
-        ("zenpower", 100), ("coretemp", 90), ("k10temp", 90),
-        ("cpu_thermal", 80), ("hp_wmi", 60), ("acpitz", 30),
+        ("zenpower", 100),
+        ("coretemp", 90),
+        ("k10temp", 90),
+        ("cpu_thermal", 80),
+        ("hp_wmi", 60),
+        ("acpitz", 30),
     ];
     const RANK_LBL: &[(&str, i32)] = &[
-        ("tdie", 100), ("package id 0", 95), ("tctl", 90),
-        ("core", 80), ("composite", 50),
+        ("tdie", 100),
+        ("package id 0", 95),
+        ("tctl", 90),
+        ("core", 80),
+        ("composite", 50),
     ];
 
     let mut best_score = i32::MIN;
@@ -141,25 +154,37 @@ fn find_best_cpu_temp_path() -> Option<String> {
             let name = std::fs::read_to_string(path.join("name"))
                 .map(|s| s.trim().to_lowercase())
                 .unwrap_or_default();
-            let d_score = RANK_DRV.iter().find(|(n, _)| name.contains(n))
-                .map(|(_, s)| *s).unwrap_or(10);
+            let d_score = RANK_DRV
+                .iter()
+                .find(|(n, _)| name.contains(n))
+                .map(|(_, s)| *s)
+                .unwrap_or(10);
 
             if let Ok(inputs) = std::fs::read_dir(&path) {
                 for inp in inputs.filter_map(Result::ok) {
                     let fname = inp.file_name().to_string_lossy().to_string();
-                    if !fname.starts_with("temp") || !fname.ends_with("_input") { continue; }
+                    if !fname.starts_with("temp") || !fname.ends_with("_input") {
+                        continue;
+                    }
                     // Skip if zero or negative
                     if let Ok(val) = std::fs::read_to_string(inp.path()) {
-                        if val.trim().parse::<i32>().unwrap_or(0) <= 0 { continue; }
-                    } else { continue; }
+                        if val.trim().parse::<i32>().unwrap_or(0) <= 0 {
+                            continue;
+                        }
+                    } else {
+                        continue;
+                    }
                     let prefix = fname.split('_').next().unwrap_or("");
                     let label_path = path.join(format!("{}_label", prefix));
                     let label = std::fs::read_to_string(&label_path)
                         .map(|s| s.trim().to_lowercase())
                         .unwrap_or_default();
-                    let l_score = RANK_LBL.iter()
+                    let l_score = RANK_LBL
+                        .iter()
                         .filter(|(k, _)| label.contains(k))
-                        .map(|(_, v)| *v).max().unwrap_or(0);
+                        .map(|(_, v)| *v)
+                        .max()
+                        .unwrap_or(0);
                     let score = d_score + l_score;
                     if score > best_score {
                         best_score = score;
@@ -264,7 +289,11 @@ impl PlatformService {
         path.is_some_and(|p| Path::new(p).exists())
     }
 
-    fn should_refresh_temp_paths(cpu_ready: bool, gpu_ready: bool, elapsed: std::time::Duration) -> bool {
+    fn should_refresh_temp_paths(
+        cpu_ready: bool,
+        gpu_ready: bool,
+        elapsed: std::time::Duration,
+    ) -> bool {
         if !cpu_ready {
             return elapsed >= std::time::Duration::from_secs(5);
         }
@@ -286,14 +315,19 @@ impl PlatformService {
                 .unwrap_or_else(|_| "Linux".to_string())
         };
         static_info.insert("hostname".into(), hostname.into());
-        static_info.insert("kernel".into(), std::fs::read_to_string("/proc/sys/kernel/osrelease")
-            .map(|s| s.trim().to_string()).unwrap_or_else(|_| "Linux".to_string()).into());
+        static_info.insert(
+            "kernel".into(),
+            std::fs::read_to_string("/proc/sys/kernel/osrelease")
+                .map(|s| s.trim().to_string())
+                .unwrap_or_else(|_| "Linux".to_string())
+                .into(),
+        );
         static_info.insert("os_name".into(), "Linux".into());
-        
+
         let prod_name = read_dmi("product_name");
         let board_id = read_dmi("board_name");
         let cpu_name = get_cpu_model();
-        
+
         static_info.insert("product_name".into(), prod_name.clone().into());
         static_info.insert("board_id".into(), board_id.clone().into());
         static_info.insert("cpu_name".into(), cpu_name.clone().into());
@@ -301,8 +335,11 @@ impl PlatformService {
         static_info.insert("bios_date".into(), read_dmi("bios_date").into());
 
         let caps = crate::capabilities::detect(&board_id, &prod_name, &cpu_name);
-        static_info.insert("capabilities".into(), serde_json::to_value(caps).unwrap_or_default());
-        
+        static_info.insert(
+            "capabilities".into(),
+            serde_json::to_value(caps).unwrap_or_default(),
+        );
+
         let ec = crate::ec::LinuxEcController::new();
         static_info.insert("ec_access".into(), ec.has_ec_access().into());
         static_info.insert("is_unsafe_ec".into(), ec.needs_ec_fallback().into());
@@ -350,7 +387,9 @@ impl PlatformService {
         Ok(svc)
     }
 
-    async fn apply_battery_limit_once(inner: &Arc<Mutex<PlatformInner>>) -> crate::battery_limit::BackendKind {
+    async fn apply_battery_limit_once(
+        inner: &Arc<Mutex<PlatformInner>>,
+    ) -> crate::battery_limit::BackendKind {
         use crate::battery_limit::{
             apply_native_threshold, detect_backend, read_sysfs_battery_reading, BackendKind,
             HpWmiSysfsBackend, LimiterState,
@@ -374,7 +413,11 @@ impl PlatformService {
                     cfg.bypass = false;
                     cleared_bypass = true;
                 }
-                let target = if !cfg.enabled || cfg.bypass { 100 } else { cfg.stop_pct };
+                let target = if !cfg.enabled || cfg.bypass {
+                    100
+                } else {
+                    cfg.stop_pct
+                };
                 let ok = tokio::task::spawn_blocking(move || apply_native_threshold(target))
                     .await
                     .unwrap_or(Err("join error".to_string()))
@@ -408,7 +451,11 @@ impl PlatformService {
                     (cfg, limiter, cleared)
                 })
                 .await
-                .unwrap_or((cfg, crate::battery_limit::HysteresisLimiter::new(), false));
+                .unwrap_or((
+                    cfg,
+                    crate::battery_limit::HysteresisLimiter::new(),
+                    false,
+                ));
                 let _ = cfg_out;
                 let mut g = inner.lock().await;
                 g.limiter = limiter_out;
@@ -459,7 +506,11 @@ impl PlatformService {
                 let mut g = inner.lock().await;
                 let cpu_ready = Self::temp_path_ready(g.cpu_temp_path.as_deref());
                 let gpu_ready = Self::temp_path_ready(g.gpu_temp_path.as_deref());
-                if Self::should_refresh_temp_paths(cpu_ready, gpu_ready, g.last_temp_path_refresh.elapsed()) {
+                if Self::should_refresh_temp_paths(
+                    cpu_ready,
+                    gpu_ready,
+                    g.last_temp_path_refresh.elapsed(),
+                ) {
                     g.last_temp_path_refresh = std::time::Instant::now();
                     g.cpu_temp_path = find_best_cpu_temp_path();
                     g.gpu_temp_path = find_gpu_temp_path();
@@ -472,7 +523,9 @@ impl PlatformService {
                 let g_temp = gpu_path.as_deref().map(read_temp).unwrap_or(0.0);
                 let bat = get_battery_info();
                 (c_temp, g_temp, bat)
-            }).await.unwrap_or((0.0, 0.0, serde_json::Value::Object(serde_json::Map::new())));
+            })
+            .await
+            .unwrap_or((0.0, 0.0, serde_json::Value::Object(serde_json::Map::new())));
 
             {
                 let mut g = inner.lock().await;
@@ -501,10 +554,21 @@ fn write_hwdb_rules(prtsc: bool, f1: bool) {
         if Path::new(HWDB_PATH).exists() {
             let _ = std::fs::remove_file(HWDB_PATH);
             tokio::spawn(async {
-                if tokio::process::Command::new("systemd-hwdb").arg("update").output().await.is_err() {
-                    let _ = tokio::process::Command::new("udevadm").args(["hwdb", "--update"]).output().await;
+                if tokio::process::Command::new("systemd-hwdb")
+                    .arg("update")
+                    .output()
+                    .await
+                    .is_err()
+                {
+                    let _ = tokio::process::Command::new("udevadm")
+                        .args(["hwdb", "--update"])
+                        .output()
+                        .await;
                 }
-                let _ = tokio::process::Command::new("udevadm").args(["trigger", "-s", "input"]).output().await;
+                let _ = tokio::process::Command::new("udevadm")
+                    .args(["trigger", "-s", "input"])
+                    .output()
+                    .await;
             });
         }
         return;
@@ -513,21 +577,25 @@ fn write_hwdb_rules(prtsc: bool, f1: bool) {
         "# HP Keyboard Fixes & Macro Mappings - Generated by Omen Space".to_string(),
         "evdev:atkbd:dmi:bvn*:bvr*:bd*:svnHP*:pn*:*".to_string(),
     ];
-    if prtsc { lines.push(" KEYBOARD_KEY_b7=sysrq".to_string()); }
-    if f1    { lines.push(" KEYBOARD_KEY_ab=f1".to_string()); }
-    
+    if prtsc {
+        lines.push(" KEYBOARD_KEY_b7=sysrq".to_string());
+    }
+    if f1 {
+        lines.push(" KEYBOARD_KEY_ab=f1".to_string());
+    }
+
     // Always map macro keys to standard keysyms (P1..P6 for Omen 17 / 8A17 etc.)
-    lines.push(" KEYBOARD_KEY_8c=calc".to_string());   // 140 -> Calculator
-    lines.push(" KEYBOARD_KEY_94=prog1".to_string());  // 148 -> Omen Key
-    lines.push(" KEYBOARD_KEY_95=prog2".to_string());  // 149 -> P1/P2/Prog2
-    lines.push(" KEYBOARD_KEY_bf=f21".to_string());    // 191 -> f21
+    lines.push(" KEYBOARD_KEY_8c=calc".to_string()); // 140 -> Calculator
+    lines.push(" KEYBOARD_KEY_94=prog1".to_string()); // 148 -> Omen Key
+    lines.push(" KEYBOARD_KEY_95=prog2".to_string()); // 149 -> P1/P2/Prog2
+    lines.push(" KEYBOARD_KEY_bf=f21".to_string()); // 191 -> f21
     lines.push(" KEYBOARD_KEY_100=prog3".to_string()); // 256 -> P3/Prog3
     lines.push(" KEYBOARD_KEY_101=prog4".to_string());
     lines.push(" KEYBOARD_KEY_102=f16".to_string());
     lines.push(" KEYBOARD_KEY_103=f17".to_string());
     lines.push(" KEYBOARD_KEY_104=f18".to_string());
     lines.push(String::new()); // hwdb records must be separated by a blank line.
-    // Also include DMI-specific matcher for 8A17 / Omen 17 programmable keys
+                               // Also include DMI-specific matcher for 8A17 / Omen 17 programmable keys
     lines.push("evdev:atkbd:dmi:bvn*:bvr*:bd*:svnHP*:pn*OMEN*17*:*".to_string());
     lines.push(" KEYBOARD_KEY_95=f13".to_string());
     lines.push(" KEYBOARD_KEY_100=f14".to_string());
@@ -535,12 +603,14 @@ fn write_hwdb_rules(prtsc: bool, f1: bool) {
     lines.push(" KEYBOARD_KEY_102=f16".to_string());
     lines.push(" KEYBOARD_KEY_103=f17".to_string());
     lines.push(" KEYBOARD_KEY_104=f18".to_string());
-    
+
     let content = lines.join("\n") + "\n";
 
     // Skip if unchanged
     if let Ok(existing) = std::fs::read_to_string(HWDB_PATH) {
-        if existing == content { return; }
+        if existing == content {
+            return;
+        }
     }
 
     if let Some(dir) = Path::new(HWDB_PATH).parent() {
@@ -548,10 +618,21 @@ fn write_hwdb_rules(prtsc: bool, f1: bool) {
     }
     if std::fs::write(HWDB_PATH, &content).is_ok() {
         tokio::spawn(async {
-            if tokio::process::Command::new("systemd-hwdb").arg("update").output().await.is_err() {
-                let _ = tokio::process::Command::new("udevadm").args(["hwdb", "--update"]).output().await;
+            if tokio::process::Command::new("systemd-hwdb")
+                .arg("update")
+                .output()
+                .await
+                .is_err()
+            {
+                let _ = tokio::process::Command::new("udevadm")
+                    .args(["hwdb", "--update"])
+                    .output()
+                    .await;
             }
-            let _ = tokio::process::Command::new("udevadm").args(["trigger", "-s", "input"]).output().await;
+            let _ = tokio::process::Command::new("udevadm")
+                .args(["trigger", "-s", "input"])
+                .output()
+                .await;
             info!("Keyboard fixes applied via hwdb");
         });
     }
@@ -612,7 +693,12 @@ impl PlatformService {
 
         let backend = Self::apply_battery_limit_once(&self.inner).await;
         if backend != crate::battery_limit::BackendKind::None {
-            info!("Battery care updated: enabled={}, stop={}% (backend={})", enabled, stop, backend.as_str());
+            info!(
+                "Battery care updated: enabled={}, stop={}% (backend={})",
+                enabled,
+                stop,
+                backend.as_str()
+            );
             "OK".to_string()
         } else {
             warn!("Battery charge limiter backend unavailable on this device");
@@ -621,7 +707,13 @@ impl PlatformService {
     }
 
     /// SetBatteryLimitConfig(enabled, stop, start, off_hold) — full hysteresis configuration.
-    async fn set_battery_limit_config(&self, enabled: bool, stop: u32, start: u32, off_hold: bool) -> String {
+    async fn set_battery_limit_config(
+        &self,
+        enabled: bool,
+        stop: u32,
+        start: u32,
+        off_hold: bool,
+    ) -> String {
         let stop_clamped = if enabled { stop.clamp(50, 95) } else { 100 };
         let max_start = stop_clamped.saturating_sub(1).max(20);
         let start_clamped = start.clamp(20, max_start);
@@ -640,7 +732,11 @@ impl PlatformService {
         if backend != crate::battery_limit::BackendKind::None {
             info!(
                 "SetBatteryLimitConfig: enabled={}, stop={}%, start={}%, off_hold={} (backend={})",
-                enabled, stop_clamped, start_clamped, off_hold, backend.as_str()
+                enabled,
+                stop_clamped,
+                start_clamped,
+                off_hold,
+                backend.as_str()
             );
             "OK".to_string()
         } else {
@@ -666,10 +762,15 @@ impl PlatformService {
 
     /// GetBatteryLimitState() -> JSON snapshot of backend & hysteresis state.
     async fn get_battery_limit_state(&self) -> String {
-        use crate::battery_limit::{detect_backend, BackendKind, ChargeModeWriter, HpWmiSysfsBackend};
+        use crate::battery_limit::{
+            detect_backend, BackendKind, ChargeModeWriter, HpWmiSysfsBackend,
+        };
         let (cfg, state_str) = {
             let g = self.inner.lock().await;
-            (g.config.to_limiter_config(), g.limiter.state.as_str().to_string())
+            (
+                g.config.to_limiter_config(),
+                g.limiter.state.as_str().to_string(),
+            )
         };
         let (backend, fw_mode) = tokio::task::spawn_blocking(|| {
             let b = detect_backend();
@@ -701,8 +802,14 @@ impl PlatformService {
     async fn clean_memory(&self) -> String {
         let _ = tokio::process::Command::new("sync").output().await;
         match tokio::fs::write("/proc/sys/vm/drop_caches", "3\n").await {
-            Ok(_) => { info!("CleanMemory: page cache dropped"); "OK".to_string() }
-            Err(e) => { warn!("CleanMemory failed: {}", e); format!("Error: {}", e) }
+            Ok(_) => {
+                info!("CleanMemory: page cache dropped");
+                "OK".to_string()
+            }
+            Err(e) => {
+                warn!("CleanMemory failed: {}", e);
+                format!("Error: {}", e)
+            }
         }
     }
 
@@ -727,19 +834,47 @@ impl PlatformService {
         let g = self.inner.lock().await;
 
         let mut sys = serde_json::Map::new();
-        sys.insert("product_name".into(), g.static_info.get("product_name").cloned().unwrap_or_default());
-        sys.insert("board_id".into(), g.static_info.get("board_id").cloned().unwrap_or_default());
-        sys.insert("cpu_name".into(), g.static_info.get("cpu_name").cloned().unwrap_or_default());
-        sys.insert("kernel".into(), g.static_info.get("kernel").cloned().unwrap_or_default());
-        sys.insert("bios_version".into(), g.static_info.get("bios_version").cloned().unwrap_or_default());
-        sys.insert("bios_date".into(), g.static_info.get("bios_date").cloned().unwrap_or_default());
+        sys.insert(
+            "product_name".into(),
+            g.static_info
+                .get("product_name")
+                .cloned()
+                .unwrap_or_default(),
+        );
+        sys.insert(
+            "board_id".into(),
+            g.static_info.get("board_id").cloned().unwrap_or_default(),
+        );
+        sys.insert(
+            "cpu_name".into(),
+            g.static_info.get("cpu_name").cloned().unwrap_or_default(),
+        );
+        sys.insert(
+            "kernel".into(),
+            g.static_info.get("kernel").cloned().unwrap_or_default(),
+        );
+        sys.insert(
+            "bios_version".into(),
+            g.static_info
+                .get("bios_version")
+                .cloned()
+                .unwrap_or_default(),
+        );
+        sys.insert(
+            "bios_date".into(),
+            g.static_info.get("bios_date").cloned().unwrap_or_default(),
+        );
 
         // Secure Boot check
         let mut secure_boot = "Unknown".to_string();
         if let Ok(mut entries) = glob("/sys/firmware/efi/efivars/SecureBoot-*") {
             if let Some(Ok(p)) = entries.next() {
                 if let Ok(b) = tokio::fs::read(&p).await {
-                    secure_boot = if *b.last().unwrap_or(&0) == 1 { "Enabled".to_string() } else { "Disabled".to_string() };
+                    secure_boot = if *b.last().unwrap_or(&0) == 1 {
+                        "Enabled".to_string()
+                    } else {
+                        "Disabled".to_string()
+                    };
                 }
             }
         }
@@ -755,7 +890,9 @@ impl PlatformService {
     async fn run_wmi_diagnostics(&self) -> String {
         let report = tokio::task::spawn_blocking(|| {
             crate::wmi_diagnostics::WmiDiagnosticRunner::run_full_suite()
-        }).await.unwrap_or_else(|_| crate::wmi_diagnostics::WmiDiagnosticReport {
+        })
+        .await
+        .unwrap_or_else(|_| crate::wmi_diagnostics::WmiDiagnosticReport {
             total_tests: 0,
             passed_tests: 0,
             failed_tests: 0,
@@ -771,15 +908,16 @@ impl PlatformService {
             test_results: vec![],
         });
         let summary = report.status_summary.clone();
-        
+
         let report_json = serde_json::to_string_pretty(&report).unwrap_or_default();
         let _ = tokio::fs::write("/tmp/wmi-diagnostics-report.json", &report_json).await;
-        
+
         crate::notifier::DesktopNotifier::send_notification(
             "OMENSpace WMI Diagnostics Complete",
             &summary,
             if report.score_percent >= 90.0 { 0 } else { 1 },
-        ).await;
+        )
+        .await;
 
         report_json
     }
@@ -794,7 +932,9 @@ impl PlatformService {
         tokio::task::spawn_blocking(|| {
             let report = crate::conflict_detector::ConflictDetector::check_conflicts();
             serde_json::to_string_pretty(&report).unwrap_or_default()
-        }).await.unwrap_or_default()
+        })
+        .await
+        .unwrap_or_default()
     }
 
     /// AnalyzeAcpi — Dumps and analyzes ACPI DSDT & SSDT tables for WMI GUIDs and methods.
@@ -802,19 +942,24 @@ impl PlatformService {
         tokio::task::spawn_blocking(|| {
             let report = crate::acpi_diagnostics::AcpiDiagnosticRunner::analyze_acpi_tables();
             serde_json::to_string_pretty(&report).unwrap_or_default()
-        }).await.unwrap_or_default()
+        })
+        .await
+        .unwrap_or_default()
     }
 
     /// GenerateTriageBundle — Generates a complete triage log bundle archive (.tar.gz) & GitHub issue template.
     async fn generate_triage_bundle(&self) -> String {
         let archive_path = tokio::task::spawn_blocking(|| {
             crate::acpi_diagnostics::AcpiDiagnosticRunner::generate_triage_bundle()
-        }).await.unwrap_or_default();
+        })
+        .await
+        .unwrap_or_default();
         crate::notifier::DesktopNotifier::send_notification(
             "OMENSpace Triage Bundle Created",
             &format!("Diagnostic bundle saved at {}", archive_path),
             0,
-        ).await;
+        )
+        .await;
         archive_path
     }
 
@@ -836,13 +981,19 @@ impl PlatformService {
     }
 
     /// ToggleOverlay — Requests the UI/overlay process to toggle visibility.
-    async fn toggle_overlay(&self, #[zbus(signal_context)] ctxt: zbus::SignalContext<'_>) -> String {
+    async fn toggle_overlay(
+        &self,
+        #[zbus(signal_context)] ctxt: zbus::SignalContext<'_>,
+    ) -> String {
         let _ = Self::macro_key_pressed(&ctxt, "overlay").await;
         "OK".to_string()
     }
 
     #[zbus(signal)]
-    pub async fn macro_key_pressed(ctxt: &zbus::SignalContext<'_>, key_name: &str) -> zbus::Result<()>;
+    pub async fn macro_key_pressed(
+        ctxt: &zbus::SignalContext<'_>,
+        key_name: &str,
+    ) -> zbus::Result<()>;
 
     async fn ping(&self) -> String {
         "OK".to_string()

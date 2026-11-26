@@ -1,7 +1,7 @@
+use log::info;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
-use log::info;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DiagnosticTestResult {
@@ -46,13 +46,17 @@ impl WmiDiagnosticRunner {
         let board_id = read_dmi("board_name");
         let product_name = read_dmi("product_name");
         let bios_version = read_dmi("bios_version");
-        let kernel_version = read_sys_file("/proc/sys/kernel/osrelease").unwrap_or_else(|| "Linux".to_string());
+        let kernel_version =
+            read_sys_file("/proc/sys/kernel/osrelease").unwrap_or_else(|| "Linux".to_string());
 
         let mut test_results = Vec::with_capacity(64);
-        let mut category_counts: std::collections::HashMap<String, (usize, usize)> = std::collections::HashMap::new();
+        let mut category_counts: std::collections::HashMap<String, (usize, usize)> =
+            std::collections::HashMap::new();
 
         let mut record_test = |category: &str, name: String, passed: bool, details: String| {
-            let entry = category_counts.entry(category.to_string()).or_insert((0, 0));
+            let entry = category_counts
+                .entry(category.to_string())
+                .or_insert((0, 0));
             entry.0 += 1; // total
             if passed {
                 entry.1 += 1; // passed
@@ -72,9 +76,17 @@ impl WmiDiagnosticRunner {
         // -----------------------------------------------------------------------
         let wmi_path = "/sys/devices/platform/hp-wmi";
         let wmi_exists = Path::new(wmi_path).exists();
-        
-        record_test("HP WMI BIOS", "WMI Platform Driver Base Path".into(), wmi_exists,
-            if wmi_exists { format!("Found {}", wmi_path) } else { "hp-wmi module not loaded or unsupported".into() });
+
+        record_test(
+            "HP WMI BIOS",
+            "WMI Platform Driver Base Path".into(),
+            wmi_exists,
+            if wmi_exists {
+                format!("Found {}", wmi_path)
+            } else {
+                "hp-wmi module not loaded or unsupported".into()
+            },
+        );
 
         let validated_wmi_resp = "Validated WMI ACPI response".to_string();
         let missing_sysfs_node = "Node missing in sysfs".to_string();
@@ -93,7 +105,11 @@ impl WmiDiagnosticRunner {
                 "HP WMI BIOS",
                 format!("WMI Endpoint Query #{} ({})", i, subnode),
                 exists,
-                if exists { validated_wmi_resp.clone() } else { missing_sysfs_node.clone() },
+                if exists {
+                    validated_wmi_resp.clone()
+                } else {
+                    missing_sysfs_node.clone()
+                },
             );
         }
 
@@ -110,9 +126,16 @@ impl WmiDiagnosticRunner {
             let reg_valid = ec_accessible || has_ec_debug;
             record_test(
                 "EC Register Access",
-                format!("EC Register 0x{:02X} Readback Validation (Check #{})", reg_offset, i),
+                format!(
+                    "EC Register 0x{:02X} Readback Validation (Check #{})",
+                    reg_offset, i
+                ),
                 reg_valid,
-                if reg_valid { format!("EC Register 0x{:02X} responsive", reg_offset) } else { "EC direct access restricted (requires root / ec_sys)".into() },
+                if reg_valid {
+                    format!("EC Register 0x{:02X} responsive", reg_offset)
+                } else {
+                    "EC direct access restricted (requires root / ec_sys)".into()
+                },
             );
         }
 
@@ -126,7 +149,10 @@ impl WmiDiagnosticRunner {
             let fan_id = (i % 2) + 1;
             record_test(
                 "Fan Telemetry",
-                format!("Fan #{} RPM Readback & Duty Curve Verification (Test #{})", fan_id, i),
+                format!(
+                    "Fan #{} RPM Readback & Duty Curve Verification (Test #{})",
+                    fan_id, i
+                ),
                 hwmon_found || wmi_exists,
                 format!("Fan #{} telemetry channel active via hwmon/wmi", fan_id),
             );
@@ -145,21 +171,29 @@ impl WmiDiagnosticRunner {
                 "Performance Profiles",
                 format!("Thermal Policy '{}' Target State (Test #{})", profile, i),
                 true,
-                format!("Profile '{}' routing verified for board {}", profile, board_id),
+                format!(
+                    "Profile '{}' routing verified for board {}",
+                    profile, board_id
+                ),
             );
         }
 
         // -----------------------------------------------------------------------
         // 5. GPU MUX & Power Limits (Tests 851 - 930)
         // -----------------------------------------------------------------------
-        let mux_exists = Path::new("/sys/devices/platform/hp-wmi/gpu_mode").exists() ||
-                         Path::new("/sys/bus/wmi/devices/95F24279-4D7B-4334-9387-AC7F57838F64/gpu_mode").exists();
+        let mux_exists = Path::new("/sys/devices/platform/hp-wmi/gpu_mode").exists()
+            || Path::new("/sys/bus/wmi/devices/95F24279-4D7B-4334-9387-AC7F57838F64/gpu_mode")
+                .exists();
         for i in 851..=930 {
             record_test(
                 "GPU MUX & Power",
                 format!("GPU Dynamic Power Boost & MUX State (Test #{})", i),
                 mux_exists || wmi_exists,
-                if mux_exists { "MUX hardware switch present".into() } else { "Standard Hybrid graphics mode verified".into() },
+                if mux_exists {
+                    "MUX hardware switch present".into()
+                } else {
+                    "Standard Hybrid graphics mode verified".into()
+                },
             );
         }
 
@@ -202,8 +236,16 @@ impl WmiDiagnosticRunner {
                 _ => "Keyboard Backlight 4-Zone WMI Control",
             };
 
-            let passed = if i % 5 == 3 { hidraw_per_key_found || wmi_exists } else { true };
-            let details = if i % 5 == 3 { hidraw_path_info.clone() } else { format!("{} state OK", feat) };
+            let passed = if i % 5 == 3 {
+                hidraw_per_key_found || wmi_exists
+            } else {
+                true
+            };
+            let details = if i % 5 == 3 {
+                hidraw_path_info.clone()
+            } else {
+                format!("{} state OK", feat)
+            };
 
             record_test(
                 "System & HID RGB",
@@ -216,7 +258,11 @@ impl WmiDiagnosticRunner {
         let total_tests: usize = category_counts.values().map(|(tot, _)| tot).sum();
         let passed_tests: usize = category_counts.values().map(|(_, pass)| pass).sum();
         let failed_tests = total_tests.saturating_sub(passed_tests);
-        let score_percent = if total_tests > 0 { (passed_tests as f64 / total_tests as f64) * 100.0 } else { 0.0 };
+        let score_percent = if total_tests > 0 {
+            (passed_tests as f64 / total_tests as f64) * 100.0
+        } else {
+            0.0
+        };
 
         let status_summary = format!(
             "[WMI/EC Diagnostics] {} / {} tests passed ({:.1}% Compatible)",
@@ -225,7 +271,15 @@ impl WmiDiagnosticRunner {
 
         let mut category_scores = std::collections::HashMap::new();
         for (cat, (tot, pass)) in category_counts {
-            category_scores.insert(cat, format!("{}/{} ({:.0}%)", pass, tot, (pass as f64 / tot as f64) * 100.0));
+            category_scores.insert(
+                cat,
+                format!(
+                    "{}/{} ({:.0}%)",
+                    pass,
+                    tot,
+                    (pass as f64 / tot as f64) * 100.0
+                ),
+            );
         }
 
         info!("{}", status_summary);

@@ -1,6 +1,6 @@
 [package]
 name = "omen-overlay"
-version = "2.5.2"
+version = "2.5.3"
 edition = "2021"
 
 [dependencies]
@@ -10,10 +10,7 @@ libadwaita = { version = "0.5", features = ["v1_4"] }
 glib = "0.18"
 tokio = { version = "1", features = ["full"] }
 zbus = "4.4"
-serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-log = "0.4"
 env_logger = "0.10"
-libc = "0.2"
 futures = "0.3.34"
-omen-types = { version = "2.5.2", path = "../omen-types" }
+omen-types = { version = "2.5.3", path = "../omen-types" }

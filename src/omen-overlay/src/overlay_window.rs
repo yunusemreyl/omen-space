@@ -277,7 +277,10 @@ impl OverlayWindow {
             .build();
 
         footer.append(&build_shortcut_hint("1–3", &crate::i18n::t("perf_mode")));
-        footer.append(&build_shortcut_hint("Q / W / E", &crate::i18n::t("fan_mode")));
+        footer.append(&build_shortcut_hint(
+            "Q / W / E",
+            &crate::i18n::t("fan_mode"),
+        ));
         footer.append(&build_shortcut_hint("Esc", &crate::i18n::t("close")));
 
         body.append(&footer);
@@ -434,7 +437,8 @@ impl OverlayWindow {
         } else {
             "--".to_string()
         };
-        self.gpu_val_label.set_label(&format!("{} · {}", gpu_t, gpu_w));
+        self.gpu_val_label
+            .set_label(&format!("{} · {}", gpu_t, gpu_w));
 
         if stats.fan1_rpm > 0 || stats.fan2_rpm > 0 {
             self.fan_val_label
@@ -447,8 +451,10 @@ impl OverlayWindow {
         }
 
         if stats.ram_total_gb > 0.0 {
-            self.ram_val_label
-                .set_label(&format!("{:.1} / {:.0} GB", stats.ram_used_gb, stats.ram_total_gb));
+            self.ram_val_label.set_label(&format!(
+                "{:.1} / {:.0} GB",
+                stats.ram_used_gb, stats.ram_total_gb
+            ));
         }
 
         if let Some(ref bat) = stats.battery {
@@ -494,9 +500,7 @@ impl OverlayWindow {
 }
 
 fn build_mode_tile(title: &str, desc: &str, key_shortcut: &str, icon_name: &str) -> gtk::Button {
-    let btn = gtk::Button::builder()
-        .css_classes(["overlay-tile"])
-        .build();
+    let btn = gtk::Button::builder().css_classes(["overlay-tile"]).build();
 
     let inner = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)

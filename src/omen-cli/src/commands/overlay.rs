@@ -1,7 +1,7 @@
-use clap::Subcommand;
 use anyhow::Result;
+use clap::Subcommand;
 use crossterm::style::Stylize;
-use crate::dbus_proxy::PlatformProxy;
+use omen_types::PlatformProxy;
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum OverlayCommand {

@@ -1,17 +1,18 @@
-use std::fs;
-pub use omen_types::SystemStats;
-use crate::sysmon::sensors::*;
 use crate::sysmon::gpu::*;
+use crate::sysmon::sensors::*;
 use crate::sysmon::utils::*;
+pub use omen_types::SystemStats;
+use std::fs;
 /// Instantaneous, Zero-Fork Telemetry Fetch
 pub fn fetch_system_stats() -> SystemStats {
     let mut stats = SystemStats::default();
     let paths = {
         let mut guard = SENSOR_PATHS.lock().unwrap_or_else(|e| e.into_inner());
-        let (cached_paths, last_update) = guard.get_or_insert_with(|| {
-            (init_sensor_paths(), std::time::Instant::now())
-        });
-        if (cached_paths.fan1_path.is_none() || cached_paths.fan2_path.is_none()) && last_update.elapsed().as_secs() > 5 {
+        let (cached_paths, last_update) =
+            guard.get_or_insert_with(|| (init_sensor_paths(), std::time::Instant::now()));
+        if (cached_paths.fan1_path.is_none() || cached_paths.fan2_path.is_none())
+            && last_update.elapsed().as_secs() > 5
+        {
             *cached_paths = init_sensor_paths();
             *last_update = std::time::Instant::now();
         }
@@ -30,7 +31,7 @@ pub fn fetch_system_stats() -> SystemStats {
                 if parts.len() >= 4 {
                     let idle = parts[3] + parts.get(4).unwrap_or(&0); // idle + iowait
                     let total: u64 = parts.iter().sum();
-                    
+
                     let mut prev_guard = PREV_JIFFIES.lock().unwrap_or_else(|e| e.into_inner());
                     if let Some(ref prev) = *prev_guard {
                         let total_diff = total.saturating_sub(prev.total);
@@ -99,7 +100,10 @@ pub fn fetch_system_stats() -> SystemStats {
                         stats.cpu_pwr = (diff as f64 / elapsed) / 1_000_000.0;
                     }
                 }
-                *prev_guard = Some(RaplState { energy_uj: energy, time: now });
+                *prev_guard = Some(RaplState {
+                    energy_uj: energy,
+                    time: now,
+                });
             }
         }
     } else if let Some(ref p) = paths.cpu_pwr_path {
@@ -132,8 +136,7 @@ pub fn fetch_system_stats() -> SystemStats {
     // (range 0–5000, typical max ~4800 RPM). Tagged "(EC approx)" in the
     // diagnostic report. Closes #233.
     if stats.fan1_rpm == 0 && stats.fan2_rpm == 0 {
-        let board_id = std::fs::read_to_string("/sys/class/dmi/id/board_name")
-            .unwrap_or_default();
+        let board_id = std::fs::read_to_string("/sys/class/dmi/id/board_name").unwrap_or_default();
         if crate::ec::LinuxEcController::needs_ec_fallback_for_board(board_id.trim()) {
             use std::io::{Read, Seek, SeekFrom};
             if let Ok(mut f) = std::fs::OpenOptions::new()
@@ -201,7 +204,9 @@ pub fn fetch_system_stats() -> SystemStats {
         if let Some(metrics) = fetch_gpu_metrics_with_timeout() {
             stats.gpu_sample_state = if metrics.temp.is_some() || metrics.power.is_some() {
                 omen_types::GpuSampleState::Active
-            } else { omen_types::GpuSampleState::Unavailable };
+            } else {
+                omen_types::GpuSampleState::Unavailable
+            };
             has_active_clients = metrics.has_clients;
             if let Some(t) = metrics.temp {
                 stats.gpu_temp = t;
@@ -218,11 +223,10 @@ pub fn fetch_system_stats() -> SystemStats {
                 let mut guard = GPU_IDLE_COOLDOWN.lock().unwrap_or_else(|e| e.into_inner());
                 *guard = None;
             }
-        }
-        else {
+        } else {
             // NVML timed out! The NVIDIA driver is busy/hanging.
             stats.gpu_sample_state = omen_types::GpuSampleState::Unavailable;
-            nvml_timed_out = true; 
+            nvml_timed_out = true;
         }
         if !has_active_clients {
             // Zero game/render clients detected. Arm 12s quiet window so kernel can suspend.
@@ -259,8 +263,13 @@ pub fn fetch_system_stats() -> SystemStats {
     }
     // Total System Power: expose the provenance instead of presenting a fixed overhead as measured.
     stats.total_power_estimated = Some(true);
-    stats.total_power_partial = Some(stats.cpu_pwr <= 0.0 || !matches!(stats.gpu_sample_state,
-        omen_types::GpuSampleState::Active | omen_types::GpuSampleState::Suspended));
+    stats.total_power_partial = Some(
+        stats.cpu_pwr <= 0.0
+            || !matches!(
+                stats.gpu_sample_state,
+                omen_types::GpuSampleState::Active | omen_types::GpuSampleState::Suspended
+            ),
+    );
     let mut real_pwr = false;
     if stats.cpu_pwr > 0.0 || stats.gpu_pwr > 0.0 {
         stats.total_pwr = stats.cpu_pwr.max(0.0) + stats.gpu_pwr.max(0.0) + 11.5;
@@ -282,10 +291,16 @@ pub fn fetch_system_stats() -> SystemStats {
         }
     }
 
-    if stats.cpu_temp == 0 { stats.cpu_temp = 45; }
+    if stats.cpu_temp == 0 {
+        stats.cpu_temp = 45;
+    }
     // gpu_temp == 0 means "unavailable" (asleep / unsampled); do not fabricate a reading.
-    if stats.cpu_pwr == 0.0 && !real_pwr { stats.cpu_pwr = stats.total_pwr * 0.45; }
-    if stats.gpu_pwr == 0.0 && !real_pwr { stats.gpu_pwr = stats.total_pwr * 0.15; }
+    if stats.cpu_pwr == 0.0 && !real_pwr {
+        stats.cpu_pwr = stats.total_pwr * 0.45;
+    }
+    if stats.gpu_pwr == 0.0 && !real_pwr {
+        stats.gpu_pwr = stats.total_pwr * 0.15;
+    }
 
     if has_nvidia && !is_nvidia_awake {
         stats.gpu_pwr = -1.0;
@@ -293,13 +308,27 @@ pub fn fetch_system_stats() -> SystemStats {
     }
 
     // Sanitize any NaNs that might crash JSON serialization
-    if stats.cpu_load.is_nan() { stats.cpu_load = 0.0; }
-    if stats.cpu_pwr.is_nan() { stats.cpu_pwr = 0.0; }
-    if stats.gpu_load.is_nan() { stats.gpu_load = 0.0; }
-    if stats.gpu_pwr.is_nan() { stats.gpu_pwr = 0.0; }
-    if stats.ram_frac.is_nan() { stats.ram_frac = 0.0; }
-    if stats.disk_frac.is_nan() { stats.disk_frac = 0.0; }
-    if stats.total_pwr.is_nan() { stats.total_pwr = 0.0; }
+    if stats.cpu_load.is_nan() {
+        stats.cpu_load = 0.0;
+    }
+    if stats.cpu_pwr.is_nan() {
+        stats.cpu_pwr = 0.0;
+    }
+    if stats.gpu_load.is_nan() {
+        stats.gpu_load = 0.0;
+    }
+    if stats.gpu_pwr.is_nan() {
+        stats.gpu_pwr = 0.0;
+    }
+    if stats.ram_frac.is_nan() {
+        stats.ram_frac = 0.0;
+    }
+    if stats.disk_frac.is_nan() {
+        stats.disk_frac = 0.0;
+    }
+    if stats.total_pwr.is_nan() {
+        stats.total_pwr = 0.0;
+    }
 
     // ── 8. Chassis / IR Temperature (WMI 0x23 via hp-wmi sysfs) ──────────
     // The file is only created when the firmware supports the query, so a
@@ -307,7 +336,8 @@ pub fn fetch_system_stats() -> SystemStats {
     // Querying it triggers an ACPI WMI call which causes AE_AML_BUFFER_LIMIT BIOS
     // errors on boards like 8D87. Cache the value for 60 seconds to prevent
     // flooding journald with 36 error lines/min while preserving UI telemetry.
-    static CHASSIS_CACHE: std::sync::Mutex<Option<(std::time::Instant, i32)>> = std::sync::Mutex::new(None);
+    static CHASSIS_CACHE: std::sync::Mutex<Option<(std::time::Instant, i32)>> =
+        std::sync::Mutex::new(None);
     if let Ok(mut cache) = CHASSIS_CACHE.lock() {
         let now = std::time::Instant::now();
         let should_read = match *cache {
@@ -327,8 +357,7 @@ pub fn fetch_system_stats() -> SystemStats {
     }
 
     // ── 9. Board verification flag ────────────────────────────────────────
-    let board_id = fs::read_to_string("/sys/class/dmi/id/board_name")
-        .unwrap_or_default();
+    let board_id = fs::read_to_string("/sys/class/dmi/id/board_name").unwrap_or_default();
     stats.board_verified =
         crate::capabilities::LinuxCapabilityClassifier::is_board_verified(board_id.trim());
 
@@ -337,4 +366,3 @@ pub fn fetch_system_stats() -> SystemStats {
 
     stats
 }
-

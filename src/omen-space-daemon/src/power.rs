@@ -1,3 +1,4 @@
+use log::{info, warn};
 /// Power management service - matches Python power_service.py feature-for-feature.
 ///
 /// D-Bus interface: com.yyl.hpmanager.power  (backward compat) +
@@ -18,7 +19,6 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use zbus::interface;
-use log::{info, warn};
 
 // ── Sysfs helpers ──────────────────────────────────────────────────────────────
 
@@ -31,7 +31,10 @@ async fn sysfs_write_async(path: &str, value: &str) -> bool {
 }
 
 async fn sysfs_read_async(path: &str) -> Option<String> {
-    tokio::fs::read_to_string(path).await.ok().map(|s| s.trim().to_string())
+    tokio::fs::read_to_string(path)
+        .await
+        .ok()
+        .map(|s| s.trim().to_string())
 }
 
 // ── ACPI health guard ──────────────────────────────────────────────────────────
@@ -46,12 +49,15 @@ async fn acpi_is_healthy() -> bool {
         "/sys/devices/platform/hp-wmi/platform-profile",
     ];
     for p in paths {
-        if !Path::new(p).exists() { continue; }
+        if !Path::new(p).exists() {
+            continue;
+        }
         // Wrap the read in a short timeout so a frozen ACPI doesn't block us.
         let result = tokio::time::timeout(
             tokio::time::Duration::from_millis(500),
             tokio::fs::read_to_string(p),
-        ).await;
+        )
+        .await;
         return matches!(result, Ok(Ok(_)));
     }
     // No platform_profile node — not an ACPI-driven board, assume healthy.
@@ -151,27 +157,34 @@ impl PowerService {
     }
 
     async fn read_current_rapl_limits() -> (Option<u32>, Option<u32>) {
-        let p1 = sysfs_read_async("/sys/class/powercap/intel-rapl/intel-rapl:0/constraint_0_power_limit_uw")
-            .await
-            .and_then(|v| v.parse::<u64>().ok())
-            .map(|uw| (uw / 1_000_000) as u32)
-            .filter(|&w| (5..=250).contains(&w));
-        let p2 = sysfs_read_async("/sys/class/powercap/intel-rapl/intel-rapl:0/constraint_1_power_limit_uw")
-            .await
-            .and_then(|v| v.parse::<u64>().ok())
-            .map(|uw| (uw / 1_000_000) as u32)
-            .filter(|&w| (5..=250).contains(&w));
+        let p1 = sysfs_read_async(
+            "/sys/class/powercap/intel-rapl/intel-rapl:0/constraint_0_power_limit_uw",
+        )
+        .await
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(|uw| (uw / 1_000_000) as u32)
+        .filter(|&w| (5..=250).contains(&w));
+        let p2 = sysfs_read_async(
+            "/sys/class/powercap/intel-rapl/intel-rapl:0/constraint_1_power_limit_uw",
+        )
+        .await
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(|uw| (uw / 1_000_000) as u32)
+        .filter(|&w| (5..=250).contains(&w));
         (p1, p2)
     }
 
-    async fn load_or_capture_boot_rapl_baseline() -> Option<(crate::rapl_baseline::Baseline,bool)> {
-        let boot_id = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap_or_default();
-        let (pl1,pl2) = Self::read_current_rapl_limits().await;
+    async fn load_or_capture_boot_rapl_baseline() -> Option<(crate::rapl_baseline::Baseline, bool)>
+    {
+        let boot_id =
+            std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap_or_default();
+        let (pl1, pl2) = Self::read_current_rapl_limits().await;
         crate::rapl_baseline::load_or_capture(
             std::path::Path::new("/var/lib/omen-space-daemon/rapl_baseline.json"),
             std::path::Path::new("/run/omen-space/rapl_baseline.json"),
             std::path::Path::new("/var/lib/omen-space/firmware_rapl_baseline.json"),
-            boot_id.trim(),pl1.zip(pl2),
+            boot_id.trim(),
+            pl1.zip(pl2),
         )
     }
 
@@ -183,7 +196,10 @@ impl PowerService {
         // The first observed state may already include earlier userspace tuning.
         let rapl_baseline = Self::load_or_capture_boot_rapl_baseline().await;
         if !config.pl_enabled {
-            if let Some((b,_)) = &rapl_baseline { config.pl1_w=b.pl1_w; config.pl2_w=b.pl2_w; }
+            if let Some((b, _)) = &rapl_baseline {
+                config.pl1_w = b.pl1_w;
+                config.pl2_w = b.pl2_w;
+            }
         }
 
         let svc = Self {
@@ -205,9 +221,9 @@ impl PowerService {
     // ── Profile detection ──────────────────────────────────────────────────────
 
     fn has_custom_power_manager() -> bool {
-        std::path::Path::new("/usr/bin/tlp").exists() ||
-        std::path::Path::new("/usr/sbin/tlp").exists() ||
-        std::path::Path::new("/usr/bin/auto-cpufreq").exists()
+        std::path::Path::new("/usr/bin/tlp").exists()
+            || std::path::Path::new("/usr/sbin/tlp").exists()
+            || std::path::Path::new("/usr/bin/auto-cpufreq").exists()
     }
 
     // ── PPD two-way sync (fix #283) ────────────────────────────────────────────
@@ -228,7 +244,7 @@ impl PowerService {
         let ppd_profile = match profile {
             "performance" => "performance",
             "power-saver" => "power-saver",
-            _             => "balanced",
+            _ => "balanced",
         };
 
         // 1. Try powerprofilesctl CLI (works on most distros).
@@ -237,7 +253,8 @@ impl PowerService {
             tokio::process::Command::new("powerprofilesctl")
                 .args(["set", ppd_profile])
                 .output(),
-        ).await;
+        )
+        .await;
         match cli_result {
             Ok(Ok(out)) if out.status.success() => {
                 info!("[PPD sync] powerprofilesctl set '{}' OK", ppd_profile);
@@ -283,7 +300,8 @@ impl PowerService {
                         zbus::zvariant::Value::from(ppd_profile),
                     ),
                 ),
-            ).await;
+            )
+            .await;
             match result {
                 Ok(Ok(_)) => info!("[PPD sync] D-Bus ActiveProfile set to '{}' OK", ppd_profile),
                 Ok(Err(e)) => {
@@ -324,24 +342,40 @@ impl PowerService {
             "/sys/devices/platform/hp-omen/thermal-profile",
         ] {
             if let Some(raw) = sysfs_read_async(p).await {
-                if raw.trim() == "1" { return "performance".to_string(); }
+                if raw.trim() == "1" {
+                    return "performance".to_string();
+                }
                 return "balanced".to_string();
             }
         }
 
         if !Self::has_custom_power_manager() {
             // 2. Try system76-power if installed
-            if let Ok(out) = tokio::process::Command::new("system76-power").arg("profile").output().await {
+            if let Ok(out) = tokio::process::Command::new("system76-power")
+                .arg("profile")
+                .output()
+                .await
+            {
                 if out.status.success() {
                     let stdout = String::from_utf8_lossy(&out.stdout).trim().to_lowercase();
-                    if stdout.contains("performance") { return "performance".to_string(); }
-                    if stdout.contains("battery") { return "power-saver".to_string(); }
-                    if stdout.contains("balanced") { return "balanced".to_string(); }
+                    if stdout.contains("performance") {
+                        return "performance".to_string();
+                    }
+                    if stdout.contains("battery") {
+                        return "power-saver".to_string();
+                    }
+                    if stdout.contains("balanced") {
+                        return "balanced".to_string();
+                    }
                 }
             }
 
             // 3. Try powerprofilesctl if installed
-            if let Ok(out) = tokio::process::Command::new("powerprofilesctl").arg("get").output().await {
+            if let Ok(out) = tokio::process::Command::new("powerprofilesctl")
+                .arg("get")
+                .output()
+                .await
+            {
                 if out.status.success() {
                     let stdout = String::from_utf8_lossy(&out.stdout).trim().to_lowercase();
                     return Self::normalize_profile(&stdout);
@@ -360,7 +394,9 @@ impl PowerService {
             "/sys/devices/platform/hp-wmi/platform-profile",
         ];
         for p in paths {
-            if !sysfs_exists(p) { continue; }
+            if !sysfs_exists(p) {
+                continue;
+            }
             // Try _choices suffix (underscore) then -choices (hyphen)
             for choices_suffix in ["_choices", "-choices"] {
                 let choices_path = format!("{}{}", p, choices_suffix);
@@ -384,7 +420,11 @@ impl PowerService {
         }
 
         // Fallback to standard 3 profiles if WMI choices are missing
-        vec!["power-saver".to_string(), "balanced".to_string(), "performance".to_string()]
+        vec![
+            "power-saver".to_string(),
+            "balanced".to_string(),
+            "performance".to_string(),
+        ]
     }
 
     fn normalize_profile(raw: &str) -> String {
@@ -425,7 +465,10 @@ impl PowerService {
                 "power-saver" => "battery",
                 _ => "balanced",
             };
-            if let Ok(mut child) = tokio::process::Command::new("system76-power").args(["profile", s76_profile]).spawn() {
+            if let Ok(mut child) = tokio::process::Command::new("system76-power")
+                .args(["profile", s76_profile])
+                .spawn()
+            {
                 if let Ok(status) = child.wait().await {
                     if status.success() {
                         info!("Set system76-power profile to '{}'", s76_profile);
@@ -448,7 +491,9 @@ impl PowerService {
             "/sys/devices/platform/hp-wmi/platform-profile",
         ];
         for p in acpi_paths {
-            if !sysfs_exists(p) { continue; }
+            if !sysfs_exists(p) {
+                continue;
+            }
 
             // Try _choices then -choices
             let mut choices_raw = String::new();
@@ -472,7 +517,7 @@ impl PowerService {
             let candidates: &[&str] = match profile.to_lowercase().as_str() {
                 "performance" => &["performance"],
                 "power-saver" => &["low-power", "quiet", "cool", "power-saver"],
-                _             => &["balanced"],
+                _ => &["balanced"],
             };
 
             let to_write = if choices.is_empty() {
@@ -483,7 +528,11 @@ impl PowerService {
                     .find(|&&c| choices.contains(c))
                     .copied()
                     .unwrap_or_else(|| {
-                        if choices.contains("balanced") { "balanced" } else { candidates[0] }
+                        if choices.contains("balanced") {
+                            "balanced"
+                        } else {
+                            candidates[0]
+                        }
                     })
             };
 
@@ -491,7 +540,10 @@ impl PowerService {
             // redundant ACPI traffic on Strix Point BIOS (fix #282).
             let current = sysfs_read_async(p).await;
             if current.as_deref() == Some(to_write) {
-                info!("platform_profile='{}' already set via {} — skipping write", to_write, p);
+                info!(
+                    "platform_profile='{}' already set via {} — skipping write",
+                    to_write, p
+                );
                 ok = true;
                 continue;
             }
@@ -512,10 +564,15 @@ impl PowerService {
             "/sys/devices/platform/hp-omen/thermal_profile",
             "/sys/devices/platform/hp-omen/thermal-profile",
         ] {
-            if !sysfs_exists(p) { continue; }
+            if !sysfs_exists(p) {
+                continue;
+            }
             let current = sysfs_read_async(p).await;
             if current.as_deref() == Some(thermal_val) {
-                info!("thermal_profile={} already set via {} — skipping write", thermal_val, p);
+                info!(
+                    "thermal_profile={} already set via {} — skipping write",
+                    thermal_val, p
+                );
                 ok = true;
                 continue;
             }
@@ -537,7 +594,9 @@ impl PowerService {
         };
         let tgp = format!("{}/gpu_tgp", base);
         let ppab = format!("{}/gpu_ppab", base);
-        if !sysfs_exists(&tgp) { return; }
+        if !sysfs_exists(&tgp) {
+            return;
+        }
         match profile {
             "performance" => {
                 let _ = sysfs_write_async(&tgp, "1").await;
@@ -554,7 +613,6 @@ impl PowerService {
         }
         info!("GPU TGP/PPAB synced for profile '{}'", profile);
     }
-
 
     // ── Intel RAPL power limits ────────────────────────────────────────────────
 
@@ -590,12 +648,11 @@ impl PowerService {
 
 #[interface(name = "org.hp.omen.Power")]
 impl PowerService {
-
     /// GetPowerProfile — returns JSON matching Python GetPowerProfile().
     async fn get_power_profile(&self) -> String {
         let cfg = self.config.lock().await.clone();
         let mut active = Self::detect_current_profile().await;
-        
+
         let available_profiles = Self::get_available_profiles().await;
         let has_hw_profile_node = [
             "/sys/firmware/acpi/platform_profile",
@@ -607,27 +664,45 @@ impl PowerService {
         ]
         .iter()
         .any(|p| sysfs_exists(p));
-        
+
         // If hardware doesn't expose a sysfs profile readback node (e.g. #297 on 8786 when
         // stock hp-wmi is loaded) or doesn't support power-saver/performance natively in PPD,
         // report the user-selected profile so the UI doesn't bounce back to "Balanced" (#293, #297).
         if !has_hw_profile_node && !cfg.power_profile.is_empty() {
             active = Self::normalize_profile(&cfg.power_profile);
         } else if active == "balanced" {
-            if cfg.power_profile == "power-saver" && !available_profiles.iter().any(|c| c == "power-saver" || c == "low-power" || c == "quiet" || c == "cool") {
+            if cfg.power_profile == "power-saver"
+                && !available_profiles
+                    .iter()
+                    .any(|c| c == "power-saver" || c == "low-power" || c == "quiet" || c == "cool")
+            {
                 active = "power-saver".to_string();
-            } else if cfg.power_profile == "performance" && !available_profiles.iter().any(|c| c == "performance") {
+            } else if cfg.power_profile == "performance"
+                && !available_profiles.iter().any(|c| c == "performance")
+            {
                 active = "performance".to_string();
             }
         }
 
         let mut real_pl1 = cfg.pl1_w;
         let mut real_pl2 = cfg.pl2_w;
-        if let Some(val) = sysfs_read_async("/sys/class/powercap/intel-rapl/intel-rapl:0/constraint_0_power_limit_uw").await {
-            if let Ok(uw) = val.parse::<u32>() { real_pl1 = uw / 1_000_000; }
+        if let Some(val) = sysfs_read_async(
+            "/sys/class/powercap/intel-rapl/intel-rapl:0/constraint_0_power_limit_uw",
+        )
+        .await
+        {
+            if let Ok(uw) = val.parse::<u32>() {
+                real_pl1 = uw / 1_000_000;
+            }
         }
-        if let Some(val) = sysfs_read_async("/sys/class/powercap/intel-rapl/intel-rapl:0/constraint_1_power_limit_uw").await {
-            if let Ok(uw) = val.parse::<u32>() { real_pl2 = uw / 1_000_000; }
+        if let Some(val) = sysfs_read_async(
+            "/sys/class/powercap/intel-rapl/intel-rapl:0/constraint_1_power_limit_uw",
+        )
+        .await
+        {
+            if let Ok(uw) = val.parse::<u32>() {
+                real_pl2 = uw / 1_000_000;
+            }
         }
 
         let json = serde_json::json!({
@@ -651,7 +726,6 @@ impl PowerService {
         });
         json.to_string()
     }
-
 
     /// SetPowerProfile — mirrors Python SetPowerProfile().
     async fn set_power_profile(&self, profile: String) -> String {
@@ -695,9 +769,13 @@ impl PowerService {
         }
         let pl2 = pl2.max(pl1); // clamp: pl2 must >= pl1
 
-        let (target_pl1,target_pl2) = if enabled { (pl1 as u32,pl2 as u32) }
-        else if let Some((b,_)) = &self.rapl_baseline { (b.pl1_w,b.pl2_w) }
-        else { return "FAIL: no observed power-limit baseline is available".to_string(); };
+        let (target_pl1, target_pl2) = if enabled {
+            (pl1 as u32, pl2 as u32)
+        } else if let Some((b, _)) = &self.rapl_baseline {
+            (b.pl1_w, b.pl2_w)
+        } else {
+            return "FAIL: no observed power-limit baseline is available".to_string();
+        };
 
         {
             let mut cfg = self.config.lock().await;
@@ -723,7 +801,10 @@ impl PowerService {
         let mut cfg = self.config.lock().await;
         cfg.undervolt_mv = mv;
         cfg.save();
-        info!("SetUndervolt: {}mV (saved; apply via undervolt service)", mv);
+        info!(
+            "SetUndervolt: {}mV (saved; apply via undervolt service)",
+            mv
+        );
         "OK".to_string()
     }
 

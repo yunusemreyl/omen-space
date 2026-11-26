@@ -1,7 +1,7 @@
+use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tokio::fs;
-use log::{info, warn};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FanConfig {
@@ -45,20 +45,24 @@ impl ConfigManager {
 
     pub async fn load(&self) -> FanConfig {
         match fs::read_to_string(&self.path).await {
-            Ok(content) => {
-                match serde_json::from_str(&content) {
-                    Ok(config) => {
-                        info!("Loaded fan config from {:?}", self.path);
-                        config
-                    }
-                    Err(e) => {
-                        warn!("Failed to parse config file {:?}: {}. Using defaults.", self.path, e);
-                        FanConfig::default()
-                    }
+            Ok(content) => match serde_json::from_str(&content) {
+                Ok(config) => {
+                    info!("Loaded fan config from {:?}", self.path);
+                    config
                 }
-            }
+                Err(e) => {
+                    warn!(
+                        "Failed to parse config file {:?}: {}. Using defaults.",
+                        self.path, e
+                    );
+                    FanConfig::default()
+                }
+            },
             Err(_) => {
-                info!("No existing config found at {:?}. Using defaults.", self.path);
+                info!(
+                    "No existing config found at {:?}. Using defaults.",
+                    self.path
+                );
                 FanConfig::default()
             }
         }

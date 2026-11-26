@@ -76,7 +76,10 @@ pub(crate) struct SharedModState {
 
 impl SharedModState {
     pub(crate) fn update(&mut self, device_id: usize, code: u16, pressed: bool) -> bool {
-        self.per_device.entry(device_id).or_default().update(code, pressed)
+        self.per_device
+            .entry(device_id)
+            .or_default()
+            .update(code, pressed)
     }
 
     pub(crate) fn reset_device(&mut self, device_id: usize) {
@@ -223,7 +226,8 @@ impl HotkeyMonitor {
                     let path = entry.path();
                     if path.to_string_lossy().contains("event") {
                         if let Ok(dev) = Device::open(&path) {
-                            let has_prog1 = dev.supported_keys()
+                            let has_prog1 = dev
+                                .supported_keys()
                                 .is_some_and(|k| k.contains(Key::KEY_PROG1));
                             let is_keyboard = dev.supported_keys().is_some_and(|k| {
                                 k.contains(Key::KEY_A)
@@ -274,8 +278,7 @@ impl HotkeyMonitor {
             let mut join_set = tokio::task::JoinSet::new();
             let shared_mods: Arc<Mutex<SharedModState>> =
                 Arc::new(Mutex::new(SharedModState::default()));
-            let last_overlay_emit: Arc<Mutex<Option<Instant>>> =
-                Arc::new(Mutex::new(None));
+            let last_overlay_emit: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
             for (device_id, path) in matching_devices.into_iter().enumerate() {
                 let conn = connection.clone();
                 let binding = binding.clone();

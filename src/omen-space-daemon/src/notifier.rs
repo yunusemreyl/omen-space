@@ -1,10 +1,11 @@
+use glob::glob;
 use log::{info, warn};
 use std::process::Command;
-use glob::glob;
 use zbus::Connection;
 
 /// Last notification id per condition tag, so a repeated/updated notice replaces the old one (#327).
-static NOTIFICATION_IDS: std::sync::Mutex<Option<std::collections::HashMap<String, u32>>> = std::sync::Mutex::new(None);
+static NOTIFICATION_IDS: std::sync::Mutex<Option<std::collections::HashMap<String, u32>>> =
+    std::sync::Mutex::new(None);
 
 pub struct DesktopNotifier;
 
@@ -12,7 +13,10 @@ impl DesktopNotifier {
     /// Discover the active graphical desktop user's session environment `(user, display, dbus_addr, xdg_runtime, home)`.
     fn find_user_session_env() -> Option<(String, String, String, String, String)> {
         // 1. Try systemd loginctl session discovery first (fast & reliable without procfs iteration)
-        if let Ok(output) = std::process::Command::new("loginctl").args(["list-sessions", "--no-legend"]).output() {
+        if let Ok(output) = std::process::Command::new("loginctl")
+            .args(["list-sessions", "--no-legend"])
+            .output()
+        {
             let stdout = String::from_utf8_lossy(&output.stdout);
             for line in stdout.lines() {
                 let parts: Vec<&str> = line.split_whitespace().collect();
@@ -25,7 +29,13 @@ impl DesktopNotifier {
                             let bus = format!("{}/bus", xdg);
                             if std::path::Path::new(&bus).exists() {
                                 let home = format!("/home/{}", user_name);
-                                return Some((user_name.to_string(), ":0".to_string(), format!("unix:path={}", bus), xdg, home));
+                                return Some((
+                                    user_name.to_string(),
+                                    ":0".to_string(),
+                                    format!("unix:path={}", bus),
+                                    xdg,
+                                    home,
+                                ));
                             }
                         }
                     }
@@ -36,7 +46,9 @@ impl DesktopNotifier {
         // 2. Fall back to /proc/*/environ scanning
         let entries = glob("/proc/*/environ").ok()?;
         for entry in entries.flatten() {
-            let Ok(content) = std::fs::read(&entry) else { continue };
+            let Ok(content) = std::fs::read(&entry) else {
+                continue;
+            };
             let env_str = String::from_utf8_lossy(&content);
             if !env_str.contains("DISPLAY=") && !env_str.contains("WAYLAND_DISPLAY=") {
                 continue;
@@ -62,7 +74,9 @@ impl DesktopNotifier {
 
             let is_valid_username = !user.is_empty()
                 && user != "root"
-                && user.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+                && user
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
 
             if is_valid_username && (!dbus_addr.is_empty() || !xdg_runtime.is_empty()) {
                 if dbus_addr.is_empty() && !xdg_runtime.is_empty() {
@@ -83,11 +97,15 @@ impl DesktopNotifier {
     /// Check whether the user has 90°C thermal desktop notifications enabled in their GUI settings (#313).
     pub fn are_thermal_alerts_enabled() -> bool {
         if let Some((_, _, _, _, home)) = Self::find_user_session_env() {
-            for rel in [".config/omenspace/settings.json", ".config/omen-space/settings.json"] {
+            for rel in [
+                ".config/omenspace/settings.json",
+                ".config/omen-space/settings.json",
+            ] {
                 let settings_path = format!("{}/{}", home, rel);
                 if let Ok(content) = std::fs::read_to_string(&settings_path) {
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                        if let Some(enabled) = json.get("thermal_alerts").and_then(|v| v.as_bool()) {
+                        if let Some(enabled) = json.get("thermal_alerts").and_then(|v| v.as_bool())
+                        {
                             return enabled;
                         }
                     }
@@ -163,7 +181,10 @@ impl DesktopNotifier {
             _ => "normal",
         };
         let mut cmd = Command::new("sudo");
-        cmd.arg("-u").arg(user).arg("env").arg(format!("DISPLAY={}", display));
+        cmd.arg("-u")
+            .arg(user)
+            .arg("env")
+            .arg(format!("DISPLAY={}", display));
         if !dbus_addr.is_empty() {
             cmd.arg(format!("DBUS_SESSION_BUS_ADDRESS={}", dbus_addr));
         }
@@ -203,7 +224,10 @@ impl DesktopNotifier {
                 out.status,
                 String::from_utf8_lossy(&out.stderr).trim()
             )),
-            Err(e) => Err(format!("Failed to spawn notify-send in user session: {}", e)),
+            Err(e) => Err(format!(
+                "Failed to spawn notify-send in user session: {}",
+                e
+            )),
         }
     }
 
@@ -280,7 +304,12 @@ impl DesktopNotifier {
     /// instead of accumulating in the notification history.
     pub async fn send_notification_tagged(tag: Option<&str>, title: &str, body: &str, urgency: u8) {
         let replaces_id: u32 = tag
-            .and_then(|t| NOTIFICATION_IDS.lock().ok().and_then(|g| g.as_ref().and_then(|m| m.get(t).copied())))
+            .and_then(|t| {
+                NOTIFICATION_IDS
+                    .lock()
+                    .ok()
+                    .and_then(|g| g.as_ref().and_then(|m| m.get(t).copied()))
+            })
             .unwrap_or(0);
         info!("Sending desktop notification: {} - {}", title, body);
         if Self::has_direct_session_bus() {
@@ -293,26 +322,30 @@ impl DesktopNotifier {
                     hints.insert("transient", zbus::zvariant::Value::Bool(true));
                 }
 
-                match connection.call_method(
-                    Some("org.freedesktop.Notifications"),
-                    "/org/freedesktop/Notifications",
-                    Some("org.freedesktop.Notifications"),
-                    "Notify",
-                    &(
-                        "OMENSpace",
-                        replaces_id,
-                        "preferences-desktop-display",
-                        title,
-                        body,
-                        Vec::<&str>::new(),
-                        hints,
-                        5000i32, // expire_timeout in ms
-                    ),
-                ).await {
+                match connection
+                    .call_method(
+                        Some("org.freedesktop.Notifications"),
+                        "/org/freedesktop/Notifications",
+                        Some("org.freedesktop.Notifications"),
+                        "Notify",
+                        &(
+                            "OMENSpace",
+                            replaces_id,
+                            "preferences-desktop-display",
+                            title,
+                            body,
+                            Vec::<&str>::new(),
+                            hints,
+                            5000i32, // expire_timeout in ms
+                        ),
+                    )
+                    .await
+                {
                     Ok(reply) => {
                         if let (Some(t), Ok(id)) = (tag, reply.body().deserialize::<u32>()) {
                             if let Ok(mut g) = NOTIFICATION_IDS.lock() {
-                                g.get_or_insert_with(Default::default).insert(t.to_string(), id);
+                                g.get_or_insert_with(Default::default)
+                                    .insert(t.to_string(), id);
                             }
                         }
                         return;
@@ -321,7 +354,14 @@ impl DesktopNotifier {
                 }
             }
         }
-        if !Self::send_via_user_session(tag, title, body, urgency, "preferences-desktop-display", 5000) {
+        if !Self::send_via_user_session(
+            tag,
+            title,
+            body,
+            urgency,
+            "preferences-desktop-display",
+            5000,
+        ) {
             warn!("Could not deliver desktop notification via session bus or user session helper");
         }
     }
@@ -330,7 +370,11 @@ impl DesktopNotifier {
     /// Use for hardware command failures, permission errors, D-Bus method errors.
     pub async fn notify_error(context: &str, err_msg: &str) {
         let is_tr = std::env::var("LANG").unwrap_or_default().starts_with("tr");
-        let title = if is_tr { "OMEN Space — Hata" } else { "OMEN Space — Error" };
+        let title = if is_tr {
+            "OMEN Space — Hata"
+        } else {
+            "OMEN Space — Error"
+        };
         let body = if is_tr {
             format!("{}\n\nHata kodu: {}", context, err_msg)
         } else {
@@ -343,22 +387,25 @@ impl DesktopNotifier {
                 let mut hints = std::collections::HashMap::new();
                 hints.insert("urgency", zbus::zvariant::Value::U8(2u8)); // critical
 
-                match connection.call_method(
-                    Some("org.freedesktop.Notifications"),
-                    "/org/freedesktop/Notifications",
-                    Some("org.freedesktop.Notifications"),
-                    "Notify",
-                    &(
-                        "OMEN Space",
-                        0u32,
-                        "dialog-error",
-                        title,
-                        body.as_str(),
-                        Vec::<&str>::new(),
-                        hints,
-                        10000i32, // 10 seconds — errors should be readable
-                    ),
-                ).await {
+                match connection
+                    .call_method(
+                        Some("org.freedesktop.Notifications"),
+                        "/org/freedesktop/Notifications",
+                        Some("org.freedesktop.Notifications"),
+                        "Notify",
+                        &(
+                            "OMEN Space",
+                            0u32,
+                            "dialog-error",
+                            title,
+                            body.as_str(),
+                            Vec::<&str>::new(),
+                            hints,
+                            10000i32, // 10 seconds — errors should be readable
+                        ),
+                    )
+                    .await
+                {
                     Ok(_) => return,
                     Err(e) => warn!("D-Bus Notify error call failed on session bus: {}", e),
                 }
@@ -366,7 +413,6 @@ impl DesktopNotifier {
         }
         let _ = Self::send_via_user_session(Some("error"), title, &body, 2, "dialog-error", 10000);
     }
-
 
     /// Open path or URL in the logged in user's graphical desktop session
     pub fn open_in_user_session(target: &str) {
@@ -394,13 +440,18 @@ impl DesktopNotifier {
                         }
 
                         // Sanitize username to prevent privilege escalation or command argument injection
-                        let is_valid_username = !user.is_empty() 
-                            && user != "root" 
-                            && user.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+                        let is_valid_username = !user.is_empty()
+                            && user != "root"
+                            && user
+                                .chars()
+                                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
 
                         if is_valid_username {
                             let mut cmd = Command::new("sudo");
-                            cmd.arg("-u").arg(&user).arg("env").arg(format!("DISPLAY={}", display));
+                            cmd.arg("-u")
+                                .arg(&user)
+                                .arg("env")
+                                .arg(format!("DISPLAY={}", display));
                             if !dbus_addr.is_empty() {
                                 cmd.arg(format!("DBUS_SESSION_BUS_ADDRESS={}", dbus_addr));
                             }
@@ -423,7 +474,7 @@ impl DesktopNotifier {
         let encoded_title = url_encode(title);
         let encoded_body = url_encode(body);
         let full_url = format!("{}?title={}&body={}", repo_url, encoded_title, encoded_body);
-        
+
         info!("Launching GitHub Issue creation URL: {}", full_url);
         Self::open_in_user_session(&full_url);
     }

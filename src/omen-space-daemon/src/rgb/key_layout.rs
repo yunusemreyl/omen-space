@@ -44,72 +44,72 @@ pub const KEY_COORDS: [(f64, f64); 104] = [
     (17.5, 1.0), // 33: Numpad *
     (18.5, 1.0), // 34: Numpad -
     // Row 2 (y = 2.0): Tab, Q..P, [, ], \, 7..9_num, +_num (18 keys: 35..=52)
-    (0.75, 2.0), // 35: Tab (w=1.5)
-    (2.0, 2.0),  // 36: Q
-    (3.0, 2.0),  // 37: W
-    (4.0, 2.0),  // 38: E
-    (5.0, 2.0),  // 39: R
-    (6.0, 2.0),  // 40: T
-    (7.0, 2.0),  // 41: Y
-    (8.0, 2.0),  // 42: U
-    (9.0, 2.0),  // 43: I
-    (10.0, 2.0), // 44: O
-    (11.0, 2.0), // 45: P
-    (12.0, 2.0), // 46: [
-    (13.0, 2.0), // 47: ]
-    (14.25, 2.0),// 48: \ (w=1.5)
-    (15.5, 2.0), // 49: Numpad 7
-    (16.5, 2.0), // 50: Numpad 8
-    (17.5, 2.0), // 51: Numpad 9
-    (18.5, 2.5), // 52: Numpad + (2 rows tall)
+    (0.75, 2.0),  // 35: Tab (w=1.5)
+    (2.0, 2.0),   // 36: Q
+    (3.0, 2.0),   // 37: W
+    (4.0, 2.0),   // 38: E
+    (5.0, 2.0),   // 39: R
+    (6.0, 2.0),   // 40: T
+    (7.0, 2.0),   // 41: Y
+    (8.0, 2.0),   // 42: U
+    (9.0, 2.0),   // 43: I
+    (10.0, 2.0),  // 44: O
+    (11.0, 2.0),  // 45: P
+    (12.0, 2.0),  // 46: [
+    (13.0, 2.0),  // 47: ]
+    (14.25, 2.0), // 48: \ (w=1.5)
+    (15.5, 2.0),  // 49: Numpad 7
+    (16.5, 2.0),  // 50: Numpad 8
+    (17.5, 2.0),  // 51: Numpad 9
+    (18.5, 2.5),  // 52: Numpad + (2 rows tall)
     // Row 3 (y = 3.0): Caps, A..', Enter, 4..6_num (16 keys: 53..=68)
-    (0.87, 3.0), // 53: Caps (w=1.75)
-    (2.25, 3.0), // 54: A
-    (3.25, 3.0), // 55: S
-    (4.25, 3.0), // 56: D
-    (5.25, 3.0), // 57: F
-    (6.25, 3.0), // 58: G
-    (7.25, 3.0), // 59: H
-    (8.25, 3.0), // 60: J
-    (9.25, 3.0), // 61: K
-    (10.25, 3.0),// 62: L
-    (11.25, 3.0),// 63: ;
-    (12.25, 3.0),// 64: '
-    (13.87, 3.0),// 65: Enter (w=2.25)
-    (15.5, 3.0), // 66: Numpad 4
-    (16.5, 3.0), // 67: Numpad 5
-    (17.5, 3.0), // 68: Numpad 6
+    (0.87, 3.0),  // 53: Caps (w=1.75)
+    (2.25, 3.0),  // 54: A
+    (3.25, 3.0),  // 55: S
+    (4.25, 3.0),  // 56: D
+    (5.25, 3.0),  // 57: F
+    (6.25, 3.0),  // 58: G
+    (7.25, 3.0),  // 59: H
+    (8.25, 3.0),  // 60: J
+    (9.25, 3.0),  // 61: K
+    (10.25, 3.0), // 62: L
+    (11.25, 3.0), // 63: ;
+    (12.25, 3.0), // 64: '
+    (13.87, 3.0), // 65: Enter (w=2.25)
+    (15.5, 3.0),  // 66: Numpad 4
+    (16.5, 3.0),  // 67: Numpad 5
+    (17.5, 3.0),  // 68: Numpad 6
     // Row 4 (y = 4.0): Shift, Z../, Shift_R, Up, 1..3_num, Enter_num (17 keys: 69..=85)
-    (1.12, 4.0), // 69: Left Shift (w=2.25)
-    (2.75, 4.0), // 70: Z
-    (3.75, 4.0), // 71: X
-    (4.75, 4.0), // 72: C
-    (5.75, 4.0), // 73: V
-    (6.75, 4.0), // 74: B
-    (7.75, 4.0), // 75: N
-    (8.75, 4.0), // 76: M
-    (9.75, 4.0), // 77: ,
-    (10.75, 4.0),// 78: .
-    (11.75, 4.0),// 79: /
-    (13.12, 4.0),// 80: Right Shift (w=1.75)
-    (14.5, 4.0), // 81: Up
-    (15.5, 4.0), // 82: Numpad 1
-    (16.5, 4.0), // 83: Numpad 2
-    (17.5, 4.0), // 84: Numpad 3
-    (18.5, 4.5), // 85: Numpad Enter (2 rows tall)
+    (1.12, 4.0),  // 69: Left Shift (w=2.25)
+    (2.75, 4.0),  // 70: Z
+    (3.75, 4.0),  // 71: X
+    (4.75, 4.0),  // 72: C
+    (5.75, 4.0),  // 73: V
+    (6.75, 4.0),  // 74: B
+    (7.75, 4.0),  // 75: N
+    (8.75, 4.0),  // 76: M
+    (9.75, 4.0),  // 77: ,
+    (10.75, 4.0), // 78: .
+    (11.75, 4.0), // 79: /
+    (13.12, 4.0), // 80: Right Shift (w=1.75)
+    (14.5, 4.0),  // 81: Up
+    (15.5, 4.0),  // 82: Numpad 1
+    (16.5, 4.0),  // 83: Numpad 2
+    (17.5, 4.0),  // 84: Numpad 3
+    (18.5, 4.5),  // 85: Numpad Enter (2 rows tall)
     // Row 5 (y = 5.0): Ctrl, Fn, Win, Alt, Space, Alt_R, Menu, Left, Down, Right, 0_num, ._num (12 keys: 86..=97)
-    (0.62, 5.0), // 86: Left Ctrl (w=1.25)
-    (1.87, 5.0), // 87: Fn
-    (3.12, 5.0), // 88: Win/Meta
-    (4.37, 5.0), // 89: Left Alt
-    (7.75, 5.0), // 90: Space (w=5.5)
-    (11.12, 5.0),// 91: Right Alt / AltGr
-    (12.37, 5.0),// 92: Menu / Right Ctrl
-    (13.5, 5.0), // 93: Left
-    (14.5, 5.0), // 94: Down
-    (15.5, 5.0), // 95: Right
-    (16.5, 5.0), // 96: Numpad 0
-    (17.5, 5.0), // 97: Numpad .
+    (0.62, 5.0),  // 86: Left Ctrl (w=1.25)
+    (1.87, 5.0),  // 87: Fn
+    (3.12, 5.0),  // 88: Win/Meta
+    (4.37, 5.0),  // 89: Left Alt
+    (7.75, 5.0),  // 90: Space (w=5.5)
+    (11.12, 5.0), // 91: Right Alt / AltGr
+    (12.37, 5.0), // 92: Menu / Right Ctrl
+    (13.5, 5.0),  // 93: Left
+    (14.5, 5.0),  // 94: Down
+    (15.5, 5.0),  // 95: Right
+    (16.5, 5.0),  // 96: Numpad 0
+    (17.5, 5.0),  // 97: Numpad .
     // Auxiliary / Macro / Settings slots (98..=103)
     (18.0, 0.0), // 98: Settings / Prog1
     (0.0, 1.0),  // 99: Macro P1
@@ -142,7 +142,7 @@ pub fn evdev_code_to_coords(code: u16) -> Option<(f64, f64)> {
         Key::KEY_F10 => 10,
         Key::KEY_F11 => 11,
         Key::KEY_F12 => 12,
-        Key::KEY_DELETE | Key::KEY_INSERT | Key::KEY_PRINT => 13,
+        Key::KEY_DELETE | Key::KEY_PRINT => 13,
         Key::KEY_PROG1 | Key::KEY_PROG2 => 14,
         Key::KEY_CALC => 15,
         Key::KEY_POWER => 16,
@@ -161,9 +161,9 @@ pub fn evdev_code_to_coords(code: u16) -> Option<(f64, f64)> {
         Key::KEY_MINUS => 28,
         Key::KEY_EQUAL => 29,
         Key::KEY_BACKSPACE => 30,
-        Key::KEY_NUMLOCK => 31,
-        Key::KEY_KPSLASH => 32,
-        Key::KEY_KPASTERISK => 33,
+        Key::KEY_NUMLOCK | Key::KEY_INSERT => 31,
+        Key::KEY_KPSLASH | Key::KEY_HOME => 32,
+        Key::KEY_KPASTERISK | Key::KEY_PAGEUP => 33,
         Key::KEY_KPMINUS => 34,
 
         Key::KEY_TAB => 35,
@@ -180,9 +180,9 @@ pub fn evdev_code_to_coords(code: u16) -> Option<(f64, f64)> {
         Key::KEY_LEFTBRACE => 46,
         Key::KEY_RIGHTBRACE => 47,
         Key::KEY_BACKSLASH => 48,
-        Key::KEY_KP7 => 49,
-        Key::KEY_KP8 => 50,
-        Key::KEY_KP9 => 51,
+        Key::KEY_KP7 | Key::KEY_PAUSE => 49,
+        Key::KEY_KP8 | Key::KEY_END => 50,
+        Key::KEY_KP9 | Key::KEY_PAGEDOWN => 51,
         Key::KEY_KPPLUS => 52,
 
         Key::KEY_CAPSLOCK => 53,
@@ -214,7 +214,7 @@ pub fn evdev_code_to_coords(code: u16) -> Option<(f64, f64)> {
         Key::KEY_DOT => 78,
         Key::KEY_SLASH => 79,
         Key::KEY_RIGHTSHIFT => 80,
-        Key::KEY_UP | Key::KEY_HOME | Key::KEY_PAGEUP => 81,
+        Key::KEY_UP => 81,
         Key::KEY_KP1 => 82,
         Key::KEY_KP2 => 83,
         Key::KEY_KP3 => 84,
@@ -227,8 +227,8 @@ pub fn evdev_code_to_coords(code: u16) -> Option<(f64, f64)> {
         Key::KEY_SPACE => 90,
         Key::KEY_RIGHTALT => 91,
         Key::KEY_COMPOSE | Key::KEY_RIGHTCTRL => 92,
-        Key::KEY_LEFT | Key::KEY_END => 93,
-        Key::KEY_DOWN | Key::KEY_PAGEDOWN => 94,
+        Key::KEY_LEFT => 93,
+        Key::KEY_DOWN => 94,
         Key::KEY_RIGHT => 95,
         Key::KEY_KP0 => 96,
         Key::KEY_KPDOT => 97,
@@ -243,11 +243,26 @@ mod tests {
 
     #[test]
     fn evdev_mapping_matches_physical_key_slots() {
-        assert_eq!(evdev_code_to_coords(Key::KEY_ESC.code()), Some(slot_coords(0)));
-        assert_eq!(evdev_code_to_coords(Key::KEY_W.code()), Some(slot_coords(37)));
-        assert_eq!(evdev_code_to_coords(Key::KEY_Z.code()), Some(slot_coords(70)));
-        assert_eq!(evdev_code_to_coords(Key::KEY_SPACE.code()), Some(slot_coords(90)));
-        assert_eq!(evdev_code_to_coords(Key::KEY_KPENTER.code()), Some(slot_coords(85)));
+        assert_eq!(
+            evdev_code_to_coords(Key::KEY_ESC.code()),
+            Some(slot_coords(0))
+        );
+        assert_eq!(
+            evdev_code_to_coords(Key::KEY_W.code()),
+            Some(slot_coords(37))
+        );
+        assert_eq!(
+            evdev_code_to_coords(Key::KEY_Z.code()),
+            Some(slot_coords(70))
+        );
+        assert_eq!(
+            evdev_code_to_coords(Key::KEY_SPACE.code()),
+            Some(slot_coords(90))
+        );
+        assert_eq!(
+            evdev_code_to_coords(Key::KEY_KPENTER.code()),
+            Some(slot_coords(85))
+        );
         assert!(evdev_code_to_coords(Key::BTN_LEFT.code()).is_none());
 
         // KEY_W and KEY_Z are both on the left side of the keyboard (unlike code % 15!).
@@ -256,5 +271,33 @@ mod tests {
         let (entx, _) = evdev_code_to_coords(Key::KEY_ENTER.code()).unwrap();
         assert!(wx < 5.0 && zx < 5.0);
         assert!(entx > 12.0);
+    }
+
+    #[test]
+    fn evdev_navigation_keys_map_to_numpad_overlay_slots() {
+        assert_eq!(
+            evdev_code_to_coords(Key::KEY_INSERT.code()),
+            Some(slot_coords(31))
+        );
+        assert_eq!(
+            evdev_code_to_coords(Key::KEY_HOME.code()),
+            Some(slot_coords(32))
+        );
+        assert_eq!(
+            evdev_code_to_coords(Key::KEY_PAGEUP.code()),
+            Some(slot_coords(33))
+        );
+        assert_eq!(
+            evdev_code_to_coords(Key::KEY_PAUSE.code()),
+            Some(slot_coords(49))
+        );
+        assert_eq!(
+            evdev_code_to_coords(Key::KEY_END.code()),
+            Some(slot_coords(50))
+        );
+        assert_eq!(
+            evdev_code_to_coords(Key::KEY_PAGEDOWN.code()),
+            Some(slot_coords(51))
+        );
     }
 }

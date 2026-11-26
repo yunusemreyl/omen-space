@@ -4,19 +4,19 @@ use libadwaita as adw;
 use std::cell::{Cell, RefCell};
 
 /* ─────────────────────────────────────────────────────────────
-   ui_scale.rs — Interface zoom (Ctrl+Shift+Plus / Ctrl+Shift+Minus)
+ui_scale.rs — Interface zoom (Ctrl+Shift+Plus / Ctrl+Shift+Minus)
 
-   Enlarges the whole pane instead of going fullscreen, so the UI stays
-   readable on large/high-density monitors. Three things move together:
-     1. the bundled stylesheet is re-emitted with every `px` length
-        multiplied by the zoom factor (cards, paddings, font sizes),
-     2. the app-local font DPI is scaled the same way so widgets that
-        use the theme font (Adw rows, plain labels) follow,
-     3. the window grows proportionally, clamped to the monitor it is on.
+Enlarges the whole pane instead of going fullscreen, so the UI stays
+readable on large/high-density monitors. Three things move together:
+  1. the bundled stylesheet is re-emitted with every `px` length
+     multiplied by the zoom factor (cards, paddings, font sizes),
+  2. the app-local font DPI is scaled the same way so widgets that
+     use the theme font (Adw rows, plain labels) follow,
+  3. the window grows proportionally, clamped to the monitor it is on.
 
-   The factor is persisted in ~/.config/omenspace/settings.json so it
-   survives a restart.
-   ───────────────────────────────────────────────────────────── */
+The factor is persisted in ~/.config/omenspace/settings.json so it
+survives a restart.
+───────────────────────────────────────────────────────────── */
 
 pub const MIN_SCALE: f64 = 0.8;
 pub const MAX_SCALE: f64 = 2.0;
@@ -93,7 +93,10 @@ pub fn install_shortcuts(app: &adw::Application) {
             "<Ctrl>KP_Subtract",
         ],
     );
-    app.set_accels_for_action("app.zoom-reset", &["<Ctrl><Shift>0", "<Ctrl>0", "<Ctrl>KP_0"]);
+    app.set_accels_for_action(
+        "app.zoom-reset",
+        &["<Ctrl><Shift>0", "<Ctrl>0", "<Ctrl>KP_0"],
+    );
 }
 
 /// Keep the Settings page spin button in sync with keyboard zooming.
@@ -160,14 +163,20 @@ fn apply_css(factor: f64) {
 }
 
 fn apply_font_dpi(factor: f64) {
-    let Some(settings) = gtk::Settings::default() else { return };
+    let Some(settings) = gtk::Settings::default() else {
+        return;
+    };
 
     let base = BASE_XFT_DPI.with(|b| {
         if b.get() == 0 {
             // Capture the session's own DPI once, so zooming stays relative to
             // whatever text scaling the desktop already applies.
             let current = settings.gtk_xft_dpi();
-            b.set(if current > 0 { current } else { FALLBACK_XFT_DPI });
+            b.set(if current > 0 {
+                current
+            } else {
+                FALLBACK_XFT_DPI
+            });
         }
         b.get()
     });
@@ -177,7 +186,9 @@ fn apply_font_dpi(factor: f64) {
 
 fn resize_window(factor: f64) {
     WINDOW.with(|w| {
-        let Some(window) = w.borrow().clone() else { return };
+        let Some(window) = w.borrow().clone() else {
+            return;
+        };
         // A window the user maximized (or a compositor did) stays where it is;
         // only the contents scale.
         if window.is_maximized() || window.is_fullscreen() {
@@ -229,8 +240,8 @@ fn scale_px_lengths(css: &str, factor: f64) -> String {
 
     while i < css.len() {
         let c = css[i..].chars().next().unwrap();
-        let starts_number = c.is_ascii_digit()
-            || (c == '.' && matches!(bytes.get(i + 1), Some(b'0'..=b'9')));
+        let starts_number =
+            c.is_ascii_digit() || (c == '.' && matches!(bytes.get(i + 1), Some(b'0'..=b'9')));
 
         if starts_number {
             let mut j = i;
@@ -275,7 +286,9 @@ fn settings_path() -> Option<String> {
 }
 
 fn load_saved_scale() -> f64 {
-    let Some(path) = settings_path() else { return 1.0 };
+    let Some(path) = settings_path() else {
+        return 1.0;
+    };
     std::fs::read_to_string(&path)
         .ok()
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
@@ -296,7 +309,10 @@ fn save_scale(factor: f64) {
         }
     }
     json["ui_scale"] = serde_json::json!(factor);
-    let _ = std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap_or_default());
+    let _ = std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&json).unwrap_or_default(),
+    );
 }
 
 #[cfg(test)]

@@ -1,10 +1,14 @@
 use gtk::prelude::*;
-use std::rc::Rc;
 use std::cell::RefCell;
+use std::rc::Rc;
 
 pub fn build_desktop_rgb_card(
     zone_colors: Rc<RefCell<Vec<String>>>,
-) -> (gtk::Box, crate::keyboardrgb::keyboard::AnimCallback, gtk::Box) {
+) -> (
+    gtk::Box,
+    crate::keyboardrgb::keyboard::AnimCallback,
+    gtk::Box,
+) {
     let card = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
         .css_classes(["os-card"])
@@ -42,22 +46,65 @@ pub fn build_desktop_rgb_card(
     let provider = gtk::CssProvider::new();
     provider.load_from_string(css);
     if let Some(display) = gtk::gdk::Display::default() {
-        gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
     }
 
     let dyn_provider = Rc::new(gtk::CssProvider::new());
     if let Some(display) = gtk::gdk::Display::default() {
-        gtk::style_context_add_provider_for_display(&display, &*dyn_provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &*dyn_provider,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
     }
 
-    let case_outer = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["desktop-case"]).width_request(180).height_request(320).build();
-    let glass_panel = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["desktop-glass"]).vexpand(true).spacing(12).build();
-    
+    let case_outer = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .css_classes(["desktop-case"])
+        .width_request(180)
+        .height_request(320)
+        .build();
+    let glass_panel = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .css_classes(["desktop-glass"])
+        .vexpand(true)
+        .spacing(12)
+        .build();
+
     // Fake internal components
-    let top_fan = gtk::Box::builder().css_classes(["desktop-fan"]).width_request(60).height_request(60).halign(gtk::Align::Center).margin_top(12).build();
-    let cpu_cooler = gtk::Box::builder().css_classes(["desktop-fan"]).width_request(80).height_request(80).halign(gtk::Align::Center).build();
-    let bottom_logo = gtk::Box::builder().css_classes(["desktop-logo"]).width_request(40).height_request(45).halign(gtk::Align::Center).vexpand(true).valign(gtk::Align::End).margin_bottom(20).build();
-    let ram_strip = gtk::Box::builder().css_classes(["desktop-strip"]).width_request(12).height_request(60).halign(gtk::Align::End).margin_end(20).build();
+    let top_fan = gtk::Box::builder()
+        .css_classes(["desktop-fan"])
+        .width_request(60)
+        .height_request(60)
+        .halign(gtk::Align::Center)
+        .margin_top(12)
+        .build();
+    let cpu_cooler = gtk::Box::builder()
+        .css_classes(["desktop-fan"])
+        .width_request(80)
+        .height_request(80)
+        .halign(gtk::Align::Center)
+        .build();
+    let bottom_logo = gtk::Box::builder()
+        .css_classes(["desktop-logo"])
+        .width_request(40)
+        .height_request(45)
+        .halign(gtk::Align::Center)
+        .vexpand(true)
+        .valign(gtk::Align::End)
+        .margin_bottom(20)
+        .build();
+    let ram_strip = gtk::Box::builder()
+        .css_classes(["desktop-strip"])
+        .width_request(12)
+        .height_request(60)
+        .halign(gtk::Align::End)
+        .margin_end(20)
+        .build();
 
     top_fan.set_widget_name("desktop_zone_2");
     cpu_cooler.set_widget_name("desktop_zone_1");
@@ -72,20 +119,35 @@ pub fn build_desktop_rgb_card(
 
     card.append(&case_outer);
 
-    let global_color_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(12).margin_top(8).margin_bottom(12).halign(gtk::Align::Center).build();
-    
+    let global_color_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(12)
+        .margin_top(8)
+        .margin_bottom(12)
+        .halign(gtk::Align::Center)
+        .build();
+
     let dyn_prov_global = dyn_provider.clone();
     let zc_global = zone_colors.clone();
 
     // Create 7 zone buttons
     let mut zone_buttons = Vec::new();
     for i in 0..7 {
-        let btn = gtk::Button::builder().width_request(32).height_request(32).build();
+        let btn = gtk::Button::builder()
+            .width_request(32)
+            .height_request(32)
+            .build();
         btn.add_css_class("circular");
         btn.set_widget_name(&format!("btn_zone_{}", i));
-        
-        let label = gtk::Label::builder().label(format!("Z{}", i+1)).css_classes(["dim-label"]).build();
-        let vbox = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(4).build();
+
+        let label = gtk::Label::builder()
+            .label(format!("Z{}", i + 1))
+            .css_classes(["dim-label"])
+            .build();
+        let vbox = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(4)
+            .build();
         vbox.append(&btn);
         vbox.append(&label);
         global_color_box.append(&vbox);
@@ -94,7 +156,7 @@ pub fn build_desktop_rgb_card(
 
     let zc_clone = zc_global.clone();
     let dyn_clone = dyn_prov_global.clone();
-    
+
     let update_css = Rc::new(move || {
         let mut css_str = String::new();
         let zc = zc_clone.borrow();
@@ -109,34 +171,54 @@ pub fn build_desktop_rgb_card(
     for (idx, btn) in zone_buttons.iter().enumerate().take(7) {
         let zc_local = zc_global.clone();
         let update_css_local = update_css.clone();
-        
+
         btn.connect_clicked(move |btn_ref| {
             let zc_inner = zc_local.clone();
             let up_inner = update_css_local.clone();
-            crate::keyboardrgb::show_color_picker_popover(btn_ref, Rc::new(move |hex| {
-                if idx < zc_inner.borrow().len() {
-                    zc_inner.borrow_mut()[idx] = hex.clone();
-                } else {
-                    while zc_inner.borrow().len() <= idx {
-                        zc_inner.borrow_mut().push("#FF0000".to_string());
+            crate::keyboardrgb::show_color_picker_popover(
+                btn_ref,
+                Rc::new(move |hex| {
+                    if idx < zc_inner.borrow().len() {
+                        zc_inner.borrow_mut()[idx] = hex.clone();
+                    } else {
+                        while zc_inner.borrow().len() <= idx {
+                            zc_inner.borrow_mut().push("#FF0000".to_string());
+                        }
+                        zc_inner.borrow_mut()[idx] = hex.clone();
                     }
-                    zc_inner.borrow_mut()[idx] = hex.clone();
-                }
-                crate::daemon_client::set_color_sync((idx + 10) as i32, hex.clone());
-                up_inner();
-            }));
+                    crate::daemon_client::set_color_sync((idx + 10) as i32, hex.clone());
+                    up_inner();
+                }),
+            );
         });
     }
 
     // Call initially
     update_css();
 
-    let controls_row = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(16).margin_top(12).margin_bottom(12).margin_start(16).margin_end(16).build();
-    let sliders_container = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).hexpand(true).build();
+    let controls_row = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(16)
+        .margin_top(12)
+        .margin_bottom(12)
+        .margin_start(16)
+        .margin_end(16)
+        .build();
+    let sliders_container = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(6)
+        .hexpand(true)
+        .build();
     let label_sg = gtk::SizeGroup::new(gtk::SizeGroupMode::Horizontal);
 
-    let speed_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).build();
-    let speed_label = gtk::Label::builder().label("Efekt Hızı").xalign(0.0).build();
+    let speed_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(6)
+        .build();
+    let speed_label = gtk::Label::builder()
+        .label("Efekt Hızı")
+        .xalign(0.0)
+        .build();
     label_sg.add_widget(&speed_label);
     speed_box.append(&speed_label);
     let speed_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
@@ -149,7 +231,10 @@ pub fn build_desktop_rgb_card(
     });
     speed_box.append(&speed_scale);
 
-    let bright_box = gtk::Box::builder().orientation(gtk::Orientation::Horizontal).spacing(6).build();
+    let bright_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(6)
+        .build();
     let bright_label = gtk::Label::builder().label("Parlaklık").xalign(0.0).build();
     label_sg.add_widget(&bright_label);
     bright_box.append(&bright_label);
@@ -165,7 +250,7 @@ pub fn build_desktop_rgb_card(
 
     sliders_container.append(&speed_box);
     sliders_container.append(&bright_box);
-    
+
     controls_row.append(&global_color_box);
     controls_row.append(&gtk::Separator::new(gtk::Orientation::Vertical));
     controls_row.append(&sliders_container);
@@ -176,5 +261,9 @@ pub fn build_desktop_rgb_card(
         speed_scale.set_value(speed);
     });
 
-    (card, apply_anim, gtk::Box::new(gtk::Orientation::Horizontal, 0))
+    (
+        card,
+        apply_anim,
+        gtk::Box::new(gtk::Orientation::Horizontal, 0),
+    )
 }

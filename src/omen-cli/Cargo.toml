@@ -1,6 +1,6 @@
 [package]
 name = "omen-cli"
-version = "2.5.2"
+version = "2.5.3"
 edition = "2021"
 
 [dependencies]
@@ -14,3 +14,4 @@ comfy-table = "7.1"
 crossterm = "0.27.0"
 shlex = "2.0"
 chrono = "0.4.45"
+omen-types = { version = "2.5.3", path = "../omen-types" }

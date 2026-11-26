@@ -122,9 +122,10 @@ impl GameAutomationService {
                     continue;
                 }
 
-                let running_procs = tokio::task::spawn_blocking(crate::sysmon::get_running_process_names)
-                    .await
-                    .unwrap_or_default();
+                let running_procs =
+                    tokio::task::spawn_blocking(crate::sysmon::get_running_process_names)
+                        .await
+                        .unwrap_or_default();
                 let found_game = match_running_profile(&running_procs, &game_map);
                 let current_active = this.active_game.lock().await.clone();
 
@@ -171,7 +172,10 @@ impl GameAutomationService {
                             .power_service
                             .set_profile_internal(&profile.power_profile)
                             .await;
-                        let _ = this.fan_service.apply_mode_internal(&profile.fan_mode).await;
+                        let _ = this
+                            .fan_service
+                            .apply_mode_internal(&profile.fan_mode)
+                            .await;
 
                         DesktopNotifier::send_notification(
                             "OMENSpace App Profile Activated",

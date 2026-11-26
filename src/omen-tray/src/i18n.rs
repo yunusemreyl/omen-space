@@ -1,7 +1,8 @@
+use omen_types::i18n::{detect_env_lang, parse_lang_code, Lang};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::RwLock;
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Language {
@@ -13,6 +14,14 @@ pub enum Language {
     En,
 }
 
+impl From<Lang> for Language {
+    fn from(lang: Lang) -> Self {
+        match lang {
+            Lang::Tr => Language::Tr,
+            Lang::En | Lang::Es => Language::En,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct GuiConfig {
@@ -36,18 +45,6 @@ fn get_config_path() -> Option<PathBuf> {
     }
 }
 
-fn detect_system_language() -> Language {
-    for var in &["LC_MESSAGES", "LC_ALL", "LANG", "LANGUAGE"] {
-        if let Ok(val) = std::env::var(var) {
-            let lower = val.to_lowercase();
-            if lower.starts_with("tr") || lower.contains("tr_tr") || lower.contains("turkish") {
-                return Language::Tr;
-            }
-        }
-    }
-    Language::En
-}
-
 struct I18nState {
     active_language: Language,
 }
@@ -61,17 +58,15 @@ pub fn init() {
     if let Some(path) = get_config_path() {
         if let Ok(content) = fs::read_to_string(&path) {
             if let Ok(cfg) = serde_json::from_str::<GuiConfig>(&content) {
-                selected = match cfg.language.as_str() {
-                    "tr" => Language::Tr,
-                    "en" => Language::En,
-                    _ => Language::Auto,
-                };
+                selected = parse_lang_code(&cfg.language)
+                    .map(Language::from)
+                    .unwrap_or(Language::Auto);
             }
         }
     }
 
     let active = match selected {
-        Language::Auto => detect_system_language(),
+        Language::Auto => detect_env_lang().into(),
         other => other,
     };
 
@@ -81,7 +76,10 @@ pub fn init() {
 }
 
 pub fn get_active_language() -> Language {
-    I18N_STATE.read().map(|s| s.active_language).unwrap_or(Language::En)
+    I18N_STATE
+        .read()
+        .map(|s| s.active_language)
+        .unwrap_or(Language::En)
 }
 
 pub fn t(key: &'static str) -> &'static str {
@@ -110,9 +108,11 @@ fn translate_tr(key: &'static str) -> &'static str {
         "discrete" => "Harici (Discrete — Yeniden Başlatma Gerekir)",
         "advanced" => "Advanced Optimus (Yeniden Başlatma Gerekir)",
         "integrated" => "Dahili iGPU (Yeniden Başlatma Gerekir)",
-        "gpu_reboot_notify" => "GPU modunun etkin olması için sistemi yeniden başlatmanız gerekiyor.",
+        "gpu_reboot_notify" => {
+            "GPU modunun etkin olması için sistemi yeniden başlatmanız gerekiyor."
+        }
         "exit" => "Çıkış",
-        
+
         // Tooltips
         "tt_power" => "Güç",
         "tt_fan" => "Fan",
@@ -127,7 +127,7 @@ fn translate_tr(key: &'static str) -> &'static str {
         "bat_discharging" => "Deşarj Oluyor",
         "bat_not_charging" => "Şarj Olmuyor",
         "bat_full" => "Tam Dolu",
-        
+
         _ => translate_en(key),
     }
 }
@@ -152,7 +152,7 @@ fn translate_en(key: &'static str) -> &'static str {
         "integrated" => "Integrated iGPU (Requires Reboot)",
         "gpu_reboot_notify" => "Please restart your system for the GPU mode change to take effect.",
         "exit" => "Exit",
-        
+
         // Tooltips
         "tt_power" => "Power",
         "tt_fan" => "Fan",
@@ -167,7 +167,7 @@ fn translate_en(key: &'static str) -> &'static str {
         "bat_discharging" => "Discharging",
         "bat_not_charging" => "Not Charging",
         "bat_full" => "Full",
-        
+
         _ => key,
     }
 }

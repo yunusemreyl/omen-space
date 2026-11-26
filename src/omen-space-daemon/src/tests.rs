@@ -49,7 +49,10 @@ mod tests {
     #[test]
     fn board_8dd0_is_verified() {
         let json = boards_json();
-        assert!(is_verified(&json, "8DD0"), "Board 8DD0 must be in verified_boards (issue #275)");
+        assert!(
+            is_verified(&json, "8DD0"),
+            "Board 8DD0 must be in verified_boards (issue #275)"
+        );
     }
 
     #[test]
@@ -66,7 +69,10 @@ mod tests {
     #[test]
     fn board_8e0f_present_in_models() {
         let json = boards_json();
-        assert!(get_board(&json, "8E0F").is_some(), "Board 8E0F must have a full model entry (issue #270)");
+        assert!(
+            get_board(&json, "8E0F").is_some(),
+            "Board 8E0F must have a full model entry (issue #270)"
+        );
     }
 
     #[test]
@@ -82,7 +88,10 @@ mod tests {
     #[test]
     fn board_8e0f_in_verified_boards() {
         let json = boards_json();
-        assert!(is_verified(&json, "8E0F"), "Board 8E0F must appear in verified_boards");
+        assert!(
+            is_verified(&json, "8E0F"),
+            "Board 8E0F must appear in verified_boards"
+        );
     }
 
     // ── Issue #268 — Board 8D41 correct entry ────────────────────────────────
@@ -90,7 +99,10 @@ mod tests {
     #[test]
     fn board_8d41_present() {
         let json = boards_json();
-        assert!(get_board(&json, "8D41").is_some(), "Board 8D41 must be in boards.json (issue #268)");
+        assert!(
+            get_board(&json, "8D41").is_some(),
+            "Board 8D41 must be in boards.json (issue #268)"
+        );
     }
 
     #[test]
@@ -103,7 +115,11 @@ mod tests {
 
     #[test]
     fn board_8bd4_has_single_zone_rgb() {
-        let cap = crate::capabilities::detect("8BD4", "Victus by HP Gaming Laptop 16-s0xxx", "AMD Ryzen 7 7840HS");
+        let cap = crate::capabilities::detect(
+            "8BD4",
+            "Victus by HP Gaming Laptop 16-s0xxx",
+            "AMD Ryzen 7 7840HS",
+        );
         assert_eq!(cap.rgb_zone_count, Some(1));
     }
 
@@ -111,7 +127,10 @@ mod tests {
     fn rgb_zone_count_defaults_to_none_when_absent() {
         let cap = crate::capabilities::detect("8D41", "", "");
         assert_eq!(cap.rgb_zone_count, None);
-        assert_eq!(crate::capabilities::ModelCapabilities::default().rgb_zone_count, None);
+        assert_eq!(
+            crate::capabilities::ModelCapabilities::default().rgb_zone_count,
+            None
+        );
     }
 
     // ── Issue #264 — chassis_temp cache test ─────────────────────────────────
@@ -138,13 +157,20 @@ mod tests {
                 self.value
             }
         }
-        let mut cache = FakeCache { last_read: None, value: 0, read_count: 0 };
+        let mut cache = FakeCache {
+            last_read: None,
+            value: 0,
+            read_count: 0,
+        };
         let t1 = cache.get_temp();
         assert_eq!(t1, 40);
         assert_eq!(cache.read_count, 1, "First call must trigger sysfs read");
         let t2 = cache.get_temp();
         assert_eq!(t2, 40);
-        assert_eq!(cache.read_count, 1, "Second call within 60 s must NOT read again (fix #264)");
+        assert_eq!(
+            cache.read_count, 1,
+            "Second call within 60 s must NOT read again (fix #264)"
+        );
     }
 
     // ── Issue #266 — Hotkey raw scancode fallback ─────────────────────────────
@@ -158,7 +184,11 @@ mod tests {
         let mods = ModState::default();
         let binding = HotkeySpec::default();
         assert_eq!(resolve_hotkey(148, &mods, &binding), Some("omen"));
-        assert_eq!(resolve_hotkey(200, &mods, &binding), Some("omen"), "raw XF86Launch2 scancode must work (fix #266)");
+        assert_eq!(
+            resolve_hotkey(200, &mods, &binding),
+            Some("omen"),
+            "raw XF86Launch2 scancode must work (fix #266)"
+        );
         assert_eq!(resolve_hotkey(149, &mods, &binding), Some("prog2"));
         assert_eq!(resolve_hotkey(140, &mods, &binding), Some("calc"));
         assert_eq!(resolve_hotkey(256, &mods, &binding), Some("prog3"));
@@ -172,13 +202,16 @@ mod tests {
     #[test]
     fn shift_f2_opens_the_overlay_but_plain_f2_does_not() {
         use crate::hotkey_monitor::{resolve_hotkey, ModState};
-        use omen_types::hotkey::HotkeySpec;
         use evdev::Key;
+        use omen_types::hotkey::HotkeySpec;
         let binding = HotkeySpec::default();
         let mut shift = ModState::default();
         shift.update(42, true);
         assert_eq!(Key::KEY_F2.code(), 60, "evdev KEY_F2 must stay code 60");
-        assert_eq!(resolve_hotkey(Key::KEY_F2.code(), &shift, &binding), Some("overlay"));
+        assert_eq!(
+            resolve_hotkey(Key::KEY_F2.code(), &shift, &binding),
+            Some("overlay")
+        );
         assert_eq!(resolve_hotkey(60, &shift, &binding), Some("overlay"));
         assert_eq!(
             resolve_hotkey(60, &ModState::default(), &binding),
@@ -194,7 +227,11 @@ mod tests {
 
         let binding = HotkeySpec::with_label(
             64, // KEY_F6
-            HotkeyModifiers { ctrl: true, alt: true, ..Default::default() },
+            HotkeyModifiers {
+                ctrl: true,
+                alt: true,
+                ..Default::default()
+            },
             "F6",
         );
 
@@ -223,21 +260,33 @@ mod tests {
         // KEY_PROG2 (149) pressed on the HP WMI hotkeys device (device 1).
         let binding = HotkeySpec::with_label(
             149,
-            HotkeyModifiers { alt: true, ..Default::default() },
+            HotkeyModifiers {
+                alt: true,
+                ..Default::default()
+            },
             "Launch2",
         );
 
         let mut shared = SharedModState::default();
         assert!(shared.update(0, 56, true)); // Left Alt on device 0
-        assert_eq!(resolve_hotkey(149, &shared.combined(), &binding), Some("overlay"));
+        assert_eq!(
+            resolve_hotkey(149, &shared.combined(), &binding),
+            Some("overlay")
+        );
 
         // SYN_DROPPED on device 1 must not drop Alt held on device 0.
         shared.reset_device(1);
-        assert_eq!(resolve_hotkey(149, &shared.combined(), &binding), Some("overlay"));
+        assert_eq!(
+            resolve_hotkey(149, &shared.combined(), &binding),
+            Some("overlay")
+        );
 
         // Releasing Alt on device 0 restores normal prog2 fallback.
         assert!(shared.update(0, 56, false));
-        assert_eq!(resolve_hotkey(149, &shared.combined(), &binding), Some("prog2"));
+        assert_eq!(
+            resolve_hotkey(149, &shared.combined(), &binding),
+            Some("prog2")
+        );
     }
 
     #[test]
@@ -258,7 +307,11 @@ mod tests {
         let mut mods = ModState::default();
         mods.update(42, true);
         for code in [30u16, 42, 54, 224, 225] {
-            assert_eq!(resolve_hotkey(code, &mods, &binding), None, "code {code} must not trigger anything");
+            assert_eq!(
+                resolve_hotkey(code, &mods, &binding),
+                None,
+                "code {code} must not trigger anything"
+            );
         }
     }
 
@@ -273,7 +326,10 @@ mod tests {
         let mut last_switch: Option<Instant> = None;
         assert!(cooldown_ok(last_switch), "First switch must be allowed");
         last_switch = Some(Instant::now());
-        assert!(!cooldown_ok(last_switch), "Rapid second switch must be blocked (fix #282)");
+        assert!(
+            !cooldown_ok(last_switch),
+            "Rapid second switch must be blocked (fix #282)"
+        );
     }
 
     // ── Issue #283 — PPD profile name mapping ─────────────────────────────────
@@ -283,14 +339,18 @@ mod tests {
         fn to_ppd(profile: &str) -> &'static str {
             match profile {
                 "performance" => "performance",
-                "power-saver"  => "power-saver",
-                _              => "balanced",
+                "power-saver" => "power-saver",
+                _ => "balanced",
             }
         }
         assert_eq!(to_ppd("performance"), "performance");
         assert_eq!(to_ppd("power-saver"), "power-saver");
         assert_eq!(to_ppd("balanced"), "balanced");
-        assert_eq!(to_ppd("custom"), "balanced", "Unknown profiles must fall back to balanced (fix #283)");
+        assert_eq!(
+            to_ppd("custom"),
+            "balanced",
+            "Unknown profiles must fall back to balanced (fix #283)"
+        );
         assert_eq!(to_ppd(""), "balanced");
     }
 
@@ -309,12 +369,19 @@ mod tests {
     fn newly_verified_boards_present() {
         let json = boards_json();
         for id in [
-            "8A3D", "8A50", "8BBE", "8BD5", "8C99", "8C9C",
-            "8C9A", "8BB2", "8BC8", "8B3B", "8C78", "8786", "8A4C", "8D40",
-            "8EDD", "8EEF",
+            "8A3D", "8A50", "8BBE", "8BD5", "8C99", "8C9C", "8C9A", "8BB2", "8BC8", "8B3B", "8C78",
+            "8786", "8A4C", "8D40", "8EDD", "8EEF",
         ] {
-            assert!(get_board(&json, id).is_some(), "Board {} must exist in models", id);
-            assert!(is_verified(&json, id), "Board {} must exist in verified_boards", id);
+            assert!(
+                get_board(&json, id).is_some(),
+                "Board {} must exist in models",
+                id
+            );
+            assert!(
+                is_verified(&json, id),
+                "Board {} must exist in verified_boards",
+                id
+            );
         }
     }
 
@@ -333,14 +400,20 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         for m in models {
             let id = m["product_id"].as_str().unwrap_or("");
-            assert!(seen.insert(id.to_string()), "Duplicate product_id '{}' in boards.json", id);
+            assert!(
+                seen.insert(id.to_string()),
+                "Duplicate product_id '{}' in boards.json",
+                id
+            );
         }
     }
 
     #[test]
     fn verified_boards_all_have_model_entry() {
         let json = boards_json();
-        let verified = json["verified_boards"].as_array().expect("verified_boards must be array");
+        let verified = json["verified_boards"]
+            .as_array()
+            .expect("verified_boards must be array");
         for id_val in verified {
             let id = id_val.as_str().unwrap_or("");
             assert!(
@@ -362,17 +435,33 @@ mod tests {
         let root = std::env::temp_dir().join(format!("omen-dkms-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
 
-        fake_dkms_package(&root, "hp-omen-extra", "2.1.4",
-            "BUILT_MODULE_NAME[0]=\"hp-wmi\"\nBUILT_MODULE_NAME[1]=\"hp-omen-extra\"\n");
-        fake_dkms_package(&root, "hp-wmi-fan-and-backlight-control", "0.0.2",
-            "PACKAGE_NAME=\"hp-wmi-fan-and-backlight-control\"\nBUILT_MODULE_NAME[0]=\"hp-wmi\"\n");
+        fake_dkms_package(
+            &root,
+            "hp-omen-extra",
+            "2.1.4",
+            "BUILT_MODULE_NAME[0]=\"hp-wmi\"\nBUILT_MODULE_NAME[1]=\"hp-omen-extra\"\n",
+        );
+        fake_dkms_package(
+            &root,
+            "hp-wmi-fan-and-backlight-control",
+            "0.0.2",
+            "PACKAGE_NAME=\"hp-wmi-fan-and-backlight-control\"\nBUILT_MODULE_NAME[0]=\"hp-wmi\"\n",
+        );
         fake_dkms_package(&root, "other-wmi", "1.0", "BUILT_MODULE_NAME[0]=hp_wmi\n");
-        fake_dkms_package(&root, "nvidia", "580.0", "BUILT_MODULE_NAME[0]=\"nvidia\"\n");
+        fake_dkms_package(
+            &root,
+            "nvidia",
+            "580.0",
+            "BUILT_MODULE_NAME[0]=\"nvidia\"\n",
+        );
 
         let found = crate::conflict_detector::conflicting_hpwmi_dkms_packages(&root);
         let _ = std::fs::remove_dir_all(&root);
 
-        assert_eq!(found, vec!["hp-wmi-fan-and-backlight-control/0.0.2", "other-wmi/1.0"]);
+        assert_eq!(
+            found,
+            vec!["hp-wmi-fan-and-backlight-control/0.0.2", "other-wmi/1.0"]
+        );
     }
 
     #[test]
