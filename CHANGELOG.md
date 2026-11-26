@@ -6,6 +6,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ---
 
+## [2.5.1] - 2026-11-26
+
+### Added
+- **Hardware Support & Verified Boards (`#394`, `#358`):** Added full support and `boards.json` capability entries for **HyperX OMEN Gaming Laptop 15-ga0xxx (`8EDF`)** (via `victus_s_thermal_profile_boards`, `broken_omen_hpc_guid_boards`, and `no_wmi_rgb_boards` / `disable_wmi_rgb`) and promoted both **`8EDF`** and **OMEN MAX 16-ah0xxx (`8D42`)** to `verified_boards`.
+- **Sonix/Microdia USB Diagnostic Detection (`#394`):** Expanded `sysmon` `lsusb` filtering to include `0c45` / `microdia` / `sonix` keyboard backlight controllers, and improved `setup.sh` error diagnostics for OpenRC systems (`#361`).
+
+### Changed
+- **Modular Daemon & GUI Refactoring:** Split `fan/mod.rs` into `fan/{mod.rs,curves.rs,hwmon.rs}` and `rgb/mod.rs` into `rgb/{mod.rs,hardware.rs,lamparray.rs,hid_per_key.rs,effects.rs,key_layout.rs}`, unified per-app & power automation loops (`game_automation.rs`, `power.rs`, `power_automation.rs`, `main.rs`) around canonical `/etc/omen-space/app_profiles.json` with legacy fallback, and streamlined `omen-gui/src/daemon_client.rs` with localized TR/EN/ES D-Bus error messages.
+- **Balanced `Auto` Fan Curve Tuning (`#395`):** Refined Balanced `default_auto_step_curve()` to ramp smoothly (`88°C -> 88%`, `93°C -> 100%`) instead of pegging fans at 100% under sub-90°C load.
+
+### Fixed
+- **Max-Fan Latch & Raw EC Write Safety (`#395`, `#364`):** Added `hp_wmi_fan_speed_max_reset()` on `PWM_MODE_MAX -> PWM_MODE_MANUAL` transitions in `driver/hp-wmi.c`, avoided latching `pwm1_enable = 0` during manual/curve 100% duty (`pwm1_enable = 1, pwm1 = 255`), transitioned `0 -> 2` (`PWM_MODE_AUTO`) cleanly when leaving `Max` / Fan Dust Cleaning, restricted raw `ec_sys` writes strictly to legacy EC-fallback boards (`8E35`, `8A43`, `8A42`), and deduplicated `No HP hwmon device found` log spam.
+- **Board `8EDF` Thermal Profile & Keyboard Backlight (`#394`):** Fixed `victus_s_gpu_thermal_profile_set` uninitialized status variable and tolerated positive WMI unsupported return codes (`0x05`) to eliminate `-22` setup failures on `8EDF`; guarded `no_wmi_rgb_boards` (`-ENODEV` in `hp-omen-extra.c`), removed `HPWMI_COLOR_*` fallback from `lightbar_show`/`lightbar_store`, and downgraded `0x02`/`0x03`/`0x05` probe codes to `pr_debug` so `hp_omen_extra` no longer turns off USB keyboard backlights.
+- **Primax `0xFF13` & 4-Zone / LampArray RGB Fixes (`#385`, `#393`, `#358`):** Streamed software animation frames for `marquee`, `reactive`, `ripple`, `wave`, and `blinking` when `hw_effects` is set; implemented `Marquee` and `Blinking` engines; mapped all 104 slots + evdev keycodes to `(x, y)` coordinates and accepted composite USB keyboards for `Reactive`/`Ripple`; synced `config.colors` in `PerKey`/`All` mode to eliminate stale `#00FFAA` Zone 4 tinting; fixed `8A17` 4-zone boundaries & numpad key disambiguation in GUI RGB Studio; and extended OMEN MAX 16 120-lamp overrides to `8D42`, `8D87`, `8D88`, `8E9A`, and `8E9F`.
+- **MUX Sysfs Readback Fallback (`#369`):** Added `write_mux_sysfs_with_fallback` in `mux.rs` to fall back cleanly to `graphics_mode` when `gpu_mux_mode` readback does not reflect the target state.
+
+---
+
 ## [2.5.0] - 2026-11-25
 
 ### Added

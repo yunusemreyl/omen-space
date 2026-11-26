@@ -8,7 +8,7 @@
 
   <p>
     <a href="https://github.com/yunusemreyl/omen-space/releases/latest">
-      <img src="https://img.shields.io/badge/Versi%C3%B3n-v2.5.0-e11d48?style=flat-square" alt="Versión v2.5.0" />
+      <img src="https://img.shields.io/badge/Versi%C3%B3n-v2.5.1-e11d48?style=flat-square" alt="Versión v2.5.1" />
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/Licencia-GPL--3.0-10b981?style=flat-square" alt="Licencia" />
@@ -87,11 +87,11 @@ curl -sSL https://raw.githubusercontent.com/yunusemreyl/omen-space/main/install.
 
 ---
 
-## Novedades en v2.5.0
+## Novedades en v2.5.1
 
-- **Rediseño de Rendimiento y barra de telemetría fija:** Se eliminaron las tres tarjetas flotantes y se fijó una barra de telemetría unificada sin cajas (**CPU | GPU | Estado del dispositivo**) en la parte inferior; incluye iconos SVG exclusivos para cada modo y botón de ventilador, acceso directo **Nuevo preajuste** y un editor de curva a ancho completo adaptable al tema.
-- **Rediseño completo de Monitor del Sistema:** Nueva barra resumen superior (**Potencia total · Perfil · Ventilador**), paneles unificados de CPU y GPU con gráficos Cairo de 60 s conmutables (**Potencia / Temp / Carga**), paneles separados de **Memoria y almacenamiento** y **Batería y energía**, y pie discreto con datos de firmware.
-- **Rediseño de Control Rápido y sincronización RGB:** Nueva interfaz nativa en Libadwaita para `omen-overlay` con soporte de atajos entre dispositivos, hidratación instantánea de color en RGB Studio y dependencias actualizadas.
+- **Soporte verificado para placas `8EDF` y `8D42` (`#394`, `#358`):** Compatibilidad completa en `verified_boards` para **HyperX OMEN 15-ga0xxx (`8EDF`)** (corrigiendo el error `-22` de perfil térmico y evitando apagar la retroiluminación USB mediante `no_wmi_rgb_boards` / `disable_wmi_rgb`) y **OMEN MAX 16-ah0xxx (`8D42`)** (calibración de 120 LEDs `LampArray`).
+- **Corrección de ventiladores al máximo y seguridad EC (`#395`, `#364`):** Reinicio por kernel `hp_wmi_fan_speed_max_reset()` al salir de `PWM_MODE_MAX`, curva `Auto` equilibrada refinada (`88°C -> 88%`, `93°C -> 100%`), salida limpia tras la limpieza de polvo, restricción estricta de escrituras `ec_sys` y deduplicación del aviso `No HP hwmon device found`.
+- **RGB Primax `0xFF13` y 4 zonas, fallback MUX y refactorización (`#385`, `#393`, `#369`, `#361`):** Transmisión por software para `Marquee`, `Reactive`, `Ripple`, `Wave` y `Blinking` en Primax `0461:4F03`, corrección del tinte residual en zona 4, límites corregidos de 4 zonas en `8A17`, fallback automático a `graphics_mode` en el MUX de `8DCF`, mejoras de diagnóstico OpenRC y modularización de `fan/`, `rgb/`, automatización y cliente D-Bus de la GUI.
 
 ---
 

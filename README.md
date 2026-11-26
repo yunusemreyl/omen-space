@@ -8,7 +8,7 @@
 
   <p>
     <a href="https://github.com/yunusemreyl/omen-space/releases/latest">
-      <img src="https://img.shields.io/badge/Release-v2.5.0-e11d48?style=flat-square" alt="Release v2.5.0" />
+      <img src="https://img.shields.io/badge/Release-v2.5.1-e11d48?style=flat-square" alt="Release v2.5.1" />
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/License-GPL--3.0-10b981?style=flat-square" alt="License" />
@@ -131,11 +131,11 @@ sudo ./setup.sh uninstall   # Remove daemon, UI, and DKMS modules cleanly
 
 ---
 
-## What's New in v2.5.0
+## What's New in v2.5.1
 
-- **Redesigned Performance Landing & Pinned Telemetry Dock:** Replaced the three floating telemetry cards with a full-width, boxless **CPU | GPU | Device Status** telemetry dock anchored to the bottom of the page; added bespoke custom SVG icons for every mode and fan control button, equal-height performance cards, a dedicated **+ New Preset** shortcut, and a full-width theme-adaptive custom fan curve studio.
-- **Redesigned System Monitor:** Rebuilt **System Monitor** from scratch with a live top summary strip (**System Power · Power Profile · Fan Mode**), unified CPU & GPU panels featuring switchable 60-second **Power / Temp / Load** Cairo area charts, split **Memory & Storage** and **Battery & Power** panels, and a quiet hardware/firmware metadata footer.
-- **Redesigned Quick Control HUD & RGB Hydration:** Rebuilt `omen-overlay` in native GNOME/Libadwaita styling with cross-device hotkey support, hydrated RGB Studio keyboard preview/swatch from live daemon color state with zero overhead, and updated workspace dependencies.
+- **Board `8EDF` & `8D42` Hardware Verification (`#394`, `#358`):** Added full support and `verified_boards` promotion for **HyperX OMEN Gaming Laptop 15-ga0xxx (`8EDF`)** (fixing `-22` thermal profile initialization and preserving USB keyboard backlighting with `no_wmi_rgb_boards` / `disable_wmi_rgb`) and **OMEN MAX 16-ah0xxx (`8D42`)** (120-lamp `LampArray` calibration).
+- **Fan Latch, Sub-90°C Ramp & EC Safety Fixes (`#395`, `#364`):** Added kernel `hp_wmi_fan_speed_max_reset()` when transitioning out of `PWM_MODE_MAX`, refined the Balanced `Auto` fan step curve (`88°C -> 88%`, `93°C -> 100%`), fixed Fan Dust Cleaning max-latch recovery, restricted raw `ec_sys` writes to legacy EC-fallback boards, and deduplicated `No HP hwmon device found` logs.
+- **Primax `0xFF13`, 4-Zone RGB, MUX Fallback & Refactoring (`#385`, `#393`, `#369`, `#361`):** Fixed `Marquee`, `Reactive`, `Ripple`, `Wave`, and `Blinking` software animation streaming on Primax `0461:4F03`, eliminated stale Zone 4 `#00FFAA` tinting, corrected `8A17` 4-zone key boundaries, added `graphics_mode` readback fallback on `8DCF` MUX switches, improved OpenRC diagnostics, and modularized the `fan/`, `rgb/`, automation, and GUI D-Bus client layers.
 
 ---
 
