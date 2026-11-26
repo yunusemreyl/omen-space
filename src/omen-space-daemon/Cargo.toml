@@ -1,6 +1,6 @@
 [package]
 name = "omen-space-daemon"
-version = "2.5.3"
+version = "2.5.4"
 edition = "2021"
 
 [dependencies]
@@ -16,4 +16,4 @@ futures = "0.3.34"
 nvml-wrapper = "0.13.0"
 hidapi = { version = "2.6.7", default-features = false, features = ["linux-static-hidraw"] }
 libc = "0.2"
-omen-types = { version = "2.5.3", path = "../omen-types" }
+omen-types = { version = "2.5.4", path = "../omen-types" }

@@ -86,11 +86,12 @@ async fn curl_fetch(url: &str) -> Result<String, String> {
             "--proto",
             "=https",
             "--tlsv1.2",
+            "--compressed",
             "-fsSL",
             "--connect-timeout",
             "8",
             "--max-time",
-            "15",
+            "20",
             "-H",
             "User-Agent: OmenSpace-GUI-Updater",
             url,
@@ -109,7 +110,7 @@ pub(super) async fn check_github_updates_async() -> RemoteUpdateCheck {
     let (installed_ver, installed_sha, installed_short) = resolve_installed_build();
 
     let commit_url = format!(
-        "https://api.github.com/repos/{}/commits/main",
+        "https://api.github.com/repos/{}/commits?sha=main&per_page=30",
         REPO_OWNER_NAME
     );
     let cargo_url = format!(
@@ -127,24 +128,43 @@ pub(super) async fn check_github_updates_async() -> RemoteUpdateCheck {
         curl_fetch(&release_url),
     );
 
-    let valid_commit = commit_res
-        .as_ref()
-        .ok()
-        .is_some_and(|raw| omen_types::parse_commit_metadata(raw).is_ok());
-    if !valid_commit {
-        return RemoteUpdateCheck {
-            installed_ver: installed_ver.clone(),
-            installed_short,
-            remote_ver: installed_ver,
-            remote_short: "unknown".to_string(),
-            commits_ahead: 0,
-            update_available: false,
-            changelog: String::new(),
-            error: Some(
-                "Could not verify the upstream commit. Retry the update check.".to_string(),
-            ),
-        };
-    }
+    let commit_raw = match commit_res {
+        Ok(raw) => raw,
+        Err(_) => {
+            return RemoteUpdateCheck {
+                installed_ver: installed_ver.clone(),
+                installed_short,
+                remote_ver: installed_ver,
+                remote_short: "unknown".to_string(),
+                commits_ahead: 0,
+                update_available: false,
+                changelog: String::new(),
+                error: Some(
+                    "Could not verify the upstream commit. Retry the update check.".to_string(),
+                ),
+            };
+        }
+    };
+
+    let (remote_sha, head_msg_raw) = match omen_types::parse_commit_metadata(&commit_raw) {
+        Ok(parsed) => parsed,
+        Err(_) => {
+            return RemoteUpdateCheck {
+                installed_ver: installed_ver.clone(),
+                installed_short,
+                remote_ver: installed_ver,
+                remote_short: "unknown".to_string(),
+                commits_ahead: 0,
+                update_available: false,
+                changelog: String::new(),
+                error: Some(
+                    "Could not verify the upstream commit. Retry the update check.".to_string(),
+                ),
+            };
+        }
+    };
+    let remote_short: String = remote_sha.chars().take(7).collect();
+    let head_msg = head_msg_raw.lines().next().unwrap_or("").to_string();
 
     let mut remote_ver = installed_ver.clone();
     let mut release_notes = String::new();
@@ -178,62 +198,57 @@ pub(super) async fn check_github_updates_async() -> RemoteUpdateCheck {
         }
     }
 
-    let mut remote_sha = "unknown".to_string();
-    let mut remote_short = "unknown".to_string();
-    let mut head_msg = String::new();
-
-    if let Ok(c_str) = commit_res {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&c_str) {
-            if let Some(sha) = v["sha"].as_str() {
-                remote_sha = sha.to_string();
-                remote_short = sha.chars().take(7).collect();
-            }
-            if let Some(msg) = v["commit"]["message"].as_str() {
-                head_msg = msg.lines().next().unwrap_or("").to_string();
-            }
-        }
-    }
-
     let mut commits_ahead = 0u32;
     let mut comparison_error = None;
     let mut commit_list = Vec::new();
 
     if installed_sha != "unknown" && remote_sha != "unknown" && installed_sha != remote_sha {
-        let cmp_url = format!(
-            "https://api.github.com/repos/{}/compare/{}...{}",
-            REPO_OWNER_NAME, installed_sha, remote_sha
-        );
-        if let Ok(cmp_str) = curl_fetch(&cmp_url).await {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&cmp_str) {
-                let status = v["status"].as_str().unwrap_or("");
-                match omen_types::parse_comparison_ahead(&cmp_str) {
-                    Ok(count) => commits_ahead = count,
-                    Err(error) => comparison_error = Some(error),
+        if let Ok(Some((ahead, items))) =
+            omen_types::parse_commits_list_ahead(&commit_raw, &installed_sha)
+        {
+            commits_ahead = ahead;
+            for (sha_s, msg_s) in items.into_iter().take(20) {
+                if !msg_s.is_empty() {
+                    commit_list.push(format!("• [{}] {}", sha_s, msg_s));
                 }
-                if status == "diverged" && commits_ahead == 0 {
-                    commits_ahead = 1;
-                }
-                if let Some(arr) = v["commits"].as_array() {
-                    for c in arr.iter().rev().take(20) {
-                        let sha_s: String =
-                            c["sha"].as_str().unwrap_or("").chars().take(7).collect();
-                        let msg_s = c["commit"]["message"]
-                            .as_str()
-                            .unwrap_or("")
-                            .lines()
-                            .next()
-                            .unwrap_or("");
-                        if !msg_s.is_empty() {
-                            commit_list.push(format!("• [{}] {}", sha_s, msg_s));
-                        }
-                    }
-                }
-            } else {
-                comparison_error = Some("Invalid comparison response".to_string());
             }
         } else {
-            comparison_error =
-                Some("Could not compare the installed and upstream commits".to_string());
+            let cmp_url = format!(
+                "https://api.github.com/repos/{}/compare/{}...{}?per_page=1",
+                REPO_OWNER_NAME, installed_sha, remote_sha
+            );
+            if let Ok(cmp_str) = curl_fetch(&cmp_url).await {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&cmp_str) {
+                    let status = v["status"].as_str().unwrap_or("");
+                    match omen_types::parse_comparison_ahead(&cmp_str) {
+                        Ok(count) => commits_ahead = count,
+                        Err(error) => comparison_error = Some(error),
+                    }
+                    if status == "diverged" && commits_ahead == 0 {
+                        commits_ahead = 1;
+                    }
+                    if let Some(arr) = v["commits"].as_array() {
+                        for c in arr.iter().rev().take(20) {
+                            let sha_s: String =
+                                c["sha"].as_str().unwrap_or("").chars().take(7).collect();
+                            let msg_s = c["commit"]["message"]
+                                .as_str()
+                                .unwrap_or("")
+                                .lines()
+                                .next()
+                                .unwrap_or("");
+                            if !msg_s.is_empty() {
+                                commit_list.push(format!("• [{}] {}", sha_s, msg_s));
+                            }
+                        }
+                    }
+                } else {
+                    comparison_error = Some("Invalid comparison response".to_string());
+                }
+            } else {
+                comparison_error =
+                    Some("Could not compare the installed and upstream commits".to_string());
+            }
         }
     }
 
@@ -262,12 +277,16 @@ pub(super) async fn check_github_updates_async() -> RemoteUpdateCheck {
         commits_ahead,
         update_available,
         changelog,
-        error: comparison_error.or_else(|| {
-            (installed_sha == "unknown").then(|| {
-                "Installed commit is unknown; only version information could be compared."
-                    .to_string()
+        error: if ver_newer {
+            None
+        } else {
+            comparison_error.or_else(|| {
+                (installed_sha == "unknown").then(|| {
+                    "Installed commit is unknown; only version information could be compared."
+                        .to_string()
+                })
             })
-        }),
+        },
     }
 }
 

@@ -8,7 +8,7 @@
 
   <p>
     <a href="https://github.com/yunusemreyl/omen-space/releases/latest">
-      <img src="https://img.shields.io/badge/Release-v2.5.3-e11d48?style=flat-square" alt="Release v2.5.3" />
+      <img src="https://img.shields.io/badge/Release-v2.5.4-e11d48?style=flat-square" alt="Release v2.5.4" />
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/License-GPL--3.0-10b981?style=flat-square" alt="License" />
@@ -131,12 +131,10 @@ sudo ./setup.sh uninstall   # Remove daemon, UI, and DKMS modules cleanly
 
 ---
 
-## What's New in v2.5.3
+## What's New in v2.5.4
 
-- **Turkish Q (`TR-Q`) Layout & Primax `0xFF13` Matrix (`#385`):** Added the `TR-Q` keycap layout alongside `EN` and `DE` in RGB Studio, mapped physical `Ralph`/`Cybug` LED matrices (`0461:4F03`/`4E9A`/`4E9B`/`4F11`/`4F1E`/`4ECB`), fixed Per-Key `Static` uniform color & `Wave (Custom Colors)`, synced `Off / Key / Zone / All` toggles, and yielded cleanly to native `Fn` presets when `Hardware Effects` is active.
-- **Fan Dust Cleaning & Max-Boost Exit Recovery (`#385`, `#364`):** Refreshes active `platform_profile` (`WMI 0x1A`) during `leave_max_boost`, drops directly to a safe initial manual duty, and seeds `PWM_MODE_MAX -> PWM_MODE_MANUAL` targets cleanly in `driver/hp-wmi.c`.
-- **Cleaner, Modular Codebase:** Unified D-Bus proxies, semver checks, and locale detection in `omen-types`; modularized `i18n/`, `monitoring/`, `updater/`, and `fan/protection.rs`; enforced TR/EN/ES translation parity and `cargo fmt` in CI; and removed unused assets and dead code.
-- **Includes all `v2.5.2` fixes:** Settings heartbeat crash fix and `8C77` EC max-fan latch recovery (`#395`).
+- **Fast, Timeout-Free GitHub Update Check:** Switched GUI & daemon update checks from `/commits/main` (which embedded ~923 KB of patch diffs) to the lightweight `/commits?sha=main&per_page=30` endpoint with `--compressed` and local ahead-count matching (`omen_types::parse_commits_list_ahead`), cutting payload size by >99% and preventing `"Could not verify the upstream commit"` timeouts.
+- **Includes all `v2.5.3` improvements:** Turkish Q (`TR-Q`) keyboard keycap layout, Primax `0xFF13` matrix & `#385` RGB fixes, Fan Dust Cleaning recovery (`#385`, `#364`), `omen-types` unification, and TR/EN/ES translation parity tests.
 
 ---
 

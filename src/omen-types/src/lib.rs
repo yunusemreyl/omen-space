@@ -757,9 +757,7 @@ mod update_metadata_tests {
     }
 }
 
-/// Require the GitHub commit object rather than accepting rate-limit/error JSON.
-pub fn parse_commit_metadata(raw: &str) -> Result<(String, String), String> {
-    let v: serde_json::Value = serde_json::from_str(raw).map_err(|e| e.to_string())?;
+fn extract_commit_fields(v: &serde_json::Value) -> Result<(String, String), String> {
     let sha = v["sha"]
         .as_str()
         .filter(|s| is_commit_sha(s))
@@ -768,6 +766,70 @@ pub fn parse_commit_metadata(raw: &str) -> Result<(String, String), String> {
         sha.to_string(),
         v["commit"]["message"].as_str().unwrap_or("").to_string(),
     ))
+}
+
+/// Require a valid GitHub commit object (or non-empty commit list array) rather than
+/// accepting rate-limit/error JSON.
+pub fn parse_commit_metadata(raw: &str) -> Result<(String, String), String> {
+    let v: serde_json::Value = serde_json::from_str(raw).map_err(|e| e.to_string())?;
+    if let Some(arr) = v.as_array() {
+        let first = arr.first().ok_or("Empty upstream commit list")?;
+        return extract_commit_fields(first);
+    }
+    extract_commit_fields(&v)
+}
+
+pub type CommitsAhead = (u32, Vec<(String, String)>);
+
+/// Compute how many commits `main` is ahead of `installed_sha` from the lightweight
+/// `/commits?sha=main&per_page=N` array without downloading large file diffs.
+/// Returns `Ok(Some((ahead_count, recent_commits)))` when `installed_sha` is found
+/// in the page, or `Ok(None)` when older than the fetched page.
+pub fn parse_commits_list_ahead(
+    raw: &str,
+    installed_sha: &str,
+) -> Result<Option<CommitsAhead>, String> {
+    let v: serde_json::Value = serde_json::from_str(raw).map_err(|e| e.to_string())?;
+    let arr = v
+        .as_array()
+        .ok_or("Expected JSON array from commits list")?;
+    let first = arr.first().ok_or("Empty upstream commit list")?;
+    let _ = extract_commit_fields(first)?;
+
+    let needle = installed_sha.trim();
+    let needle_is_hex =
+        (7..=40).contains(&needle.len()) && needle.bytes().all(|b| b.is_ascii_hexdigit());
+    if !needle_is_hex {
+        return Ok(None);
+    }
+    let needle_lower = needle.to_ascii_lowercase();
+
+    let mut ahead_items = Vec::new();
+    for (idx, item) in arr.iter().enumerate() {
+        let Some(sha) = item["sha"].as_str().filter(|s| is_commit_sha(s)) else {
+            continue;
+        };
+        let sha_lower = sha.to_ascii_lowercase();
+        let matches = if needle_lower.len() == 40 {
+            sha_lower == needle_lower
+        } else {
+            sha_lower.starts_with(&needle_lower)
+        };
+        if matches {
+            return Ok(Some((idx as u32, ahead_items)));
+        }
+        let short: String = sha.chars().take(7).collect();
+        let msg = item["commit"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .lines()
+            .next()
+            .unwrap_or("")
+            .to_string();
+        ahead_items.push((short, msg));
+    }
+
+    Ok(None)
 }
 /// Compare API errors must never become a zero-commits-behind success.
 pub fn parse_comparison_ahead(raw: &str) -> Result<u32, String> {
@@ -805,6 +867,57 @@ mod github_response_tests {
         assert_eq!(
             parse_comparison_ahead(r#"{"status":"ahead","ahead_by":2}"#).unwrap(),
             2
+        );
+    }
+
+    #[test]
+    fn commit_list_endpoint_parses_head_and_computes_ahead_count_locally() {
+        let head = "6a5adaed55a6f74b14a489ec31d355727ac45c22";
+        let mid = "1111111111111111111111111111111111111111";
+        let old = "2222222222222222222222222222222222222222";
+        let arr = serde_json::json!([
+            {"sha": head, "commit": {"message": "release: v2.5.4\n\nbody"}},
+            {"sha": mid, "commit": {"message": "fix: middle commit"}},
+            {"sha": old, "commit": {"message": "release: v2.5.3"}}
+        ])
+        .to_string();
+
+        let (sha, msg) = parse_commit_metadata(&arr).unwrap();
+        assert_eq!(sha, head);
+        assert!(msg.starts_with("release: v2.5.4"));
+
+        assert_eq!(
+            parse_commits_list_ahead(&arr, head).unwrap(),
+            Some((0, vec![]))
+        );
+        assert_eq!(
+            parse_commits_list_ahead(&arr, old).unwrap(),
+            Some((
+                2,
+                vec![
+                    ("6a5adae".to_string(), "release: v2.5.4".to_string()),
+                    ("1111111".to_string(), "fix: middle commit".to_string()),
+                ]
+            ))
+        );
+        // Short 7-char prefix match (case-insensitive)
+        assert_eq!(
+            parse_commits_list_ahead(&arr, "1111111").unwrap(),
+            Some((
+                1,
+                vec![("6a5adae".to_string(), "release: v2.5.4".to_string())]
+            ))
+        );
+        // Installed SHA older than the 30-commit window returns Ok(None) so caller falls back to compare
+        assert_eq!(
+            parse_commits_list_ahead(&arr, "3333333333333333333333333333333333333333").unwrap(),
+            None
+        );
+
+        assert!(parse_commit_metadata("[]").is_err());
+        assert!(parse_commits_list_ahead("[]", head).is_err());
+        assert!(
+            parse_commits_list_ahead(r#"{"message":"API rate limit exceeded"}"#, head).is_err()
         );
     }
 }

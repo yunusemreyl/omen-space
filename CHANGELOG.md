@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ---
 
+## [2.5.4] - 2026-11-26
+
+### Fixed
+- **GitHub Update Check Timeout (`Could not verify the upstream commit`):** Replaced the single-commit `/commits/main` endpoint (which embeds full file diffs — ~923 KB on `v2.5.3` — causing `curl --max-time 15` timeouts in both `omen-gui` and `omen-space-daemon`) with the lightweight `/commits?sha=main&per_page=30` list endpoint (`~3 KB`), added `--compressed` to `curl` fetches, computed local `commits_ahead` / changelog entries via `omen_types::parse_commits_list_ahead` with `?per_page=1` compare fallback, and prevented non-fatal compare errors or unknown local SHAs from hiding a newer semver release.
+
+---
+
 ## [2.5.3] - 2026-11-26
 
 ### Added

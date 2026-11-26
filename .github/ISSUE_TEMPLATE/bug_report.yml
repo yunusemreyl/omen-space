@@ -29,7 +29,7 @@ body:
     id: version
     attributes:
       label: OMEN Space Version
-      placeholder: "e.g. v2.5.3"
+      placeholder: "e.g. v2.5.4"
     validations:
       required: true
 

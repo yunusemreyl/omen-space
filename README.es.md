@@ -8,7 +8,7 @@
 
   <p>
     <a href="https://github.com/yunusemreyl/omen-space/releases/latest">
-      <img src="https://img.shields.io/badge/Versi%C3%B3n-v2.5.3-e11d48?style=flat-square" alt="Versión v2.5.3" />
+      <img src="https://img.shields.io/badge/Versi%C3%B3n-v2.5.4-e11d48?style=flat-square" alt="Versión v2.5.4" />
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/Licencia-GPL--3.0-10b981?style=flat-square" alt="Licencia" />
@@ -87,12 +87,10 @@ curl -sSL https://raw.githubusercontent.com/yunusemreyl/omen-space/main/install.
 
 ---
 
-## Novedades en v2.5.3
+## Novedades en v2.5.4
 
-- **Distribución `TR-Q` y matriz Primax `0xFF13` (`#385`):** Añadida la distribución de teclas turca Q (`TR-Q`) junto a `EN` y `DE` en RGB Studio, mapas físicos de LED `Ralph`/`Cybug` (`0461:4F03`/`4E9A`/`4E9B`/`4F11`/`4F1E`/`4ECB`), color uniforme en `Static`, onda personalizada en `Wave`, sincronización de botones `Off / Key / Zone / All` y respeto de atajos nativos `Fn` en `Hardware Effects`.
-- **Recuperación tras limpieza de ventiladores (`#385`, `#364`):** Refresca `platform_profile` (`WMI 0x1A`) al salir del modo máximo, aplica un ciclo inicial seguro y ajusta la transición `PWM_MODE_MAX -> PWM_MODE_MANUAL` en `driver/hp-wmi.c`.
-- **Código más limpio y modular:** Proxies D-Bus, comparación semver y detección de idioma unificados en `omen-types`; módulos divididos (`i18n/`, `monitoring/`, `updater/`, `fan/protection.rs`), paridad TR/EN/ES verificada por pruebas, `cargo fmt` en CI y limpieza de archivos/código sin uso.
-- **Incluye todas las correcciones de `v2.5.2`:** Corrección de cierre en Ajustes y recuperación del bloqueo máximo EC en `8C77` (`#395`).
+- **Comprobación de actualizaciones sin tiempos de espera:** Se reemplazó el endpoint `/commits/main` (que incluía ~923 KB de diffs en commits grandes) por `/commits?sha=main&per_page=30` con `--compressed` y cálculo local de commits pendientes (`omen_types::parse_commits_list_ahead`), evitando el error `"Could not verify the upstream commit"`.
+- **Incluye todas las mejoras de `v2.5.3`:** Distribución de teclado turca Q (`TR-Q`), matriz Primax `0xFF13` y correcciones RGB (`#385`), recuperación tras limpieza de ventiladores (`#385`, `#364`), unificación en `omen-types` y pruebas de paridad TR/EN/ES.
 
 ---
 

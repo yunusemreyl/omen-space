@@ -75,11 +75,11 @@ impl AutoUpdateService {
             && installed_sha != latest_sha
             && commits_behind > 0;
 
-        let error = if metadata_error.is_some() {
+        let error = if metadata_error.is_some() && !semver_newer {
             metadata_error
         } else if latest_sha == "unknown" {
             Some("Could not verify the upstream commit. Retry the update check.".to_string())
-        } else if installed_sha == "unknown" {
+        } else if installed_sha == "unknown" && !semver_newer {
             Some(
                 "Installed commit is unknown; only version information could be compared."
                     .to_string(),
@@ -87,7 +87,7 @@ impl AutoUpdateService {
         } else {
             None
         };
-        let update_available = error.is_none() && (semver_newer || commit_newer);
+        let update_available = semver_newer || (error.is_none() && commit_newer);
 
         let status_message = if let Some(error) = &error {
             error.clone()
@@ -243,11 +243,12 @@ async fn curl_get(url: &str) -> Option<String> {
             "--proto",
             "=https",
             "--tlsv1.2",
+            "--compressed",
             "-fsSL",
             "--connect-timeout",
             "8",
             "--max-time",
-            "15",
+            "20",
             "-H",
             "User-Agent: OmenSpace-Updater",
             url,
@@ -278,7 +279,7 @@ async fn fetch_github_update_metadata(
         REPO_OWNER_NAME
     );
     let commit_api = format!(
-        "https://api.github.com/repos/{}/commits/main",
+        "https://api.github.com/repos/{}/commits?sha=main&per_page=30",
         REPO_OWNER_NAME
     );
     let raw_cargo_url = format!(
@@ -334,18 +335,11 @@ async fn fetch_github_update_metadata(
     let mut latest_short = "unknown".to_string();
     let mut latest_commit_msg = String::new();
 
-    if let Some(c_json) = commit_res {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&c_json) {
-            if let Some(sha) = v["sha"]
-                .as_str()
-                .filter(|sha| omen_types::is_commit_sha(sha))
-            {
-                latest_sha = sha.to_string();
-                latest_short = sha.chars().take(7).collect();
-            }
-            if let Some(msg) = v["commit"]["message"].as_str() {
-                latest_commit_msg = msg.lines().next().unwrap_or("").to_string();
-            }
+    if let Some(ref c_json) = commit_res {
+        if let Ok((sha, msg_raw)) = omen_types::parse_commit_metadata(c_json) {
+            latest_short = sha.chars().take(7).collect();
+            latest_sha = sha;
+            latest_commit_msg = msg_raw.lines().next().unwrap_or("").to_string();
         }
     }
 
@@ -353,41 +347,57 @@ async fn fetch_github_update_metadata(
     let mut comparison_error = None;
     let mut commit_changelog = String::new();
     if installed_sha != "unknown" && latest_sha != "unknown" && installed_sha != latest_sha {
-        let compare_url = format!(
-            "https://api.github.com/repos/{}/compare/{}...{}",
-            REPO_OWNER_NAME, installed_sha, latest_sha
-        );
-        if let Some(cmp_json) = curl_get(&compare_url).await {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&cmp_json) {
-                match omen_types::parse_comparison_ahead(&cmp_json) {
-                    Ok(count) => commits_behind = count,
-                    Err(error) => comparison_error = Some(error),
+        if let Some(Ok(Some((ahead, items)))) = commit_res
+            .as_deref()
+            .map(|c_json| omen_types::parse_commits_list_ahead(c_json, installed_sha))
+        {
+            commits_behind = ahead;
+            let mut lines = Vec::new();
+            for (c_sha, c_msg) in items.into_iter().take(15) {
+                if !c_msg.is_empty() {
+                    lines.push(format!("• [{}] {}", c_sha, c_msg));
                 }
-                if let Some(commits) = v["commits"].as_array() {
-                    let mut lines = Vec::new();
-                    for c in commits.iter().rev().take(15) {
-                        let c_sha: String =
-                            c["sha"].as_str().unwrap_or("").chars().take(7).collect();
-                        let c_msg = c["commit"]["message"]
-                            .as_str()
-                            .unwrap_or("")
-                            .lines()
-                            .next()
-                            .unwrap_or("");
-                        if !c_msg.is_empty() {
-                            lines.push(format!("• [{}] {}", c_sha, c_msg));
-                        }
-                    }
-                    if !lines.is_empty() {
-                        commit_changelog = lines.join("\n");
-                    }
-                }
-            } else {
-                comparison_error = Some("Invalid comparison response".to_string());
+            }
+            if !lines.is_empty() {
+                commit_changelog = lines.join("\n");
             }
         } else {
-            comparison_error =
-                Some("Could not compare the installed and upstream commits".to_string());
+            let compare_url = format!(
+                "https://api.github.com/repos/{}/compare/{}...{}?per_page=1",
+                REPO_OWNER_NAME, installed_sha, latest_sha
+            );
+            if let Some(cmp_json) = curl_get(&compare_url).await {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&cmp_json) {
+                    match omen_types::parse_comparison_ahead(&cmp_json) {
+                        Ok(count) => commits_behind = count,
+                        Err(error) => comparison_error = Some(error),
+                    }
+                    if let Some(commits) = v["commits"].as_array() {
+                        let mut lines = Vec::new();
+                        for c in commits.iter().rev().take(15) {
+                            let c_sha: String =
+                                c["sha"].as_str().unwrap_or("").chars().take(7).collect();
+                            let c_msg = c["commit"]["message"]
+                                .as_str()
+                                .unwrap_or("")
+                                .lines()
+                                .next()
+                                .unwrap_or("");
+                            if !c_msg.is_empty() {
+                                lines.push(format!("• [{}] {}", c_sha, c_msg));
+                            }
+                        }
+                        if !lines.is_empty() {
+                            commit_changelog = lines.join("\n");
+                        }
+                    }
+                } else {
+                    comparison_error = Some("Invalid comparison response".to_string());
+                }
+            } else {
+                comparison_error =
+                    Some("Could not compare the installed and upstream commits".to_string());
+            }
         }
     }
 
