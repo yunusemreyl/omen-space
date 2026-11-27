@@ -2,6 +2,7 @@ use adw::prelude::*;
 use gtk::prelude::*;
 use libadwaita as adw;
 use omen_types::hotkey::HotkeySpec;
+use omen_types::GpuSampleState;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -448,18 +449,31 @@ impl OverlayWindow {
         self.cpu_val_label
             .set_label(&format!("{}°C · {:.0}W", stats.cpu_temp, stats.cpu_pwr));
 
-        let gpu_t = if stats.gpu_temp > 0 {
+        // The daemon stops polling an idle dGPU so it can sleep; say so
+        // instead of showing placeholder dashes that look like an error.
+        let gpu_idle = matches!(
+            stats.gpu_sample_state,
+            GpuSampleState::Deferred | GpuSampleState::Suspended
+        ) || (stats.gpu_sample_state == GpuSampleState::Unknown
+            && stats.gpu_pwr < 0.0);
+        let gpu_t = if gpu_idle {
+            crate::i18n::t("gpu_idle")
+        } else if stats.gpu_temp > 0 {
             format!("{}°C", stats.gpu_temp)
         } else {
             "--".to_string()
         };
-        let gpu_w = if stats.gpu_pwr >= 0.0 {
-            format!("{:.0}W", stats.gpu_pwr)
+        if gpu_idle {
+            self.gpu_val_label.set_label(&gpu_t);
         } else {
-            "--".to_string()
-        };
-        self.gpu_val_label
-            .set_label(&format!("{} · {}", gpu_t, gpu_w));
+            let gpu_w = if stats.gpu_pwr >= 0.0 {
+                format!("{:.0}W", stats.gpu_pwr)
+            } else {
+                "--".to_string()
+            };
+            self.gpu_val_label
+                .set_label(&format!("{} · {}", gpu_t, gpu_w));
+        }
 
         if stats.fan1_rpm > 0 || stats.fan2_rpm > 0 {
             self.fan_val_label
