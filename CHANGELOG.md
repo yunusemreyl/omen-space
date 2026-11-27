@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **Updates no longer leave the system without a kernel driver:** `setup.sh install|update` now refuse to run while a kernel upgrade is pending a reboot (running kernel's module tree gone), before anything is changed. Previously `do_update` removed every `hp-omen-extra` DKMS version — including the one the package manager's DKMS hook had just built for the new kernel — and then `driver/setup.sh` aborted, so the next boot had no RGB/hp-omen-extra.
+- **Driver install is now build-first:** `driver/setup.sh install` test-builds the module against the running kernel in a temporary directory (`preflight_build`) and only removes the previously installed driver once that succeeds. Old-version cleanup moved here from `do_update`; superseded `/usr/src/hp-omen-extra-*` trees are removed too.
+- **No more root-owned files in the user's checkout:** `setup.sh` hands any root-owned files (from `git pull`, `cargo build`) back to the checkout's owner on exit, so the user's own `git`/`cargo` keep working after a GUI update.
+
+### Added
+- **`setup.sh repair-driver`:** rebuilds and reloads only the kernel driver (same build-first path as `driver/setup.sh install`) and restarts the daemon, without rebuilding the Rust workspace.
+
 ## [2.6.2] - 2026-11-27
 
 ### Added
