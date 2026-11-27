@@ -199,12 +199,34 @@ pub fn read_sysfs_battery_reading() -> Option<BatteryReading> {
     })
 }
 
+/// Marker recording that this machine's firmware rejects the `hold` (0x0300)
+/// charge mode (e.g. OMEN 15-ek0xxx / 878A returns WMI error 0x35).  Lives in
+/// the daemon's StateDirectory so it survives restarts and reboots.
+pub const HOLD_UNSUPPORTED_MARKER: &str = "/var/lib/omen-space-daemon/battery_hold_unsupported";
+
+/// `false` once the firmware has been seen rejecting `hold`.
+pub fn hold_supported() -> bool {
+    !Path::new(HOLD_UNSUPPORTED_MARKER).exists()
+}
+
+/// Remember that `hold` is rejected so future shutdowns skip it silently.
+pub fn mark_hold_unsupported() {
+    if let Err(e) = std::fs::write(HOLD_UNSUPPORTED_MARKER, b"0x2B hold (0x0300) rejected\n") {
+        warn!("BatteryLimiter: could not record hold-unsupported marker: {e}");
+    }
+}
+
 /// Hysteretic firmware charge controller modeled after `kralonur/hp-charge-limit-rs`.
 #[derive(Debug)]
 pub struct HysteresisLimiter {
     pub state: LimiterState,
     last_written_mode: Option<ChargeMode>,
     failing: bool,
+    /// Whether to attempt `hold` on shutdown (false when known unsupported).
+    pub hold_supported: bool,
+    /// Set by `on_shutdown` when the firmware refused `hold` but accepted the
+    /// `auto` fallback, i.e. `hold` is unsupported on this machine.
+    pub hold_rejected: bool,
 }
 
 impl Default for HysteresisLimiter {
@@ -219,6 +241,8 @@ impl HysteresisLimiter {
             state: LimiterState::Starting,
             last_written_mode: None,
             failing: false,
+            hold_supported: true,
+            hold_rejected: false,
         }
     }
 
@@ -372,13 +396,33 @@ impl HysteresisLimiter {
             return Some(ChargeMode::Auto);
         }
 
-        let target = if cfg.off_hold && cap > cfg.start_pct {
-            ChargeMode::Hold
-        } else {
-            ChargeMode::Auto
-        };
-        self.write_mode(writer, target, "shutdown", cap)
-            .then_some(target)
+        let want_hold = cfg.off_hold && cap > cfg.start_pct;
+        if want_hold && self.hold_supported {
+            match writer.set_mode(ChargeMode::Hold) {
+                Ok(()) => {
+                    info!("BatteryLimiter [shutdown]: cap={cap}% -> hold");
+                    self.last_written_mode = Some(ChargeMode::Hold);
+                    return Some(ChargeMode::Hold);
+                }
+                Err(e) => {
+                    // Some firmware (e.g. 878A) refuses `hold` while accepting
+                    // `auto`/`inhibit`.  Never leave the EC in a running-only
+                    // `inhibit` state we cannot reason about across power-off:
+                    // fall back to `auto`, the same as off_hold = false.
+                    if self.write_mode(writer, ChargeMode::Auto, "shutdown_hold_fallback", cap) {
+                        info!(
+                            "BatteryLimiter: firmware rejected 'hold' ({e}); \
+                             treating it as unsupported on this machine"
+                        );
+                        self.hold_rejected = true;
+                        return Some(ChargeMode::Auto);
+                    }
+                    return None;
+                }
+            }
+        }
+        self.write_mode(writer, ChargeMode::Auto, "shutdown", cap)
+            .then_some(ChargeMode::Auto)
     }
 }
 
@@ -389,6 +433,8 @@ mod tests {
     struct FakeWriter {
         calls: Vec<ChargeMode>,
         fail_next: bool,
+        reject_hold: bool,
+        fail_all: bool,
         current: String,
     }
 
@@ -397,6 +443,8 @@ mod tests {
             Self {
                 calls: Vec::new(),
                 fail_next: false,
+                reject_hold: false,
+                fail_all: false,
                 current: "auto".to_string(),
             }
         }
@@ -407,6 +455,12 @@ mod tests {
             if self.fail_next {
                 self.fail_next = false;
                 return Err("simulated WMI error".to_string());
+            }
+            if self.fail_all {
+                return Err("No such file or directory (os error 2)".to_string());
+            }
+            if self.reject_hold && mode == ChargeMode::Hold {
+                return Err("Input/output error (os error 5)".to_string());
             }
             self.calls.push(mode);
             self.current = mode.as_str().to_string();
@@ -639,5 +693,58 @@ mod tests {
 
         c.off_hold = false;
         assert_eq!(lim.on_shutdown(high, &c, &mut fw), Some(ChargeMode::Auto));
+    }
+
+    #[test]
+    fn shutdown_falls_back_to_auto_when_firmware_rejects_hold() {
+        let mut lim = HysteresisLimiter::new();
+        let mut fw = FakeWriter::new();
+        fw.current = "inhibit".to_string();
+        fw.reject_hold = true;
+        let c = cfg(80, 75);
+        let high = Some(BatteryReading {
+            capacity: 95,
+            on_ac: true,
+            is_full: false,
+        });
+
+        assert_eq!(lim.on_shutdown(high, &c, &mut fw), Some(ChargeMode::Auto));
+        assert!(lim.hold_rejected);
+        assert_eq!(fw.read_mode().as_deref(), Some("auto"));
+    }
+
+    #[test]
+    fn shutdown_skips_hold_when_known_unsupported() {
+        let mut lim = HysteresisLimiter::new();
+        lim.hold_supported = false;
+        let mut fw = FakeWriter::new();
+        fw.reject_hold = true;
+        let c = cfg(80, 75);
+        let high = Some(BatteryReading {
+            capacity: 95,
+            on_ac: true,
+            is_full: false,
+        });
+
+        assert_eq!(lim.on_shutdown(high, &c, &mut fw), Some(ChargeMode::Auto));
+        assert!(!lim.hold_rejected);
+        assert_eq!(fw.calls, vec![ChargeMode::Auto]);
+    }
+
+    #[test]
+    fn shutdown_does_not_mark_unsupported_when_every_write_fails() {
+        let mut lim = HysteresisLimiter::new();
+        let mut fw = FakeWriter::new();
+        fw.fail_all = true; // e.g. sysfs node gone: not evidence about `hold`
+        let c = cfg(80, 75);
+        let high = Some(BatteryReading {
+            capacity: 95,
+            on_ac: true,
+            is_full: false,
+        });
+
+        assert_eq!(lim.on_shutdown(high, &c, &mut fw), None);
+        assert!(!lim.hold_rejected);
+        assert!(fw.calls.is_empty());
     }
 }

@@ -164,7 +164,11 @@ pub async fn handle(cmd: &SystemCommand, conn: &Connection) -> Result<()> {
                     let start = limit_json["start"].as_u64().unwrap_or(75);
                     let state = limit_json["limiter_state"].as_str().unwrap_or("disabled");
                     let bypass = limit_json["bypass"].as_bool().unwrap_or(false);
-                    let off_hold = limit_json["off_hold"].as_bool().unwrap_or(true);
+                    let off_hold = if limit_json["off_hold_supported"].as_bool().unwrap_or(true) {
+                        limit_json["off_hold"].as_bool().unwrap_or(true).to_string()
+                    } else {
+                        "unsupported".to_string()
+                    };
                     let fw = limit_json["firmware_mode"].as_str().unwrap_or("");
                     if enabled {
                         println!(

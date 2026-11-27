@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **Battery "Hold Limit While Powered Off" on firmware that rejects `hold`:** some models (verified: OMEN 15-ek0xxx / `878A`) accept WMI `0x2B` `auto`/`inhibit` but reject `hold` (`0x0300`, WMI error `0x35`), so every daemon stop logged `hold failed: Input/output error` and left the EC in the running-only `inhibit` state. On shutdown the limiter now falls back to `auto` when `hold` is rejected but `auto` is accepted, records that `hold` is unsupported (`/var/lib/omen-space-daemon/battery_hold_unsupported`) so later shutdowns skip it silently, and reports `off_hold_supported` in `GetBatteryLimitState`. The GUI greys out the switch with an explanation (TR/EN/ES) and `omen-cli` shows `off_hold=unsupported`.
+
 ## [2.6.2] - 2026-11-27
 
 ### Added

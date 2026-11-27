@@ -265,6 +265,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("battery_limit_start_sub", "Resume charging on WMI 0x2B boards when battery drops to this level"),
     ("battery_limit_off_hold", "Hold Limit While Powered Off"),
     ("battery_limit_off_hold_sub", "Preserve charge block across shutdown/sleep when above resume threshold"),
+    ("battery_limit_off_hold_unsupported", "Not supported by this laptop's firmware — charging resumes normally while powered off"),
     ("battery_limit_bypass", "One-Shot 100% Full Charge Bypass"),
     ("battery_limit_bypass_sub", "Allow one full charge to 100%, then automatically re-enable limiting"),
     ("battery_limit_status_limiting", "Limiting"),
