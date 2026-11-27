@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **Keyboard backlight in desktop power managers (KDE Plasma / GNOME via UPower):** the daemon's existing `uleds` integration (`omen::kbd_backlight`) never activated because nothing loaded the `uleds` kernel module. The daemon now runs `modprobe uleds` when `/dev/uleds` is missing, publishes the real brightness right after registering (a fresh uleds LED reports 0, which desktops could "restore" and switch the keyboard off), and mirrors GUI/CLI/tray brightness changes to the LED so the desktop slider and OSD stay in sync. Turning the backlight off from the desktop now keeps the stored brightness, so turning it back on restores the previous level.
+
 ## [2.6.2] - 2026-11-27
 
 ### Added
