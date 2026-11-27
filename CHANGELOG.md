@@ -15,6 +15,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 - **`setup.sh repair-driver`:** rebuilds and reloads only the kernel driver (same build-first path as `driver/setup.sh install`) and restarts the daemon, without rebuilding the Rust workspace.
+- **Updater "Repair" button:** the Updater's *DKMS Kernel Driver* row shows a **Repair** button when `hp_wmi`/`hp_omen_extra` are not loaded. It runs `setup.sh repair-driver` through `pkexec` — the same privilege path the Updater already uses for `setup.sh update` — and shows the result inline (TR/EN/ES).
 
 ## [2.6.2] - 2026-11-27
 
