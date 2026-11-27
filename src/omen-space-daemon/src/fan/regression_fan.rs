@@ -12,6 +12,7 @@ fn test_state(hwmon: PathBuf) -> FanState {
         hwmon_path: Some(hwmon),
         minimum_manual_pwm: 50,
         zero_pct_manual_pwm: false,
+        prefer_ec_auto_fan: false,
         found_fans: vec![1, 2],
         max_speeds,
         fallback_paths: HashMap::new(),
@@ -362,4 +363,83 @@ async fn disabling_thermal_protection_restores_previous_fan_mode() {
     assert!(!state.thermal_protection_enabled);
     assert!(!state.thermal_protection_active);
     assert_eq!(state.mode, "auto");
+}
+
+#[tokio::test]
+async fn idle_zero_pct_ticks_do_not_rewrite_pwm_enable_when_already_auto() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = std::env::temp_dir().join(format!("omen-fan-nospam-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let enable_path = dir.join("pwm1_enable");
+    std::fs::write(&enable_path, "2").unwrap();
+    std::fs::write(dir.join("pwm1"), "0").unwrap();
+    // Make pwm1_enable read-only: any unnecessary write while already in mode 2 would EACCES/bump mtime,
+    // and we assert mtime + contents stay completely untouched across 5 ticks (#395).
+    let mut perms = std::fs::metadata(&enable_path).unwrap().permissions();
+    perms.set_mode(0o444);
+    std::fs::set_permissions(&enable_path, perms.clone()).unwrap();
+    let before_mtime = std::fs::metadata(&enable_path).unwrap().modified().unwrap();
+
+    let mut state = test_state(dir.clone());
+    for _ in 0..5 {
+        assert!(write_pwm_duty(&mut state, 0).await);
+    }
+
+    let after_mtime = std::fs::metadata(&enable_path).unwrap().modified().unwrap();
+    perms.set_mode(0o644);
+    let _ = std::fs::set_permissions(&enable_path, perms);
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert_eq!(
+        before_mtime, after_mtime,
+        "idle 0% tick must not rewrite pwm1_enable=2 (#395)"
+    );
+}
+
+#[tokio::test]
+async fn sim_8c77_prefer_ec_auto_fan_delegates_auto_to_ec_without_poisoning_max() {
+    let dir = std::env::temp_dir().join(format!("omen-fan-8c77-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("pwm1_enable"), "1").unwrap();
+    std::fs::write(dir.join("pwm1"), "200").unwrap();
+    let mut state = test_state(dir.clone());
+    state.prefer_ec_auto_fan = true;
+
+    // Auto on 8C77 delegates directly to EC (pwm1_enable=2) without holding manual WMI 0x2E.
+    assert!(FanService::set_mode_internal(&mut state, "auto").await);
+    assert_eq!(state.mode, "auto");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("pwm1_enable")).unwrap(),
+        "2"
+    );
+
+    // Entering Max writes pwm1_enable=0 directly (no prior pwm1=255 write).
+    std::fs::write(dir.join("pwm1"), "52").unwrap();
+    assert!(FanService::set_mode_internal(&mut state, "max").await);
+    assert_eq!(
+        std::fs::read_to_string(dir.join("pwm1_enable")).unwrap(),
+        "0"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("pwm1")).unwrap(),
+        "52",
+        "entering max must not poison pwm1=255 before pwm1_enable=0 (#395)"
+    );
+
+    // Exiting Max back to Auto leaves cleanly via step-down and lands on EC auto ("2").
+    assert!(FanService::set_mode_internal(&mut state, "auto").await);
+    assert_eq!(
+        std::fs::read_to_string(dir.join("pwm1_enable")).unwrap(),
+        "2"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("pwm1")).unwrap(),
+        "52",
+        "exiting max must step pwm1 down before handing back to EC auto (#395)"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
 }

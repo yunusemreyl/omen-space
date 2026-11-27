@@ -154,6 +154,7 @@ pub fn compute_anim_color(
 pub fn render_per_key_frame(
     mode: &str,
     step: f64,
+    speed: u32,
     direction: &str,
     primary: (u8, u8, u8),
     secondary: (u8, u8, u8),
@@ -162,6 +163,7 @@ pub fn render_per_key_frame(
 ) -> Vec<String> {
     let (r1, g1, b1) = primary;
     let (r2, g2, b2) = secondary;
+    let clamped_speed = speed.clamp(1, 100) as f64 / 100.0;
     let mut out = Vec::with_capacity(104);
 
     for i in 0..104 {
@@ -170,11 +172,12 @@ pub fn render_per_key_frame(
 
         match mode {
             "reactive" => {
+                let decay_rate = 1.2 + clamped_speed * 4.8;
                 let mut max_intensity = 0.0f64;
                 for &(kx, ky, age) in recent_keys {
                     let dist = ((kx - x).powi(2) + (ky - y).powi(2)).sqrt();
                     if dist < 0.85 {
-                        let intensity = (1.0 - age * 1.5).clamp(0.0, 1.0);
+                        let intensity = (1.0 - age * decay_rate).clamp(0.0, 1.0);
                         max_intensity = max_intensity.max(intensity);
                     }
                 }
@@ -183,12 +186,14 @@ pub fn render_per_key_frame(
                 bf = b1 as f64 * max_intensity;
             }
             "ripple" => {
+                let wave_speed = 8.0 + clamped_speed * 20.0;
+                let fade_rate = 0.55 + clamped_speed * 1.1;
                 for &(kx, ky, age) in recent_keys {
                     let dist = ((kx - x).powi(2) + (ky - y).powi(2)).sqrt();
-                    let radius = age * 12.0;
+                    let radius = age * wave_speed;
                     let thickness = 1.15;
                     if (dist - radius).abs() < thickness {
-                        let intensity = (1.0 - age * 0.8).clamp(0.0, 1.0);
+                        let intensity = (1.0 - age * fade_rate).clamp(0.0, 1.0);
                         rf += r1 as f64 * intensity;
                         gf += g1 as f64 * intensity;
                         bf += b1 as f64 * intensity;
@@ -256,8 +261,26 @@ mod tests {
 
     #[test]
     fn marquee_moves_lit_band_across_keyboard_columns() {
-        let f_t0 = render_per_key_frame("marquee", 0.0, "ltr", (0, 128, 255), (0, 0, 0), 1.0, &[]);
-        let f_t1 = render_per_key_frame("marquee", 2.0, "ltr", (0, 128, 255), (0, 0, 0), 1.0, &[]);
+        let f_t0 = render_per_key_frame(
+            "marquee",
+            0.0,
+            50,
+            "ltr",
+            (0, 128, 255),
+            (0, 0, 0),
+            1.0,
+            &[],
+        );
+        let f_t1 = render_per_key_frame(
+            "marquee",
+            2.0,
+            50,
+            "ltr",
+            (0, 128, 255),
+            (0, 0, 0),
+            1.0,
+            &[],
+        );
         assert_ne!(f_t0, f_t1, "marquee frame must advance over time (#385)");
         // At t=0 (head=0), Esc (slot 0, x=0.5) should be brighter than Enter (slot 65, x=13.87).
         assert_ne!(
@@ -281,6 +304,7 @@ mod tests {
         let frame = render_per_key_frame(
             "reactive",
             0.0,
+            50,
             "ltr",
             (255, 0, 0),
             (0, 0, 0),
@@ -297,6 +321,7 @@ mod tests {
         let early = render_per_key_frame(
             "ripple",
             0.0,
+            50,
             "ltr",
             (0, 255, 128),
             (0, 0, 0),
@@ -306,18 +331,80 @@ mod tests {
         let later = render_per_key_frame(
             "ripple",
             0.0,
+            50,
             "ltr",
             (0, 255, 128),
             (0, 0, 0),
             1.0,
-            &[(s_pos.0, s_pos.1, 0.45)],
+            &[(s_pos.0, s_pos.1, 0.28)],
         );
         assert_ne!(early[55], "000000", "ring center lights up immediately");
         assert_eq!(early[60], "000000", "key J far away not yet reached");
         assert_ne!(
             later[60], "000000",
-            "expanding ring reaches J at t=0.45s (#385)"
+            "expanding ring reaches J at t=0.28s (#385)"
         );
+    }
+
+    #[test]
+    fn reactive_and_ripple_scale_with_speed_slider() {
+        let w_pos = slot_coords(37); // W
+        let slow_reactive = render_per_key_frame(
+            "reactive",
+            0.0,
+            15,
+            "ltr",
+            (255, 0, 0),
+            (0, 0, 0),
+            1.0,
+            &[(w_pos.0, w_pos.1, 0.25)],
+        );
+        let fast_reactive = render_per_key_frame(
+            "reactive",
+            0.0,
+            100,
+            "ltr",
+            (255, 0, 0),
+            (0, 0, 0),
+            1.0,
+            &[(w_pos.0, w_pos.1, 0.25)],
+        );
+        assert_ne!(
+            slow_reactive[37], "000000",
+            "slow reactive key stays lit longer at t=0.25s"
+        );
+        assert_eq!(
+            fast_reactive[37], "000000",
+            "fast reactive key has already decayed at t=0.25s"
+        );
+
+        let s_pos = slot_coords(55); // S (x=3.25)
+        let slow_ripple = render_per_key_frame(
+            "ripple",
+            0.0,
+            15,
+            "ltr",
+            (0, 200, 255),
+            (0, 0, 0),
+            1.0,
+            &[(s_pos.0, s_pos.1, 0.25)],
+        );
+        let fast_ripple = render_per_key_frame(
+            "ripple",
+            0.0,
+            100,
+            "ltr",
+            (0, 200, 255),
+            (0, 0, 0),
+            1.0,
+            &[(s_pos.0, s_pos.1, 0.25)],
+        );
+        // At t=0.25s: speed=15 -> radius=2.75 (hits G slot 58, dist=3.0; misses L slot 62, dist=7.0).
+        // At t=0.25s: speed=100 -> radius=7.0 (hits L slot 62, dist=7.0; passed G slot 58).
+        assert_ne!(slow_ripple[58], "000000");
+        assert_eq!(slow_ripple[62], "000000");
+        assert_eq!(fast_ripple[58], "000000");
+        assert_ne!(fast_ripple[62], "000000");
     }
 
     #[test]

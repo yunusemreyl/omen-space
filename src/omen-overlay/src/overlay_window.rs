@@ -377,15 +377,36 @@ impl OverlayWindow {
         self.window.add_controller(key_controller);
     }
 
+    #[allow(deprecated)]
     pub fn select_power_profile(self: &Rc<Self>, profile: &str) {
         let normalized = daemon_client::normalize_power_profile(profile);
         *self.active_power.borrow_mut() = normalized.to_string();
         self.update_button_states();
 
+        let (tx, rx) = glib::MainContext::channel::<Option<String>>(glib::Priority::default());
+        let this = self.clone();
+        rx.attach(None, move |revert_to| {
+            if let Some(actual) = revert_to {
+                *this.active_power.borrow_mut() =
+                    daemon_client::normalize_power_profile(&actual).to_string();
+                this.update_button_states();
+            }
+            glib::ControlFlow::Break
+        });
+
         let prof = normalized.to_string();
         let rt = daemon_client::get_runtime();
         rt.spawn(async move {
-            let _ = daemon_client::set_power_profile(&prof).await;
+            let failed = !matches!(
+                daemon_client::set_power_profile(&prof).await,
+                Ok(resp) if !resp.starts_with("FAIL")
+            );
+            if failed {
+                let actual = daemon_client::get_power_profile().await;
+                let _ = tx.send(Some(actual));
+            } else {
+                let _ = tx.send(None);
+            }
         });
     }
 

@@ -377,6 +377,7 @@ impl RgbService {
         loop {
             let mut g = inner.lock().await;
             if g.calibrating {
+                last_per_key_colors.clear();
                 if let Some(until) = g.calibration_until {
                     if std::time::Instant::now() < until {
                         drop(g);
@@ -391,17 +392,20 @@ impl RgbService {
             let has_per_key = g.hid_per_key.is_available();
             let has_old_sysfs = g.hw.available && !g.hw.is_new_driver;
 
+            let wakeup_handle = g.evdev_monitor.wakeup_handle();
             let is_interactive = g.config.power
                 && has_per_key
                 && (g.config.mode == "reactive" || g.config.mode == "ripple");
             g.evdev_monitor.set_active(is_interactive);
 
             if !has_per_key && !has_old_sysfs {
+                last_per_key_colors.clear();
                 drop(g);
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                 continue;
             }
             if !g.config.power || g.config.mode == "static" || g.config.mode == "per_key_custom" {
+                last_per_key_colors.clear();
                 last_sysfs_frame.clear();
                 drop(g);
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
@@ -470,6 +474,7 @@ impl RgbService {
             let primary = parse_hex_color(colors.first().map(|s| s.as_str()).unwrap_or("FF0000"));
             let secondary = parse_hex_color(colors.get(1).map(|s| s.as_str()).unwrap_or("0000FF"));
 
+            let mut recent_keys_empty = true;
             if has_per_key {
                 let recent_keys = {
                     let mut keys_guard = g.evdev_monitor.recent_keys.lock().await;
@@ -480,10 +485,12 @@ impl RgbService {
                         .map(|k| (k.x, k.y, now.duration_since(k.timestamp).as_secs_f64()))
                         .collect::<Vec<_>>()
                 };
+                recent_keys_empty = recent_keys.is_empty();
 
                 let out_colors = render_per_key_frame(
                     &mode,
                     step,
+                    speed,
                     &direction,
                     primary,
                     secondary,
@@ -533,8 +540,20 @@ impl RgbService {
                 }
             }
 
+            let sleep_ms = if is_interactive {
+                if recent_keys_empty && last_per_key_colors.iter().all(|c| c == "000000") {
+                    50
+                } else {
+                    20
+                }
+            } else {
+                tick_ms
+            };
             drop(g);
-            tokio::time::sleep(tokio::time::Duration::from_millis(tick_ms)).await;
+            tokio::select! {
+                _ = tokio::time::sleep(tokio::time::Duration::from_millis(sleep_ms)) => {}
+                _ = wakeup_handle.notified(), if is_interactive => {}
+            }
         }
     }
 
@@ -608,6 +627,7 @@ impl RgbService {
         let colors = g.config.colors.clone();
 
         if g.hid_per_key.is_available() {
+            g.hid_per_key.invalidate_primax_cache();
             let primax_yield_hw = g.config.hw_effects && g.hid_per_key.is_primax_mcu();
             let mcu_anim_active = g.config.hw_effects
                 && power
@@ -623,6 +643,7 @@ impl RgbService {
                 g.hid_per_key.send_enter_per_key_mode(0);
                 g.hid_per_key
                     .set_zone_colors(&vec!["000000".to_string(); 8]);
+                g.hid_per_key.invalidate_primax_cache();
             } else {
                 g.hid_per_key.send_enter_per_key_mode(brightness);
                 if mode == "static" {
@@ -1152,6 +1173,8 @@ mod mcu_effect_tests {
             device_pid: pid,
             lamparray: None,
             is_primax_mcu: false,
+            primax_mode_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            primax_last_pages: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -1166,6 +1189,8 @@ mod mcu_effect_tests {
             device_pid: Some(0x4F03),
             lamparray: None,
             is_primax_mcu: true,
+            primax_mode_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            primax_last_pages: Arc::new(std::sync::Mutex::new(None)),
         };
         assert!(primax.mcu_effect_for("breathing", 50, "ltr", &c).is_none());
         assert!(backend(None)
@@ -1246,6 +1271,8 @@ mod regression_rgb {
             device_pid: Some(0x54BF),
             lamparray: None,
             is_primax_mcu: false,
+            primax_mode_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            primax_last_pages: Arc::new(std::sync::Mutex::new(None)),
         };
         assert!(h.write_darfon_colors(&vec![(255, 255, 255); 104]));
         let packet = std::fs::read(&path).unwrap();
@@ -1279,11 +1306,14 @@ mod regression_rgb {
             device_pid: Some(0x4F03),
             lamparray: None,
             is_primax_mcu: true,
+            primax_mode_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            primax_last_pages: Arc::new(std::sync::Mutex::new(None)),
         };
         assert!(h.write_primax_colors(&vec![(255, 128, 64); 104]));
-        let packet = std::fs::read(&path).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
         let _ = std::fs::remove_file(path);
-        assert_eq!(packet.len(), 65);
+        assert_eq!(bytes.len(), 650);
+        let packet = &bytes[bytes.len() - 65..];
         assert_eq!(&packet[..5], &[0x00, 0x07, 0x02, 0x00, 0x00]);
         assert_eq!(packet[5], 64);
         assert_eq!(packet[5 + 46], 64);
@@ -1315,6 +1345,8 @@ mod regression_rgb {
                 device_pid: Some(0x4F03),
                 lamparray: None,
                 is_primax_mcu: true,
+                primax_mode_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                primax_last_pages: Arc::new(std::sync::Mutex::new(None)),
             },
             config: cfg,
             anim_step: 0.0,
@@ -1371,6 +1403,8 @@ mod regression_rgb {
                 device_pid: Some(0x4F03),
                 lamparray: None,
                 is_primax_mcu: true,
+                primax_mode_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                primax_last_pages: Arc::new(std::sync::Mutex::new(None)),
             },
             config: cfg,
             anim_step: 0.0,
@@ -1384,8 +1418,9 @@ mod regression_rgb {
         }));
 
         RgbService::apply_state(inner).await;
-        let b_page2 = std::fs::read(&path).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
         let _ = std::fs::remove_file(&path);
+        let b_page2 = &bytes[bytes.len() - 65..];
         // Primary color is FF0000 -> Blue channel MUST be 0 on Right arrow (LED 166 => byte 5+46=51), NOT 0xAA!
         assert_eq!(
             b_page2[5 + 46],

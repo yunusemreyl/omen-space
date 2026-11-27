@@ -6,6 +6,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ---
 
+## [2.6.0] - 2026-11-27
+
+### Added
+- **Saved Per-Key RGB Colour Presets (`#397`):** Merged and hardened PR #397 by [@Dmitriy-Romanov](https://github.com/Dmitriy-Romanov) (`src/omen-gui/src/keyboardrgb/presets.rs` + `keyboard.rs`), allowing users to save, load, overwrite, and delete named 104-key layouts in `~/.config/omenspace/key_presets.json` with `Custom` dirty-edit tracking, exiting `Off` or active software animations cleanly on load, WeakRef timer lifecycle safety, and unit tests.
+- **Instant Fan Dust Cleaning Stop Override (`#364`, `#385`):** Added `CancelFanCleaning` (`fan_cleaning.rs`, `platform.rs`, `omen-types`, `omen-gui` Diagnostics modal **Stop & Restore Auto** button) so users can interrupt the high-airflow cleaning cycle immediately and restore their prior fan mode.
+- **Native EC `Auto` Delegation Capability (`prefer_ec_auto_fan`, `#395`):** Added `prefer_ec_auto_fan` in `capabilities.rs` / `boards.json` (enabled on OMEN 16-wf1xxx `8C76`, `8C77`, and `8C78`) so `Auto` fan mode delegates cleanly to firmware (`pwm1_enable = 2`) without tripping `WMI 0x2E` thermal-guard latches under sustained load.
+
+### Fixed
+- **Power Profile Sysfs Readback Verification & UMA Error Handling (`#396`):** Refactored `PowerService` (`power.rs`) with `PowerSysfsPaths`/`PowerSysfsIo` (`MockSysfsIo` hardware simulations), excluded non-HP providers (`amd-pmf`) from `/sys/class/platform-profile`, added sysfs readback verification + UMA (`gpu_mux_mode=3`) BIOS diagnostic errors instead of returning `"OK"`, changed `SetPowerProfile` to return `zbus::fdo::Result<String>`, exposed `last_error` in `GetPowerProfile`, and updated `omen-gui`, `omen-tray`, `omen-overlay`, and `omen-cli` to surface failures and revert UI state to hardware reality.
+- **1-Second Mode Oscillation & `8C77` Max-Fan Latch (`#395`):**
+  - Added `apply_lock`, `ppd_suppress_until` echo suppression, and `set_profile_from_ppd` (`power.rs`, `power_automation.rs`) so `net.hadess.PowerProfiles` `ActiveProfile` signals never bounce `Balanced <-> Performance` indefinitely.
+  - Stopped `fan/hwmon.rs` from rewriting `/sys/firmware/acpi/platform_profile` or spamming `pwm1_enable = 2` on 1 Hz idle `0%` ticks, and changed `Max` mode entry in `fan/mod.rs` to write `pwm1_enable = 0` directly without poisoning `pwm1 = 255` first.
+  - Updated `driver/hp-wmi.c`: restricted 90s `PWM_MODE_AUTO` `WMI 0x10` keepalives strictly to `PLATFORM_PROFILE_PERFORMANCE`, and added a safe low step-down `HPWMI_VICTUS_S_FAN_SPEED_SET_QUERY` (`max(min_rpm, 12)`) in `hp_wmi_fan_speed_reset()` when leaving `PWM_MODE_MAX`.
+- **Primax `0461:4F03` Reactive & Ripple RGB Latency (`#385`):** Added immediate `evdev` keypress wakeup (`EvdevMonitor::wakeup` + `tokio::select!` in `rgb/mod.rs`), single-open HID batching + dirty-page packet diffing in `rgb/hid_per_key.rs` (reducing frames from 10 hidraw opens/transfers down to 1–3 changed pages), and `speed`-scaled fade/wavefront timing in `rgb/effects.rs`.
+- **Single-Zone `omen-rgb-keyboard` Clamping (`#369`):** Fixed `max_zones_for_caps` in `rgb/hardware.rs` so boards with `rgb_zone_count = 1` (e.g. `8DCF`) clamp to 1 zone even when using the canonical `omen-rgb-keyboard` sysfs driver.
+
+---
+
 ## [2.5.4] - 2026-11-26
 
 ### Fixed

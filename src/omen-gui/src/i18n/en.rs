@@ -426,6 +426,8 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("dbus_err_ctx_bat_limit", "Failed to set battery charge limit"),
     ("dbus_err_ctx_bat_bypass", "Failed to set battery full-charge bypass"),
     ("lightbar_sync_btn", "Paint All Segments"),
+    ("perf_profile_apply_failed", "Failed to switch power profile"),
+    ("fan_clean_stop_btn", "Stop & Restore Auto"),
 ];
 
 pub(super) fn translate(key: &str) -> Option<&'static str> {

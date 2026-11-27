@@ -47,7 +47,7 @@ impl PowerAutomationService {
                                         if let Ok(profile_str) = <&str>::try_from(val) {
                                             info!("PPD Profile changed to: {}", profile_str);
                                             let _ =
-                                                power_ppd.set_profile_internal(profile_str).await;
+                                                power_ppd.set_profile_from_ppd(profile_str).await;
                                         }
                                     }
                                 }

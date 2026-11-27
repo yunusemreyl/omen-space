@@ -8,7 +8,7 @@
 
   <p>
     <a href="https://github.com/yunusemreyl/omen-space/releases/latest">
-      <img src="https://img.shields.io/badge/Release-v2.5.4-e11d48?style=flat-square" alt="Release v2.5.4" />
+      <img src="https://img.shields.io/badge/Release-v2.6.0-e11d48?style=flat-square" alt="Release v2.6.0" />
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/License-GPL--3.0-10b981?style=flat-square" alt="License" />
@@ -37,7 +37,7 @@
 | **System Monitor** | Live **Power / Temp / Load** 60-second area charts for CPU & GPU, live system power & active mode summary strip, per-drive storage utilization (`NVMe`/`SSD`/`HDD`), detailed **Battery & Power** health telemetry, and firmware metadata (`OS`, `BIOS`, `EC`, `NVIDIA`). |
 | **Power & Battery** | HP WMI `0x2B` / native battery charge limiter with hysteresis (`stop`/`start` thresholds, shutdown `hold` protection, one-shot 100% bypass), real-time Intel RAPL `PL1`/`PL2` power limits, `TCC Offset`, MSR undervolting (`UV_LOCK` detection), GPU Dynamic Boost (`cTGP`/`PPAB`), and AMD Ryzen SMU tuning. |
 | **Graphics Switcher (MUX & PRIME)** | Hardware-gated **Hybrid**, **Discrete (dGPU)**, **Advanced Optimus**, and **Integrated** switching backed by BIOS `/sys/devices/platform/hp-wmi/gpu_mux_supported_modes`, live display routing, passive `D3cold` state, and one-click Steam/app **PRIME Offload** launch copy. |
-| **RGB Studio** | 4-Zone OMEN, Single-Zone Victus, chassis Lightbar, Desktop RGB, and HID Per-Key RGB (Darfon `0d62:54bf` / `0d62:30bf` + Primax `0xFF13` McuSDK2) with daemon-hydrated preview, physical lamp calibration, EN/DE layout toggle, and low-CPU sysfs animations. |
+| **RGB Studio** | 4-Zone OMEN, Single-Zone Victus, chassis Lightbar, Desktop RGB, and HID Per-Key RGB (Darfon `0d62:54bf` / `0d62:30bf` + Primax `0xFF13` McuSDK2) with daemon-hydrated preview, named per-key colour presets, physical lamp calibration, EN/DE/TR-Q layout selector, and low-latency animations. |
 | **Quick Control HUD (`Shift+F2`, configurable)** | Native Libadwaita floating overlay with keyboard shortcuts (`1–3`, `Q/W/E`), cross-device evdev hotkey support, and a live telemetry bar synchronized with the system tray and main GUI. |
 | **Unified Settings Hub** | Clean **General \| Updates \| Diagnostics** segmented hub with one-click GitHub **Full System Dump**, OTA + `fwupd` (LVFS) update checks, conflict detection, and per-app profiles. |
 
@@ -131,10 +131,13 @@ sudo ./setup.sh uninstall   # Remove daemon, UI, and DKMS modules cleanly
 
 ---
 
-## What's New in v2.5.4
+## What's New in v2.6.0
 
-- **Fast, Timeout-Free GitHub Update Check:** Switched GUI & daemon update checks from `/commits/main` (which embedded ~923 KB of patch diffs) to the lightweight `/commits?sha=main&per_page=30` endpoint with `--compressed` and local ahead-count matching (`omen_types::parse_commits_list_ahead`), cutting payload size by >99% and preventing `"Could not verify the upstream commit"` timeouts.
-- **Includes all `v2.5.3` improvements:** Turkish Q (`TR-Q`) keyboard keycap layout, Primax `0xFF13` matrix & `#385` RGB fixes, Fan Dust Cleaning recovery (`#385`, `#364`), `omen-types` unification, and TR/EN/ES translation parity tests.
+- **Saved Per-Key RGB Colour Presets (`#397`):** Save, load, overwrite, and delete named custom 104-key layouts (`~/.config/omenspace/key_presets.json`) directly in RGB Studio with live edit tracking, animation stop on preset load, and full TR/EN/ES localization (contributed by [@Dmitriy-Romanov](https://github.com/Dmitriy-Romanov)).
+- **Ultra-Low-Latency Primax Reactive & Ripple RGB (`#385`):** Added instant `evdev` keypress wakeup to the daemon animation loop, single-open HID batching with dirty-page diffing (cutting USB bus traffic from 10 reports/frame down to 1–3 changed pages on `0461:4F03`), and full **Effect Speed** slider scaling for `Reactive` and `Ripple`.
+- **Verified Power Profile Switching & UMA Diagnostics (`#396`):** Excluded `amd-pmf` from OMEN profile detection, added sysfs readback verification on `platform_profile` / `thermal_profile`, surfaced loud D-Bus errors with UMA (`gpu_mux_mode=3`) firmware guidance, and reverted GUI / tray / overlay active buttons automatically when hardware rejects a switch.
+- **OMEN 16-wf1xxx (`8C76`/`8C77`/`8C78`) Thermal Stability & Anti-Oscillation (`#395`):** Eliminated `power-profiles-daemon` feedback oscillation and 1 Hz idle `pwm1_enable` / `platform_profile` rewrites; delegated `Auto` fan mode on `8C77`-family boards to native EC firmware (`prefer_ec_auto_fan`) + `hp-wmi` `PWM_MODE_AUTO` / `PWM_MODE_MAX` fixes so EC `0x06` never latches fans at 6000 RPM.
+- **Instant Fan Dust Cleaning Stop Override (`#364`, `#385`) & Single-Zone Clamp (`#369`):** Added a **Stop & Restore Auto** cancel button (`CancelFanCleaning`) inside the Diagnostics cleaning modal and enforced `rgb_zone_count = 1` clamping in `omen-rgb-keyboard` hardware detection.
 
 ---
 

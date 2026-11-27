@@ -927,6 +927,11 @@ impl PlatformService {
         crate::fan_cleaning::FanCleaningService::run_cleaning_routine().await
     }
 
+    /// CancelFanCleaning — Cancels an active fan dust cleaning sequence and restores prior mode.
+    async fn cancel_fan_cleaning(&self) -> String {
+        crate::fan_cleaning::FanCleaningService::cancel_cleaning()
+    }
+
     /// CheckConflicts — Checks for conflicting thermal background daemons.
     async fn check_conflicts(&self) -> String {
         tokio::task::spawn_blocking(|| {

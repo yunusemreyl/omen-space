@@ -20,6 +20,11 @@ pub struct ModelCapabilities {
     #[serde(default = "default_minimum_manual_pwm")]
     pub minimum_manual_pwm: u32,
 
+    /// Delegate Auto fan mode to the firmware's native EC curve instead of holding
+    /// manual WMI `pwm1_enable=1` constantly, preventing EC thermal-guard max-fan latches (#395).
+    #[serde(default)]
+    pub prefer_ec_auto_fan: bool,
+
     // Performance Modes
     pub supports_performance_modes: bool,
     pub performance_modes: Vec<String>,
@@ -75,6 +80,7 @@ impl Default for ModelCapabilities {
             max_fan_speed_percent: 100,
             min_fan_speed_percent: 0,
             minimum_manual_pwm: default_minimum_manual_pwm(),
+            prefer_ec_auto_fan: false,
 
             supports_performance_modes: true,
             performance_modes: vec![

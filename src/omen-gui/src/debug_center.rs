@@ -667,19 +667,38 @@ pub fn build_embedded(window: &adw::ApplicationWindow) -> gtk::Box {
             .body(i18n::t("fan_cleaning_msg"))
             .transient_for(&win_clone_clean)
             .build();
-        let spinner = gtk::Spinner::builder()
-            .spinning(true)
+        let extra_box = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(12)
             .halign(gtk::Align::Center)
             .margin_top(12)
             .margin_bottom(12)
             .build();
-        dialog.set_extra_child(Some(&spinner));
+        let spinner = gtk::Spinner::builder()
+            .spinning(true)
+            .halign(gtk::Align::Center)
+            .build();
+        let stop_btn = gtk::Button::builder()
+            .label(i18n::t("fan_clean_stop_btn"))
+            .css_classes(["destructive-action", "pill"])
+            .halign(gtk::Align::Center)
+            .build();
+        let stop_btn_c = stop_btn.clone();
+        stop_btn.connect_clicked(move |_| {
+            stop_btn_c.set_sensitive(false);
+            daemon_client::cancel_fan_cleaning_sync();
+            daemon_client::set_fan_mode_sync("auto".to_string());
+        });
+        extra_box.append(&spinner);
+        extra_box.append(&stop_btn);
+        dialog.set_extra_child(Some(&extra_box));
         dialog.present();
 
         let dialog_clone = dialog.clone();
         glib::spawn_future_local(async move {
             let res = daemon_client::run_fan_cleaning_async().await;
             spinner.set_spinning(false);
+            stop_btn.set_visible(false);
             dialog_clone.set_heading(Some(i18n::t("debug_complete")));
             dialog_clone.set_body(&res.unwrap_or_else(|e| format!("Error: {}", e)));
             dialog_clone.add_response("ok", i18n::t("btn_close"));

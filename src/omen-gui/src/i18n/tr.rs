@@ -426,6 +426,8 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("dbus_err_ctx_tcc", "TCC offset ayarlanamıyor"),
     ("dbus_err_ctx_bat_limit", "Pil şarj sınırı ayarlanamıyor"),
     ("dbus_err_ctx_bat_bypass", "Pil tam şarj modu ayarlanamıyor"),
+    ("perf_profile_apply_failed", "Güç profili değiştirilemedi"),
+    ("fan_clean_stop_btn", "Durdur ve Otomatiğe Dön"),
 ];
 
 pub(super) fn translate(key: &str) -> Option<&'static str> {

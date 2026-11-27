@@ -560,8 +560,11 @@ async fn set_power_profile(profile: &str) {
     if let Ok(conn) = get_conn().await {
         if let Ok(proxy) = PowerProxy::new(&conn).await {
             match proxy.set_power_profile(profile).await {
-                Ok(resp) => info!("Güç profili ayarlandı ({}) -> {}", profile, resp),
-                Err(e) => error!("Güç profili değiştirilemedi: {}", e),
+                Ok(resp) if !resp.starts_with("FAIL") => {
+                    info!("Güç profili ayarlandı ({}) -> {}", profile, resp);
+                }
+                Ok(resp) => error!("Güç profili değiştirilemedi ({}): {}", profile, resp),
+                Err(e) => error!("Güç profili değiştirilemedi ({}): {}", profile, e),
             }
         }
     }

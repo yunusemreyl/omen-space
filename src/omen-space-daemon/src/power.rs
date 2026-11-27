@@ -1,4 +1,4 @@
-use log::{info, warn};
+use log::{debug, info, warn};
 /// Power management service - matches Python power_service.py feature-for-feature.
 ///
 /// D-Bus interface: com.yyl.hpmanager.power  (backward compat) +
@@ -15,12 +15,123 @@ use log::{info, warn};
 ///   Ping()                      -> resp: s
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use zbus::interface;
 
-// ── Sysfs helpers ──────────────────────────────────────────────────────────────
+// ── Sysfs backend & helpers ────────────────────────────────────────────────────
+
+#[derive(Clone, Debug)]
+pub struct PowerSysfsPaths {
+    pub acpi_platform_profile: PathBuf,
+    pub hp_wmi_platform_profile: PathBuf,
+    pub hp_wmi_platform_profile_hyphen: PathBuf,
+    pub class_platform_profile_dir: PathBuf,
+    pub thermal_profile_paths: Vec<PathBuf>,
+    pub gpu_mux_mode: PathBuf,
+}
+
+impl Default for PowerSysfsPaths {
+    fn default() -> Self {
+        Self::system()
+    }
+}
+
+impl PowerSysfsPaths {
+    pub fn system() -> Self {
+        Self {
+            acpi_platform_profile: PathBuf::from("/sys/firmware/acpi/platform_profile"),
+            hp_wmi_platform_profile: PathBuf::from("/sys/devices/platform/hp-wmi/platform_profile"),
+            hp_wmi_platform_profile_hyphen: PathBuf::from(
+                "/sys/devices/platform/hp-wmi/platform-profile",
+            ),
+            class_platform_profile_dir: PathBuf::from("/sys/class/platform-profile"),
+            thermal_profile_paths: vec![
+                PathBuf::from("/sys/devices/platform/hp-wmi/thermal_profile"),
+                PathBuf::from("/sys/devices/platform/hp-wmi/thermal-profile"),
+                PathBuf::from("/sys/devices/platform/hp-omen/thermal_profile"),
+                PathBuf::from("/sys/devices/platform/hp-omen/thermal-profile"),
+            ],
+            gpu_mux_mode: PathBuf::from("/sys/devices/platform/hp-wmi/gpu_mux_mode"),
+        }
+    }
+
+    pub fn platform_profile_candidates(&self, io: &dyn PowerSysfsIo) -> Vec<PathBuf> {
+        let mut out = vec![
+            self.acpi_platform_profile.clone(),
+            self.hp_wmi_platform_profile.clone(),
+            self.hp_wmi_platform_profile_hyphen.clone(),
+        ];
+        if let Some(hp_class) = find_hp_class_platform_profile(&self.class_platform_profile_dir, io)
+        {
+            if !out.contains(&hp_class) {
+                out.push(hp_class);
+            }
+        }
+        out
+    }
+
+    pub fn any_hw_node_exists(&self, io: &dyn PowerSysfsIo) -> bool {
+        self.platform_profile_candidates(io)
+            .iter()
+            .any(|p| io.exists(p))
+            || self.thermal_profile_paths.iter().any(|p| io.exists(p))
+    }
+}
+
+/// Explicitly ignore non-HP platform_profile providers such as `amd-pmf` whose
+/// sysfs writes may succeed as no-ops on HP OMEN laptops in UMA mode (#396).
+fn find_hp_class_platform_profile(dir: &Path, io: &dyn PowerSysfsIo) -> Option<PathBuf> {
+    let entries = io.list_class_profiles(dir);
+    for entry in entries {
+        if let Ok(name) = io.read_trimmed(&entry.join("name")) {
+            let trimmed = name.trim();
+            if trimmed.eq_ignore_ascii_case("hp-wmi") || trimmed.eq_ignore_ascii_case("hp-omen") {
+                let profile_path = entry.join("profile");
+                if io.exists(&profile_path) {
+                    return Some(profile_path);
+                }
+            }
+        }
+    }
+    None
+}
+
+pub trait PowerSysfsIo: Send + Sync {
+    fn exists(&self, path: &Path) -> bool;
+    fn read_trimmed(&self, path: &Path) -> std::io::Result<String>;
+    fn write_value(&self, path: &Path, value: &str) -> std::io::Result<()>;
+    fn list_class_profiles(&self, dir: &Path) -> Vec<PathBuf>;
+}
+
+#[derive(Clone, Default)]
+pub struct RealSysfsIo;
+
+impl PowerSysfsIo for RealSysfsIo {
+    fn exists(&self, path: &Path) -> bool {
+        path.exists()
+    }
+
+    fn read_trimmed(&self, path: &Path) -> std::io::Result<String> {
+        Ok(std::fs::read_to_string(path)?.trim().to_string())
+    }
+
+    fn write_value(&self, path: &Path, value: &str) -> std::io::Result<()> {
+        std::fs::write(path, value.as_bytes())
+    }
+
+    fn list_class_profiles(&self, dir: &Path) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        if let Ok(rd) = std::fs::read_dir(dir) {
+            for e in rd.flatten() {
+                out.push(e.path());
+            }
+        }
+        out.sort();
+        out
+    }
+}
 
 fn sysfs_exists(path: &str) -> bool {
     Path::new(path).exists()
@@ -42,23 +153,24 @@ async fn sysfs_read_async(path: &str) -> Option<String> {
 /// If ACPI is stuck (AE_AML_LOOP_TIMEOUT / AE_AML_BUFFER_LIMIT storm), the
 /// read either hangs or returns an I/O error — in that case we must NOT send
 /// further WMI commands or we make the freeze worse.
-async fn acpi_is_healthy() -> bool {
-    let paths = [
-        "/sys/firmware/acpi/platform_profile",
-        "/sys/devices/platform/hp-wmi/platform_profile",
-        "/sys/devices/platform/hp-wmi/platform-profile",
+async fn acpi_is_healthy_at(paths: &PowerSysfsPaths, io: Arc<dyn PowerSysfsIo>) -> bool {
+    let check_paths = [
+        paths.acpi_platform_profile.clone(),
+        paths.hp_wmi_platform_profile.clone(),
+        paths.hp_wmi_platform_profile_hyphen.clone(),
     ];
-    for p in paths {
-        if !Path::new(p).exists() {
+    for p in check_paths {
+        if !io.exists(&p) {
             continue;
         }
+        let io_c = io.clone();
         // Wrap the read in a short timeout so a frozen ACPI doesn't block us.
         let result = tokio::time::timeout(
             tokio::time::Duration::from_millis(500),
-            tokio::fs::read_to_string(p),
+            tokio::task::spawn_blocking(move || io_c.read_trimmed(&p)),
         )
         .await;
-        return matches!(result, Ok(Ok(_)));
+        return matches!(result, Ok(Ok(Ok(_))));
     }
     // No platform_profile node — not an ACPI-driven board, assume healthy.
     true
@@ -98,20 +210,20 @@ impl Default for PowerConfig {
 }
 
 impl PowerConfig {
-    fn load() -> Self {
-        if let Ok(data) = std::fs::read_to_string(CONFIG_PATH) {
+    fn load_from(path: &Path) -> Self {
+        if let Ok(data) = std::fs::read_to_string(path) {
             serde_json::from_str(&data).unwrap_or_default()
         } else {
             Self::default()
         }
     }
 
-    fn save(&self) {
-        if let Some(dir) = Path::new(CONFIG_PATH).parent() {
+    fn save_to(&self, path: &Path) {
+        if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
         if let Ok(json) = serde_json::to_string_pretty(self) {
-            let _ = std::fs::write(CONFIG_PATH, json);
+            let _ = std::fs::write(path, json);
         }
     }
 }
@@ -121,12 +233,18 @@ impl PowerConfig {
 #[derive(Clone)]
 pub struct PowerService {
     config: Arc<Mutex<PowerConfig>>,
+    config_path: PathBuf,
+    sysfs_paths: PowerSysfsPaths,
+    sysfs_io: Arc<dyn PowerSysfsIo>,
     rapl_baseline: Option<(crate::rapl_baseline::Baseline, bool)>,
+    last_error: Arc<Mutex<Option<String>>>,
+    apply_lock: Arc<Mutex<()>>,
+    ppd_suppress_until: Arc<Mutex<Option<std::time::Instant>>>,
 }
 
 impl PowerService {
     pub async fn check_acpi_healthy() -> bool {
-        acpi_is_healthy().await
+        acpi_is_healthy_at(&PowerSysfsPaths::system(), Arc::new(RealSysfsIo)).await
     }
 
     pub async fn is_app_profiles_enabled(&self) -> bool {
@@ -137,23 +255,75 @@ impl PowerService {
         self.config.lock().await.power_profile.clone()
     }
 
-    pub async fn set_profile_internal(&self, profile: &str) -> bool {
+    /// Arm echo suppression so our own `sync_ppd` write doesn't feed back
+    /// through the PPD PropertiesChanged listener (#395).
+    async fn arm_ppd_suppression(&self) {
+        let mut guard = self.ppd_suppress_until.lock().await;
+        *guard = Some(std::time::Instant::now() + std::time::Duration::from_millis(1800));
+    }
+
+    async fn is_ppd_echo_suppressed(&self) -> bool {
+        let guard = self.ppd_suppress_until.lock().await;
+        guard.is_some_and(|until| std::time::Instant::now() < until)
+    }
+
+    pub async fn set_profile_result(&self, profile: &str, sync_to_ppd: bool) -> Result<(), String> {
+        let _guard = self.apply_lock.lock().await;
         let normalized = Self::normalize_profile(profile);
-        let ok = Self::sync_omen_profile(&normalized).await;
-        if ok {
-            {
-                let mut cfg = self.config.lock().await;
-                cfg.power_profile = normalized.clone();
-                cfg.save();
+
+        match self.sync_omen_profile_with(&normalized, sync_to_ppd).await {
+            Ok(()) => {
+                *self.last_error.lock().await = None;
+                {
+                    let mut cfg = self.config.lock().await;
+                    cfg.power_profile = normalized.clone();
+                    cfg.save_to(&self.config_path);
+                }
+                if self.sysfs_paths.acpi_platform_profile
+                    == Path::new("/sys/firmware/acpi/platform_profile")
+                {
+                    let p = normalized.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                        Self::sync_gpu_power(&p).await;
+                    });
+                }
+                info!("Power profile set to '{}'", normalized);
+                Ok(())
             }
-            let p = normalized.clone();
-            tokio::spawn(async move {
-                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                Self::sync_gpu_power(&p).await;
-            });
-            info!("Power profile set to '{}'", normalized);
+            Err(err_msg) => {
+                let real_hw = self.detect_current_profile_with().await;
+                {
+                    let mut cfg = self.config.lock().await;
+                    cfg.power_profile = real_hw;
+                }
+                *self.last_error.lock().await = Some(err_msg.clone());
+                Err(err_msg)
+            }
         }
-        ok
+    }
+
+    pub async fn set_profile_internal(&self, profile: &str) -> bool {
+        self.set_profile_result(profile, true).await.is_ok()
+    }
+
+    /// Handle external `net.hadess.PowerProfiles` `ActiveProfile` updates without
+    /// echoing back to `powerprofilesctl` and while suppressing self-triggered signals (#395).
+    pub async fn set_profile_from_ppd(&self, profile: &str) -> bool {
+        if self.is_ppd_echo_suppressed().await {
+            debug!(
+                "[PPD sync] Ignoring echo ActiveProfile '{}' during suppression window",
+                profile
+            );
+            return true;
+        }
+        let target = Self::normalize_profile(profile);
+        let current_hw = self.detect_current_profile_with().await;
+        let current_cfg = self.config.lock().await.power_profile.clone();
+        if current_hw == target && current_cfg == target {
+            return true;
+        }
+        self.set_profile_result(profile, false).await.is_ok()
     }
 
     async fn read_current_rapl_limits() -> (Option<u32>, Option<u32>) {
@@ -189,25 +359,53 @@ impl PowerService {
     }
 
     pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let mut config = PowerConfig::load();
-        // Detect real hardware profile on start
-        config.power_profile = Self::detect_current_profile().await;
+        Self::new_with_paths(
+            PathBuf::from(CONFIG_PATH),
+            PowerSysfsPaths::system(),
+            Arc::new(RealSysfsIo),
+            true,
+        )
+        .await
+    }
 
-        // The first observed state may already include earlier userspace tuning.
-        let rapl_baseline = Self::load_or_capture_boot_rapl_baseline().await;
-        if !config.pl_enabled {
-            if let Some((b, _)) = &rapl_baseline {
-                config.pl1_w = b.pl1_w;
-                config.pl2_w = b.pl2_w;
+    pub async fn new_with_paths(
+        config_path: PathBuf,
+        sysfs_paths: PowerSysfsPaths,
+        sysfs_io: Arc<dyn PowerSysfsIo>,
+        load_rapl: bool,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut config = PowerConfig::load_from(&config_path);
+        // Detect real hardware profile on start
+        config.power_profile =
+            Self::detect_current_profile_for(&sysfs_paths, sysfs_io.as_ref()).await;
+
+        let rapl_baseline = if load_rapl {
+            let b = Self::load_or_capture_boot_rapl_baseline().await;
+            if !config.pl_enabled {
+                if let Some((ref base, _)) = b {
+                    config.pl1_w = base.pl1_w;
+                    config.pl2_w = base.pl2_w;
+                }
             }
-        }
+            b
+        } else {
+            None
+        };
 
         let svc = Self {
             config: Arc::new(Mutex::new(config)),
+            config_path,
+            sysfs_paths,
+            sysfs_io,
             rapl_baseline,
+            last_error: Arc::new(Mutex::new(None)),
+            apply_lock: Arc::new(Mutex::new(())),
+            ppd_suppress_until: Arc::new(Mutex::new(None)),
         };
 
-        svc.apply_startup_tuning().await;
+        if load_rapl {
+            svc.apply_startup_tuning().await;
+        }
         Ok(svc)
     }
 
@@ -229,17 +427,8 @@ impl PowerService {
     // ── PPD two-way sync (fix #283) ────────────────────────────────────────────
     /// Notify power-profiles-daemon of the new profile so desktop environments
     /// (GNOME, KDE, Noctalia, etc.) that subscribe to PPD stay in sync.
-    ///
-    /// We try two paths in order:
-    ///   1. `powerprofilesctl set <profile>` — standard CLI
-    ///   2. D-Bus call to `net.hadess.PowerProfiles` — avoids PATH issues on
-    ///      NixOS sandboxed systemd units where `powerprofilesctl` may not be
-    ///      in PATH even if PPD is running.
-    ///
-    /// The whole call is wrapped in a 3 s timeout; if PPD is not installed or
-    /// not responding the function returns silently so the rest of the profile
-    /// switch is not blocked.
-    async fn sync_ppd(profile: &str) {
+    /// Returns `true` when either `powerprofilesctl` or the PPD D-Bus call succeeded.
+    async fn sync_ppd(profile: &str) -> bool {
         // Map omen-space profile names to the PPD profile IDs.
         let ppd_profile = match profile {
             "performance" => "performance",
@@ -258,7 +447,7 @@ impl PowerService {
         match cli_result {
             Ok(Ok(out)) if out.status.success() => {
                 info!("[PPD sync] powerprofilesctl set '{}' OK", ppd_profile);
-                return;
+                return true;
             }
             Ok(Ok(out)) => {
                 let stderr = String::from_utf8_lossy(&out.stderr);
@@ -284,8 +473,6 @@ impl PowerService {
         }
 
         // 2. Fallback: D-Bus call to net.hadess.PowerProfiles.
-        // This works even when powerprofilesctl is not in PATH (NixOS, etc.)
-        // as long as the PPD daemon is running.
         if let Ok(conn) = zbus::Connection::system().await {
             let result = tokio::time::timeout(
                 tokio::time::Duration::from_secs(3),
@@ -303,7 +490,10 @@ impl PowerService {
             )
             .await;
             match result {
-                Ok(Ok(_)) => info!("[PPD sync] D-Bus ActiveProfile set to '{}' OK", ppd_profile),
+                Ok(Ok(_)) => {
+                    info!("[PPD sync] D-Bus ActiveProfile set to '{}' OK", ppd_profile);
+                    return true;
+                }
                 Ok(Err(e)) => {
                     let msg = e.to_string();
                     if msg.contains("NameHasNoOwner")
@@ -318,30 +508,24 @@ impl PowerService {
                 Err(_) => warn!("[PPD sync] D-Bus call to net.hadess.PowerProfiles timed out"),
             }
         }
+        false
     }
 
-    async fn detect_current_profile() -> String {
-        // 1. Prefer direct kernel hardware state (platform_profile / thermal_profile)
-        // so placeholder power-profiles-daemon states never mask the real OMEN mode (#293, #297).
-        let platform_paths = [
-            "/sys/firmware/acpi/platform_profile",
-            "/sys/class/platform-profile/platform-profile-0/profile",
-            "/sys/devices/platform/hp-wmi/platform_profile",
-            "/sys/devices/platform/hp-wmi/platform-profile",
-        ];
-        for p in platform_paths {
-            if let Some(raw) = sysfs_read_async(p).await {
+    async fn detect_current_profile_with(&self) -> String {
+        Self::detect_current_profile_for(&self.sysfs_paths, self.sysfs_io.as_ref()).await
+    }
+
+    async fn detect_current_profile_for(paths: &PowerSysfsPaths, io: &dyn PowerSysfsIo) -> String {
+        // 1. Prefer direct OMEN/ACPI hardware state (never amd-pmf!)
+        // so placeholder power-profiles-daemon states never mask the real OMEN mode (#293, #297, #396).
+        for p in paths.platform_profile_candidates(io) {
+            if let Ok(raw) = io.read_trimmed(&p) {
                 return Self::normalize_profile(&raw);
             }
         }
         // Fallback: thermal_profile (both naming styles)
-        for p in [
-            "/sys/devices/platform/hp-wmi/thermal_profile",
-            "/sys/devices/platform/hp-wmi/thermal-profile",
-            "/sys/devices/platform/hp-omen/thermal_profile",
-            "/sys/devices/platform/hp-omen/thermal-profile",
-        ] {
-            if let Some(raw) = sysfs_read_async(p).await {
+        for p in &paths.thermal_profile_paths {
+            if let Ok(raw) = io.read_trimmed(p) {
                 if raw.trim() == "1" {
                     return "performance".to_string();
                 }
@@ -349,8 +533,9 @@ impl PowerService {
             }
         }
 
-        if !Self::has_custom_power_manager() {
-            // 2. Try system76-power if installed
+        if paths.acpi_platform_profile == Path::new("/sys/firmware/acpi/platform_profile")
+            && !Self::has_custom_power_manager()
+        {
             if let Ok(out) = tokio::process::Command::new("system76-power")
                 .arg("profile")
                 .output()
@@ -370,7 +555,6 @@ impl PowerService {
                 }
             }
 
-            // 3. Try powerprofilesctl if installed
             if let Ok(out) = tokio::process::Command::new("powerprofilesctl")
                 .arg("get")
                 .output()
@@ -386,21 +570,17 @@ impl PowerService {
         "balanced".to_string()
     }
 
-    async fn get_available_profiles() -> Vec<String> {
-        // All known platform_profile paths — underscore and hyphen variants
-        let paths = [
-            "/sys/firmware/acpi/platform_profile",
-            "/sys/devices/platform/hp-wmi/platform_profile",
-            "/sys/devices/platform/hp-wmi/platform-profile",
-        ];
-        for p in paths {
-            if !sysfs_exists(p) {
+    async fn get_available_profiles_for(
+        paths: &PowerSysfsPaths,
+        io: &dyn PowerSysfsIo,
+    ) -> Vec<String> {
+        for p in paths.platform_profile_candidates(io) {
+            if !io.exists(&p) {
                 continue;
             }
-            // Try _choices suffix (underscore) then -choices (hyphen)
             for choices_suffix in ["_choices", "-choices"] {
-                let choices_path = format!("{}{}", p, choices_suffix);
-                if let Some(choices_raw) = sysfs_read_async(&choices_path).await {
+                let choices_path = PathBuf::from(format!("{}{}", p.display(), choices_suffix));
+                if let Ok(choices_raw) = io.read_trimmed(&choices_path) {
                     let choices: Vec<String> = choices_raw
                         .split_whitespace()
                         .map(|s| s.trim_matches(|c| c == '[' || c == ']').to_lowercase())
@@ -437,69 +617,43 @@ impl PowerService {
 
     // ── Profile application ────────────────────────────────────────────────────
 
-    /// Writes platform_profile (checks _choices) + thermal_profile — mirrors
-    /// Python PowerProfileController._sync_omen_profile().
-    ///
-    /// Fix #282: Guards all WMI/sysfs writes behind an ACPI health check with a
-    /// 500 ms timeout.  If ACPI is unresponsive (e.g. AE_AML_BUFFER_LIMIT storm
-    /// caused by the OMEN 17-db1xxx Strix Point BIOS), we abort immediately
-    /// instead of flooding \_SB.WMID.WMBA with additional commands.
-    async fn sync_omen_profile(profile: &str) -> bool {
-        // ── ACPI health pre-check ────────────────────────────────────────────
-        if !acpi_is_healthy().await {
-            warn!(
-                "sync_omen_profile('{}') aborted: ACPI platform_profile \
-                 unresponsive (possible AE_AML_BUFFER_LIMIT / LOOP_TIMEOUT). \
-                 Will NOT write to WMI to prevent system freeze. (fix #282)",
+    /// Writes `platform_profile` / `thermal_profile`, verifies readback from sysfs
+    /// so firmware rejections (`EINVAL` in UMA mode on 8D88, or silent no-ops)
+    /// fail loudly instead of returning `"OK"`, and only then syncs PPD (#396, #395).
+    async fn sync_omen_profile_with(&self, profile: &str, sync_to_ppd: bool) -> Result<(), String> {
+        let paths = &self.sysfs_paths;
+        let io = self.sysfs_io.as_ref();
+
+        if !acpi_is_healthy_at(paths, self.sysfs_io.clone()).await {
+            let msg = format!(
+                "Aborted profile switch '{}': ACPI platform_profile is unresponsive (timeout)",
                 profile
             );
-            return false;
+            warn!("{}", msg);
+            return Err(msg);
         }
 
-        let mut ok = false;
+        let is_real_sys =
+            paths.acpi_platform_profile == Path::new("/sys/firmware/acpi/platform_profile");
+        let mux_mode = io.read_trimmed(&paths.gpu_mux_mode).ok();
+        let is_uma_mode = mux_mode.as_deref() == Some("3");
 
-        if !Self::has_custom_power_manager() {
-            // 1. Try setting via system76-power if installed
-            let s76_profile = match profile {
-                "performance" => "performance",
-                "power-saver" => "battery",
-                _ => "balanced",
-            };
-            if let Ok(mut child) = tokio::process::Command::new("system76-power")
-                .args(["profile", s76_profile])
-                .spawn()
-            {
-                if let Ok(status) = child.wait().await {
-                    if status.success() {
-                        info!("Set system76-power profile to '{}'", s76_profile);
-                    }
-                }
-            }
+        let mut platform_found = false;
+        let mut platform_ok = false;
+        let mut thermal_found = false;
+        let mut thermal_ok = false;
+        let mut first_error: Option<String> = None;
 
-            // 2. Notify power-profiles-daemon (fix #283 — two-way sync).
-            // sync_ppd() tries powerprofilesctl CLI first, then falls back to
-            // a direct D-Bus call so desktop status bars stay in sync even
-            // when powerprofilesctl is not in PATH (e.g. NixOS sandboxed units).
-            Self::sync_ppd(profile).await;
-            ok = true; // PPD path never blocks success of the overall switch
-        }
-
-        // 3. Fallback/Explicit Override: ACPI platform_profile — underscore and hyphen variants
-        let acpi_paths = [
-            "/sys/firmware/acpi/platform_profile",
-            "/sys/devices/platform/hp-wmi/platform_profile",
-            "/sys/devices/platform/hp-wmi/platform-profile",
-        ];
-        for p in acpi_paths {
-            if !sysfs_exists(p) {
+        for p in paths.platform_profile_candidates(io) {
+            if !io.exists(&p) {
                 continue;
             }
+            platform_found = true;
 
-            // Try _choices then -choices
             let mut choices_raw = String::new();
             for sfx in ["_choices", "-choices"] {
-                let cp = format!("{}{}", p, sfx);
-                if let Some(raw) = sysfs_read_async(&cp).await {
+                let cp = PathBuf::from(format!("{}{}", p.display(), sfx));
+                if let Ok(raw) = io.read_trimmed(&cp) {
                     choices_raw = raw;
                     break;
                 }
@@ -536,53 +690,212 @@ impl PowerService {
                     })
             };
 
-            // Skip the write if the current value already matches — avoids
-            // redundant ACPI traffic on Strix Point BIOS (fix #282).
-            let current = sysfs_read_async(p).await;
+            let current = io.read_trimmed(&p).ok();
             if current.as_deref() == Some(to_write) {
                 info!(
                     "platform_profile='{}' already set via {} — skipping write",
-                    to_write, p
+                    to_write,
+                    p.display()
                 );
-                ok = true;
+                platform_ok = true;
                 continue;
             }
 
-            if sysfs_write_async(p, to_write).await {
-                info!("Set platform_profile='{}' via {}", to_write, p);
-                ok = true;
+            let p_c = p.clone();
+            let io_c = self.sysfs_io.clone();
+            let val_s = to_write.to_string();
+            let write_res = tokio::task::spawn_blocking(move || io_c.write_value(&p_c, &val_s))
+                .await
+                .unwrap_or_else(|e| Err(std::io::Error::other(e.to_string())));
+
+            match write_res {
+                Ok(()) => match io.read_trimmed(&p) {
+                    Ok(readback)
+                        if readback == to_write
+                            || Self::normalize_profile(&readback)
+                                == Self::normalize_profile(to_write) =>
+                    {
+                        info!(
+                            "Set platform_profile='{}' via {} (verified)",
+                            readback,
+                            p.display()
+                        );
+                        platform_ok = true;
+                    }
+                    Ok(readback) => {
+                        let msg = if is_uma_mode {
+                            format!(
+                                "Firmware did not apply platform_profile='{}' on {} (hardware remained '{}' in UMA/integrated-GPU mode, gpu_mux_mode=3).",
+                                to_write,
+                                p.display(),
+                                readback
+                            )
+                        } else {
+                            format!(
+                                "Firmware ignored platform_profile='{}' on {} (readback stayed '{}').",
+                                to_write,
+                                p.display(),
+                                readback
+                            )
+                        };
+                        warn!("{}", msg);
+                        if first_error.is_none() {
+                            first_error = Some(msg);
+                        }
+                    }
+                    Err(e) => {
+                        let msg = format!(
+                            "Failed to verify platform_profile readback on {}: {}",
+                            p.display(),
+                            e
+                        );
+                        warn!("{}", msg);
+                        if first_error.is_none() {
+                            first_error = Some(msg);
+                        }
+                    }
+                },
+                Err(e) => {
+                    let remained = current.unwrap_or_else(|| "unknown".to_string());
+                    let is_einval = e.raw_os_error() == Some(libc::EINVAL)
+                        || e.kind() == std::io::ErrorKind::InvalidInput;
+                    let msg = if is_uma_mode && is_einval {
+                        format!(
+                            "BIOS rejected platform_profile='{}' on {} ({}): HP firmware disables thermal profile switching in UMA/integrated-GPU mode (gpu_mux_mode=3); hardware remained '{}'. Switch GPU MUX back to Hybrid or Discrete to change power profiles.",
+                            to_write,
+                            p.display(),
+                            e,
+                            remained
+                        )
+                    } else {
+                        format!(
+                            "Failed to write platform_profile='{}' to {}: {} (hardware remained '{}')",
+                            to_write,
+                            p.display(),
+                            e,
+                            remained
+                        )
+                    };
+                    warn!("{}", msg);
+                    if first_error.is_none() {
+                        first_error = Some(msg);
+                    }
+                }
             }
         }
 
-        // thermal_profile / thermal-profile (both naming styles, both hp-wmi paths).
-        // Also skip redundant writes (fix #282: each WMI write can trigger
-        // \_SB.WMID.WMBA which overflows the Strix Point ACPI buffer).
         let thermal_val = if profile == "performance" { "1" } else { "0" };
-        for p in [
-            "/sys/devices/platform/hp-wmi/thermal_profile",
-            "/sys/devices/platform/hp-wmi/thermal-profile",
-            "/sys/devices/platform/hp-omen/thermal_profile",
-            "/sys/devices/platform/hp-omen/thermal-profile",
-        ] {
-            if !sysfs_exists(p) {
+        for p in &paths.thermal_profile_paths {
+            if !io.exists(p) {
                 continue;
             }
-            let current = sysfs_read_async(p).await;
+            thermal_found = true;
+            let current = io.read_trimmed(p).ok();
             if current.as_deref() == Some(thermal_val) {
                 info!(
                     "thermal_profile={} already set via {} — skipping write",
-                    thermal_val, p
+                    thermal_val,
+                    p.display()
                 );
-                ok = true;
+                thermal_ok = true;
                 continue;
             }
-            if sysfs_write_async(p, thermal_val).await {
-                info!("Set thermal_profile={} via {}", thermal_val, p);
-                ok = true;
+            let p_c = p.clone();
+            let io_c = self.sysfs_io.clone();
+            let val_s = thermal_val.to_string();
+            let write_res = tokio::task::spawn_blocking(move || io_c.write_value(&p_c, &val_s))
+                .await
+                .unwrap_or_else(|e| Err(std::io::Error::other(e.to_string())));
+
+            match write_res {
+                Ok(()) => match io.read_trimmed(p) {
+                    Ok(rb) if rb == thermal_val => {
+                        info!("Set thermal_profile={} via {} (verified)", rb, p.display());
+                        thermal_ok = true;
+                    }
+                    Ok(rb) => {
+                        let msg = format!(
+                            "thermal_profile={} ignored on {} (readback stayed '{}')",
+                            thermal_val,
+                            p.display(),
+                            rb
+                        );
+                        warn!("{}", msg);
+                        if first_error.is_none() {
+                            first_error = Some(msg);
+                        }
+                    }
+                    Err(e) => {
+                        if first_error.is_none() {
+                            first_error = Some(format!(
+                                "Failed to read back thermal_profile on {}: {}",
+                                p.display(),
+                                e
+                            ));
+                        }
+                    }
+                },
+                Err(e) => {
+                    if first_error.is_none() {
+                        first_error = Some(format!(
+                            "Failed to write thermal_profile={} to {}: {}",
+                            thermal_val,
+                            p.display(),
+                            e
+                        ));
+                    }
+                }
             }
         }
 
-        ok
+        let hw_found = platform_found || thermal_found;
+        let hw_succeeded = if platform_found {
+            platform_ok
+        } else if thermal_found {
+            thermal_ok
+        } else {
+            false
+        };
+
+        if hw_found {
+            if !hw_succeeded {
+                return Err(first_error
+                    .unwrap_or_else(|| format!("Hardware rejected power profile '{}'", profile)));
+            }
+            if is_real_sys && sync_to_ppd && !Self::has_custom_power_manager() {
+                let s76_profile = match profile {
+                    "performance" => "performance",
+                    "power-saver" => "battery",
+                    _ => "balanced",
+                };
+                if let Ok(mut child) = tokio::process::Command::new("system76-power")
+                    .args(["profile", s76_profile])
+                    .spawn()
+                {
+                    let _ = child.wait().await;
+                }
+                self.arm_ppd_suppression().await;
+                let _ = Self::sync_ppd(profile).await;
+            }
+            return Ok(());
+        }
+
+        // Fallback when no hardware platform_profile/thermal_profile node exists:
+        if is_real_sys && !Self::has_custom_power_manager() {
+            if sync_to_ppd {
+                self.arm_ppd_suppression().await;
+                if Self::sync_ppd(profile).await {
+                    return Ok(());
+                }
+            } else {
+                return Ok(());
+            }
+        }
+
+        Err(format!(
+            "No OMEN thermal/platform_profile sysfs interface is available to apply '{}'",
+            profile
+        ))
     }
 
     /// Sync GPU TGP + PPAB — mirrors Python _sync_kernel_gpu_power().
@@ -651,19 +964,11 @@ impl PowerService {
     /// GetPowerProfile — returns JSON matching Python GetPowerProfile().
     async fn get_power_profile(&self) -> String {
         let cfg = self.config.lock().await.clone();
-        let mut active = Self::detect_current_profile().await;
+        let mut active = self.detect_current_profile_with().await;
 
-        let available_profiles = Self::get_available_profiles().await;
-        let has_hw_profile_node = [
-            "/sys/firmware/acpi/platform_profile",
-            "/sys/class/platform-profile/platform-profile-0/profile",
-            "/sys/devices/platform/hp-wmi/platform_profile",
-            "/sys/devices/platform/hp-wmi/platform-profile",
-            "/sys/devices/platform/hp-wmi/thermal_profile",
-            "/sys/devices/platform/hp-wmi/thermal-profile",
-        ]
-        .iter()
-        .any(|p| sysfs_exists(p));
+        let available_profiles =
+            Self::get_available_profiles_for(&self.sysfs_paths, self.sysfs_io.as_ref()).await;
+        let has_hw_profile_node = self.sysfs_paths.any_hw_node_exists(self.sysfs_io.as_ref());
 
         // If hardware doesn't expose a sysfs profile readback node (e.g. #297 on 8786 when
         // stock hp-wmi is loaded) or doesn't support power-saver/performance natively in PPD,
@@ -705,6 +1010,7 @@ impl PowerService {
             }
         }
 
+        let last_error = self.last_error.lock().await.clone();
         let json = serde_json::json!({
             "available": true,
             "active": active,
@@ -712,6 +1018,7 @@ impl PowerService {
             "app_profiles_enabled": cfg.app_profiles_enabled,
             "app_profiles": cfg.app_profiles,
             "active_app": null,
+            "last_error": last_error,
             "undervolt_mv": cfg.undervolt_mv,
             "tcc_offset": cfg.tcc_offset,
             "pl1_w": real_pl1,
@@ -727,32 +1034,22 @@ impl PowerService {
         json.to_string()
     }
 
-    /// SetPowerProfile — mirrors Python SetPowerProfile().
-    async fn set_power_profile(&self, profile: String) -> String {
-        if self.set_profile_internal(&profile).await {
-            "OK".to_string()
-        } else {
-            let is_tr = std::env::var("LANG").unwrap_or_default().starts_with("tr");
-            let (title, err_msg) = if is_tr {
-                (
-                    "Güç Profili Değiştirilemedi",
-                    format!(
-                        "Güç profili '{}' uygulanamadı. BIOS OMEN komut arayüzü erişilebilir değil veya donanım desteklemiyor.",
-                        profile
-                    ),
-                )
-            } else {
-                (
-                    "Failed to Change Power Profile",
-                    format!(
-                        "Power profile '{}' could not be applied. BIOS OMEN thermal profile interface is unavailable or unsupported.",
-                        profile
-                    ),
-                )
-            };
-            warn!("{}", err_msg);
-            crate::notifier::DesktopNotifier::notify_error(title, &err_msg).await;
-            "FAIL".to_string()
+    /// SetPowerProfile — applies and verifies hardware profile, returning a D-Bus
+    /// error (`Failed`) whenever firmware rejects or ignores the write (#396).
+    async fn set_power_profile(&self, profile: String) -> zbus::fdo::Result<String> {
+        match self.set_profile_result(&profile, true).await {
+            Ok(()) => Ok("OK".to_string()),
+            Err(err_msg) => {
+                let is_tr = std::env::var("LANG").unwrap_or_default().starts_with("tr");
+                let title = if is_tr {
+                    "Güç Profili Değiştirilemedi"
+                } else {
+                    "Failed to Change Power Profile"
+                };
+                warn!("{}", err_msg);
+                crate::notifier::DesktopNotifier::notify_error(title, &err_msg).await;
+                Err(zbus::fdo::Error::Failed(err_msg))
+            }
         }
     }
 
@@ -782,7 +1079,7 @@ impl PowerService {
             cfg.pl_enabled = enabled;
             cfg.pl1_w = target_pl1;
             cfg.pl2_w = target_pl2;
-            cfg.save();
+            cfg.save_to(&self.config_path);
         }
 
         Self::apply_rapl_limits(target_pl1, target_pl2).await;
@@ -800,7 +1097,7 @@ impl PowerService {
         let mv = mv.clamp(-250, 250);
         let mut cfg = self.config.lock().await;
         cfg.undervolt_mv = mv;
-        cfg.save();
+        cfg.save_to(&self.config_path);
         info!(
             "SetUndervolt: {}mV (saved; apply via undervolt service)",
             mv
@@ -813,7 +1110,7 @@ impl PowerService {
         let val = val.clamp(0, 15);
         let mut cfg = self.config.lock().await;
         cfg.tcc_offset = val;
-        cfg.save();
+        cfg.save_to(&self.config_path);
         info!("SetTccOffset: {} (saved)", val);
         "OK".to_string()
     }
@@ -822,7 +1119,7 @@ impl PowerService {
     async fn set_app_profiles_enabled(&self, enabled: bool) -> String {
         let mut cfg = self.config.lock().await;
         cfg.app_profiles_enabled = enabled;
-        cfg.save();
+        cfg.save_to(&self.config_path);
         info!("SetAppProfilesEnabled: {}", enabled);
         "OK".to_string()
     }
@@ -833,7 +1130,7 @@ impl PowerService {
             Ok(data) => {
                 let mut cfg = self.config.lock().await;
                 cfg.app_profiles = data;
-                cfg.save();
+                cfg.save_to(&self.config_path);
                 info!("SetAppProfiles: updated {} entries", cfg.app_profiles.len());
                 "OK".to_string()
             }
@@ -846,5 +1143,257 @@ impl PowerService {
 
     async fn ping(&self) -> String {
         "OK".to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[derive(Default)]
+    struct MockSysfsState {
+        files: BTreeMap<PathBuf, String>,
+        einval_paths: Vec<PathBuf>,
+        silent_noop_paths: Vec<PathBuf>,
+        class_dirs: Vec<PathBuf>,
+        writes: Vec<(PathBuf, String)>,
+    }
+
+    #[derive(Clone, Default)]
+    struct MockSysfsIo(Arc<std::sync::Mutex<MockSysfsState>>);
+
+    impl MockSysfsIo {
+        fn set_file(&self, path: impl AsRef<Path>, val: &str) {
+            self.0
+                .lock()
+                .unwrap()
+                .files
+                .insert(path.as_ref().to_path_buf(), val.to_string());
+        }
+
+        fn fail_einval(&self, path: impl AsRef<Path>) {
+            self.0
+                .lock()
+                .unwrap()
+                .einval_paths
+                .push(path.as_ref().to_path_buf());
+        }
+
+        fn make_silent_noop(&self, path: impl AsRef<Path>) {
+            self.0
+                .lock()
+                .unwrap()
+                .silent_noop_paths
+                .push(path.as_ref().to_path_buf());
+        }
+
+        fn add_class_dir(&self, dir: impl AsRef<Path>) {
+            self.0
+                .lock()
+                .unwrap()
+                .class_dirs
+                .push(dir.as_ref().to_path_buf());
+        }
+
+        fn writes(&self) -> Vec<(PathBuf, String)> {
+            self.0.lock().unwrap().writes.clone()
+        }
+    }
+
+    impl PowerSysfsIo for MockSysfsIo {
+        fn exists(&self, path: &Path) -> bool {
+            self.0.lock().unwrap().files.contains_key(path)
+        }
+
+        fn read_trimmed(&self, path: &Path) -> std::io::Result<String> {
+            self.0
+                .lock()
+                .unwrap()
+                .files
+                .get(path)
+                .map(|s| s.trim().to_string())
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "missing"))
+        }
+
+        fn write_value(&self, path: &Path, value: &str) -> std::io::Result<()> {
+            let mut st = self.0.lock().unwrap();
+            st.writes.push((path.to_path_buf(), value.to_string()));
+            if st.einval_paths.iter().any(|p| p == path) {
+                return Err(std::io::Error::from_raw_os_error(libc::EINVAL));
+            }
+            if !st.files.contains_key(path) {
+                return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "missing"));
+            }
+            if st.silent_noop_paths.iter().any(|p| p == path) {
+                // Accepts write cleanly without changing firmware state.
+                return Ok(());
+            }
+            st.files.insert(path.to_path_buf(), value.to_string());
+            Ok(())
+        }
+
+        fn list_class_profiles(&self, _dir: &Path) -> Vec<PathBuf> {
+            self.0.lock().unwrap().class_dirs.clone()
+        }
+    }
+
+    fn mock_paths(root: &Path) -> PowerSysfsPaths {
+        PowerSysfsPaths {
+            acpi_platform_profile: root.join("acpi/platform_profile"),
+            hp_wmi_platform_profile: root.join("hp-wmi/platform_profile"),
+            hp_wmi_platform_profile_hyphen: root.join("hp-wmi/platform-profile"),
+            class_platform_profile_dir: root.join("class/platform-profile"),
+            thermal_profile_paths: vec![root.join("hp-wmi/thermal_profile")],
+            gpu_mux_mode: root.join("hp-wmi/gpu_mux_mode"),
+        }
+    }
+
+    #[tokio::test]
+    async fn sim_8d88_uma_einval_fails_loudly_and_ignores_amd_pmf() {
+        let dir = std::env::temp_dir().join(format!("omen-power-8d88-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cfg_path = dir.join("power.json");
+        let paths = mock_paths(&dir);
+        let io = MockSysfsIo::default();
+
+        // Simulate 8D88 in UMA mode (gpu_mux_mode=3): acpi platform_profile stays balanced
+        // and rejects writes with EINVAL, while amd-pmf sits on platform-profile-1.
+        io.set_file(&paths.acpi_platform_profile, "balanced");
+        io.set_file(
+            dir.join("acpi/platform_profile_choices"),
+            "low-power balanced performance",
+        );
+        io.fail_einval(&paths.acpi_platform_profile);
+        io.set_file(&paths.gpu_mux_mode, "3");
+
+        let amd_pmf_dir = paths.class_platform_profile_dir.join("platform-profile-1");
+        io.add_class_dir(&amd_pmf_dir);
+        io.set_file(amd_pmf_dir.join("name"), "amd-pmf");
+        io.set_file(amd_pmf_dir.join("profile"), "low-power");
+
+        let svc = PowerService::new_with_paths(
+            cfg_path.clone(),
+            paths.clone(),
+            Arc::new(io.clone()),
+            false,
+        )
+        .await
+        .unwrap();
+
+        let err = svc
+            .set_profile_result("power-saver", true)
+            .await
+            .expect_err("EINVAL in UMA mode must fail loudly (#396)");
+        assert!(err.contains("gpu_mux_mode=3"), "err was: {}", err);
+        assert!(
+            io.writes()
+                .iter()
+                .all(|(p, _)| p != &amd_pmf_dir.join("profile")),
+            "amd-pmf must never be written"
+        );
+
+        let state_json: serde_json::Value =
+            serde_json::from_str(&svc.get_power_profile().await).unwrap();
+        assert_eq!(state_json["active"], "balanced");
+        assert!(
+            state_json["last_error"]
+                .as_str()
+                .is_some_and(|s| s.contains("UMA")),
+            "GetPowerProfile must report last_error: {}",
+            state_json
+        );
+        assert!(
+            !cfg_path.exists(),
+            "rejected profile must not persist to power.json"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn sim_silent_firmware_noop_is_caught_by_readback_verification() {
+        let dir = std::env::temp_dir().join(format!("omen-power-noop-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let paths = mock_paths(&dir);
+        let io = MockSysfsIo::default();
+
+        io.set_file(&paths.acpi_platform_profile, "balanced");
+        io.set_file(
+            dir.join("acpi/platform_profile_choices"),
+            "low-power balanced performance",
+        );
+        io.make_silent_noop(&paths.acpi_platform_profile);
+
+        let svc = PowerService::new_with_paths(dir.join("power.json"), paths, Arc::new(io), false)
+            .await
+            .unwrap();
+
+        let err = svc
+            .set_profile_result("performance", true)
+            .await
+            .expect_err("silent firmware no-op must fail readback check (#396)");
+        assert!(
+            err.contains("readback stayed 'balanced'") || err.contains("remained 'balanced'"),
+            "unexpected msg: {}",
+            err
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn sim_valid_switch_verifies_readback_and_suppresses_ppd_echo_loop() {
+        let dir = std::env::temp_dir().join(format!("omen-power-ok-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cfg_path = dir.join("power.json");
+        let paths = mock_paths(&dir);
+        let io = MockSysfsIo::default();
+
+        io.set_file(&paths.acpi_platform_profile, "balanced");
+        io.set_file(
+            dir.join("acpi/platform_profile_choices"),
+            "low-power balanced performance",
+        );
+
+        let svc = PowerService::new_with_paths(
+            cfg_path.clone(),
+            paths.clone(),
+            Arc::new(io.clone()),
+            false,
+        )
+        .await
+        .unwrap();
+
+        // Successful switch persists and clears last_error
+        svc.set_profile_result("performance", true).await.unwrap();
+        assert_eq!(svc.current_profile().await, "performance");
+        let state_json: serde_json::Value =
+            serde_json::from_str(&svc.get_power_profile().await).unwrap();
+        assert_eq!(state_json["active"], "performance");
+        assert!(state_json["last_error"].is_null());
+
+        // Arm suppression (as real sync_ppd does) -> immediate echo back to "balanced" MUST be ignored (#395)
+        svc.arm_ppd_suppression().await;
+        let writes_before = io.writes().len();
+        assert!(svc.set_profile_from_ppd("balanced").await);
+        assert_eq!(
+            svc.current_profile().await,
+            "performance",
+            "echo during suppression window must not oscillate back to balanced"
+        );
+        assert_eq!(io.writes().len(), writes_before);
+
+        // Once suppression expires, an external PPD change updates hardware without extra writes if repeated
+        *svc.ppd_suppress_until.lock().await = None;
+        assert!(svc.set_profile_from_ppd("power-saver").await);
+        assert_eq!(svc.current_profile().await, "power-saver");
+        let count_after = io.writes().len();
+        assert!(svc.set_profile_from_ppd("power-saver").await);
+        assert_eq!(
+            io.writes().len(),
+            count_after,
+            "idempotent PPD signal must not re-write sysfs"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

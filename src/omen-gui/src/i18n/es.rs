@@ -426,6 +426,8 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("updater_dkms_loaded", "Cargado y activo"),
     ("updater_dkms_missing", "No cargado (se recomienda reparar)"),
     ("updater_commits_ahead", "nuevo(s) commit(s) disponible(s)"),
+    ("perf_profile_apply_failed", "No se pudo cambiar el perfil de energía"),
+    ("fan_clean_stop_btn", "Detener y volver a Automático"),
 ];
 
 pub(super) fn translate(key: &str) -> Option<&'static str> {

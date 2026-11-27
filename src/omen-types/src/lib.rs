@@ -297,6 +297,7 @@ pub trait Platform {
     async fn get_hardware_dump_json(&self) -> zbus::Result<String>;
     async fn run_wmi_diagnostics(&self) -> zbus::Result<String>;
     async fn run_fan_cleaning(&self) -> zbus::Result<String>;
+    async fn cancel_fan_cleaning(&self) -> zbus::Result<String>;
     async fn check_conflicts(&self) -> zbus::Result<String>;
     async fn analyze_acpi(&self) -> zbus::Result<String>;
     async fn generate_triage_bundle(&self) -> zbus::Result<String>;

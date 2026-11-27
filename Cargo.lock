@@ -1560,7 +1560,7 @@ dependencies = [
 
 [[package]]
 name = "omen-cli"
-version = "2.5.4"
+version = "2.6.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1577,7 +1577,7 @@ dependencies = [
 
 [[package]]
 name = "omen-gui"
-version = "2.5.4"
+version = "2.6.0"
 dependencies = [
  "glib",
  "glob",
@@ -1593,7 +1593,7 @@ dependencies = [
 
 [[package]]
 name = "omen-overlay"
-version = "2.5.4"
+version = "2.6.0"
 dependencies = [
  "env_logger 0.10.2",
  "futures",
@@ -1608,7 +1608,7 @@ dependencies = [
 
 [[package]]
 name = "omen-space-daemon"
-version = "2.5.4"
+version = "2.6.0"
 dependencies = [
  "env_logger 0.11.11",
  "evdev",
@@ -1627,7 +1627,7 @@ dependencies = [
 
 [[package]]
 name = "omen-tray"
-version = "2.5.4"
+version = "2.6.0"
 dependencies = [
  "env_logger 0.10.2",
  "futures",
@@ -1643,7 +1643,7 @@ dependencies = [
 
 [[package]]
 name = "omen-types"
-version = "2.5.4"
+version = "2.6.0"
 dependencies = [
  "libc",
  "serde",

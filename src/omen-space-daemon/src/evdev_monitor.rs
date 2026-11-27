@@ -18,6 +18,29 @@ pub struct EvdevMonitor {
     pub recent_keys: Arc<Mutex<Vec<KeyEventInfo>>>,
     pub active: Arc<AtomicBool>,
     pub notify: Arc<tokio::sync::Notify>,
+    pub wakeup: Arc<tokio::sync::Notify>,
+}
+
+/// Record a physical key press at `(x, y)` into `recent_keys` (capped at 30 entries)
+/// and immediately wake any animation loop waiting on `wakeup`.
+pub(crate) async fn record_key_press(
+    recent_keys: &Mutex<Vec<KeyEventInfo>>,
+    wakeup: &tokio::sync::Notify,
+    x: f64,
+    y: f64,
+) {
+    {
+        let mut lock = recent_keys.lock().await;
+        lock.push(KeyEventInfo {
+            x,
+            y,
+            timestamp: std::time::Instant::now(),
+        });
+        if lock.len() > 30 {
+            lock.remove(0);
+        }
+    }
+    wakeup.notify_waiters();
 }
 
 /// Returns `true` when an `evdev::Device` exposes a full alpha/enter keyboard report set.
@@ -34,19 +57,26 @@ impl EvdevMonitor {
         let recent_keys = Arc::new(Mutex::new(Vec::new()));
         let active = Arc::new(AtomicBool::new(false));
         let notify = Arc::new(tokio::sync::Notify::new());
+        let wakeup = Arc::new(tokio::sync::Notify::new());
 
         let keys_clone = recent_keys.clone();
         let active_clone = active.clone();
         let notify_clone = notify.clone();
+        let wakeup_clone = wakeup.clone();
         tokio::spawn(async move {
-            Self::monitor_loop(keys_clone, active_clone, notify_clone).await;
+            Self::monitor_loop(keys_clone, active_clone, notify_clone, wakeup_clone).await;
         });
 
         Self {
             recent_keys,
             active,
             notify,
+            wakeup,
         }
+    }
+
+    pub fn wakeup_handle(&self) -> Arc<tokio::sync::Notify> {
+        self.wakeup.clone()
     }
 
     pub fn set_active(&self, enabled: bool) {
@@ -66,6 +96,7 @@ impl EvdevMonitor {
         keys: Arc<Mutex<Vec<KeyEventInfo>>>,
         active: Arc<AtomicBool>,
         notify: Arc<tokio::sync::Notify>,
+        wakeup: Arc<tokio::sync::Notify>,
     ) {
         loop {
             // Fix #345: When reactive lighting is not active, stay parked and do NOT poll or keep /dev/input open!
@@ -97,6 +128,7 @@ impl EvdevMonitor {
             for path in device_paths {
                 let keys_c = keys.clone();
                 let active_c = active.clone();
+                let wakeup_c = wakeup.clone();
                 join_set.spawn(async move {
                     let Ok(file) = std::fs::OpenOptions::new()
                         .read(true)
@@ -138,15 +170,7 @@ impl EvdevMonitor {
                                             if ev.type_ == 1 && ev.value == 1 {
                                                 let key_code = ev.code;
                                                 if let Some((x, y)) = crate::rgb::key_layout::evdev_code_to_coords(key_code) {
-                                                    let mut lock = keys_c.lock().await;
-                                                    lock.push(KeyEventInfo {
-                                                        x,
-                                                        y,
-                                                        timestamp: std::time::Instant::now(),
-                                                    });
-                                                    if lock.len() > 30 {
-                                                        lock.remove(0);
-                                                    }
+                                                    record_key_press(&keys_c, &wakeup_c, x, y).await;
                                                 }
                                             }
                                         }
@@ -185,5 +209,42 @@ impl EvdevMonitor {
             }
             join_set.abort_all();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn record_key_press_wakes_notified_task_immediately_and_caps_at_30() {
+        let recent_keys = Arc::new(Mutex::new(Vec::new()));
+        let wakeup = Arc::new(tokio::sync::Notify::new());
+
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let wakeup_waiter = wakeup.clone();
+        let waiter = tokio::spawn(async move {
+            let notified = wakeup_waiter.notified();
+            tokio::pin!(notified);
+            // Register waiter before signaling readiness.
+            notified.as_mut().enable();
+            let _ = ready_tx.send(());
+            notified.await;
+        });
+
+        ready_rx.await.unwrap();
+        record_key_press(&recent_keys, &wakeup, 3.0, 2.0).await;
+
+        tokio::time::timeout(tokio::time::Duration::from_millis(200), waiter)
+            .await
+            .expect("waiting task must wake immediately on keypress")
+            .unwrap();
+
+        for i in 0..35 {
+            record_key_press(&recent_keys, &wakeup, i as f64, 1.0).await;
+        }
+        let guard = recent_keys.lock().await;
+        assert_eq!(guard.len(), 30, "recent_keys must be capped at 30 entries");
+        assert_eq!(guard.last().unwrap().x, 34.0);
     }
 }

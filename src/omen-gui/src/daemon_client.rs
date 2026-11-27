@@ -110,31 +110,67 @@ where
 
 // ── Synchronous / Background UI Callbacks ────────────────────────────────────
 
-pub fn set_power_profile_sync(profile: String) {
+fn format_dbus_error_message(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if let Some((_, rest)) = trimmed.split_once("org.freedesktop.DBus.Error.Failed:") {
+        return rest.trim().to_string();
+    }
+    trimmed.to_string()
+}
+
+pub fn set_power_profile_with_result<F>(profile: String, mut on_done: F)
+where
+    F: FnMut(Result<(), (String, String)>) + 'static,
+{
+    #[allow(deprecated)]
+    let (tx, rx) =
+        glib::MainContext::channel::<Result<(), (String, String)>>(glib::Priority::default());
+    rx.attach(None, move |res| {
+        on_done(res);
+        glib::ControlFlow::Break
+    });
+
     get_runtime().spawn(async move {
         let Ok(conn) = get_conn().await else {
-            notify_dbus_error(
-                crate::i18n::t("dbus_err_ctx_power_conn"),
-                crate::i18n::t("dbus_err_no_bus"),
-            )
-            .await;
+            let msg = crate::i18n::t("dbus_err_no_bus").to_string();
+            notify_dbus_error(crate::i18n::t("dbus_err_ctx_power_conn"), &msg).await;
+            let _ = tx.send(Err((msg, "balanced".to_string())));
             return;
         };
         match PowerProxy::new(&conn).await {
-            Ok(proxy) => {
-                if let Err(e) = proxy.set_power_profile(&profile).await {
-                    notify_dbus_error(crate::i18n::t("dbus_err_ctx_power"), &e).await;
+            Ok(proxy) => match proxy.set_power_profile(&profile).await {
+                Ok(resp) if !resp.starts_with("FAIL") => {
+                    let _ = tx.send(Ok(()));
                 }
-            }
+                Ok(resp) => {
+                    let msg = format_dbus_error_message(&resp);
+                    notify_dbus_error(crate::i18n::t("dbus_err_ctx_power"), &msg).await;
+                    let actual = get_power_profile_async()
+                        .await
+                        .unwrap_or_else(|_| "balanced".to_string());
+                    let _ = tx.send(Err((msg, actual)));
+                }
+                Err(e) => {
+                    let msg = format_dbus_error_message(&e.to_string());
+                    notify_dbus_error(crate::i18n::t("dbus_err_ctx_power"), &msg).await;
+                    let actual = get_power_profile_async()
+                        .await
+                        .unwrap_or_else(|_| "balanced".to_string());
+                    let _ = tx.send(Err((msg, actual)));
+                }
+            },
             Err(_) => {
-                notify_dbus_error(
-                    crate::i18n::t("dbus_err_ctx_power_conn"),
-                    crate::i18n::t("dbus_err_daemon_down"),
-                )
-                .await;
+                let msg = crate::i18n::t("dbus_err_daemon_down").to_string();
+                notify_dbus_error(crate::i18n::t("dbus_err_ctx_power_conn"), &msg).await;
+                let _ = tx.send(Err((msg, "balanced".to_string())));
             }
         }
     });
+}
+
+#[allow(dead_code)]
+pub fn set_power_profile_sync(profile: String) {
+    set_power_profile_with_result(profile, |_| {});
 }
 
 /// Returns whether the given board_id is in the community-verified list.
@@ -315,6 +351,14 @@ pub async fn run_fan_cleaning_async() -> Result<String, Box<dyn std::error::Erro
     let conn = get_conn().await?;
     let proxy = PlatformProxy::new(&conn).await?;
     Ok(proxy.run_fan_cleaning().await?)
+}
+
+pub fn cancel_fan_cleaning_sync() {
+    spawn_dbus(|conn| async move {
+        if let Ok(proxy) = PlatformProxy::new(&conn).await {
+            let _ = proxy.cancel_fan_cleaning().await;
+        }
+    });
 }
 
 // ── Daemon Status ─────────────────────────────────────────────────────────────

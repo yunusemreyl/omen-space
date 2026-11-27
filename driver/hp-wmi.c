@@ -1170,6 +1170,7 @@ static int thermal_profile_set(int thermal_profile);
 static int hp_wmi_fan_speed_reset(struct hp_wmi_hwmon_priv *priv)
 {
 	int ret;
+	bool leaving_max = (priv->mode == PWM_MODE_MAX || priv->prev_mode == PWM_MODE_MAX);
 
 	ret = hp_wmi_fan_speed_max_set(0);
 	if (ret)
@@ -1188,19 +1189,31 @@ static int hp_wmi_fan_speed_reset(struct hp_wmi_hwmon_priv *priv)
 	 * at 0 RPM for up to 120 seconds until the internal watchdog times out, leaving
 	 * the fans completely stopped even under heavy load.
 	 *
-	 * When leaving PWM_MODE_MANUAL on Victus-S / modern OMEN boards, do NOT call
+	 * When leaving PWM_MODE_MAX on Victus-S / modern OMEN boards (e.g. 8C77, 8A4C),
+	 * clear stale 6000 RPM EC target registers with a single safe non-zero step-down
+	 * RPM before restoring thermal policy (#385, #395).
+	 *
+	 * When leaving PWM_MODE_MANUAL or PWM_MODE_MAX, do NOT call
 	 * hp_wmi_get_fan_count_userdefine_trigger() (WMI 0x10) immediately here, as
 	 * WMI 0x10 re-arms the 120s manual-fan watchdog timer and keeps the last
 	 * 0x2E RPM target latched (#311). Instead, re-apply the thermal profile mode
-	 * directly and let keep_alive_dwork wait VICTUS_S_WATCHDOG_EXPIRY_SECS (125s)
-	 * before resuming periodic keepalives.
+	 * directly and let keep_alive_dwork wait before resuming periodic keepalives.
 	 */
+	if (leaving_max && is_victus_s_thermal_profile()) {
+		u8 low_rpm = max_t(u8, priv->min_rpm, 12);
+		u8 fan_speed[2] = { low_rpm, low_rpm };
+
+		hp_wmi_perform_query(HPWMI_VICTUS_S_FAN_SPEED_SET_QUERY,
+				     HPWMI_GM, &fan_speed, sizeof(fan_speed), 0);
+	}
+
 	if (is_omen_thermal_profile()) {
 		ret = platform_profile_omen_set_ec(active_platform_profile);
 	} else if (is_victus_thermal_profile()) {
 		ret = platform_profile_victus_set_ec(active_platform_profile);
 	} else if (is_victus_s_thermal_profile()) {
-		if (priv->prev_mode == PWM_MODE_MANUAL && active_thermal_profile_params) {
+		if ((priv->prev_mode == PWM_MODE_MANUAL || leaving_max) &&
+		    active_thermal_profile_params) {
 			u8 tp = (active_platform_profile == PLATFORM_PROFILE_PERFORMANCE)
 				? active_thermal_profile_params->performance
 				: (active_platform_profile == PLATFORM_PROFILE_LOW_POWER)
@@ -3740,9 +3753,7 @@ static void hp_wmi_hwmon_keep_alive_handler(struct work_struct *work)
 		if (is_victus_s_thermal_profile() &&
 		    active_thermal_profile_params &&
 		    active_thermal_profile_params->ec_tp_offset != HP_NO_THERMAL_PROFILE_OFFSET) {
-			if (active_platform_profile == PLATFORM_PROFILE_PERFORMANCE ||
-			    platform_profile_written ||
-			    priv->prev_mode != -1) {
+			if (active_platform_profile == PLATFORM_PROFILE_PERFORMANCE) {
 				platform_profile_victus_s_set_ec(active_platform_profile);
 			}
 			schedule_delayed_work(&priv->keep_alive_dwork,

@@ -8,7 +8,7 @@
 
   <p>
     <a href="https://github.com/yunusemreyl/omen-space/releases/latest">
-      <img src="https://img.shields.io/badge/Versi%C3%B3n-v2.5.4-e11d48?style=flat-square" alt="Versión v2.5.4" />
+      <img src="https://img.shields.io/badge/Versi%C3%B3n-v2.6.0-e11d48?style=flat-square" alt="Versión v2.6.0" />
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/Licencia-GPL--3.0-10b981?style=flat-square" alt="Licencia" />
@@ -37,7 +37,7 @@
 | **Monitor del Sistema** | Gráficos en tiempo real de 60 s con selector **Potencia / Temp / Carga** para CPU y GPU, barra resumen de potencia y modos activos, uso por disco, panel dedicado de **Batería y energía** y metadatos de firmware (`OS`, `BIOS`, `EC`, `NVIDIA`). |
 | **Energía y Batería** | Limitador de carga de batería HP WMI `0x2B` / nativo con histéresis (`stop`/`start`, protección apagado `hold` y bypass único al 100 %), límites Intel RAPL `PL1`/`PL2`, `TCC Offset`, undervolt por MSR (`UV_LOCK`), GPU Dynamic Boost y ajustes AMD Ryzen SMU. |
 | **Selector de Gráficos (MUX y PRIME)** | Cambio validado por hardware entre **Hybrid (MSHybrid)**, **Discrete (dGPU)**, **Advanced Optimus** e **Integrated**, enrutamiento de pantallas, estado pasivo `D3cold` y copia rápida de **PRIME Offload**. |
-| **RGB Studio** | Iluminación RGB de 4 zonas, zona única (Victus), barra de luz frontal, Desktop RGB y teclado por tecla HID (Darfon `0d62:54bf` / `0d62:30bf` y Primax `0xFF13`) con vista previa sincronizada con el daemon, calibración física y distribución EN/DE. |
+| **RGB Studio** | Iluminación RGB de 4 zonas, zona única (Victus), barra de luz frontal, Desktop RGB y teclado por tecla HID (Darfon `0d62:54bf` / `0d62:30bf` y Primax `0xFF13`) con vista previa sincronizada, preajustes por tecla guardados, calibración física y distribución EN/DE/TR-Q. |
 | **Control Rápido (`Shift+F2`, configurable)** | Superposición flotante nativa en Libadwaita con atajos de teclado (`1–3`, `Q/W/E`), soporte de teclas en múltiples dispositivos y telemetría en vivo. |
 | **Centro de Ajustes Unificado** | Pestañas **General \| Actualizaciones \| Diagnóstico** con volcado completo para GitHub, comprobación OTA + `fwupd` (LVFS) y perfiles automáticos por aplicación. |
 
@@ -87,10 +87,13 @@ curl -sSL https://raw.githubusercontent.com/yunusemreyl/omen-space/main/install.
 
 ---
 
-## Novedades en v2.5.4
+## Novedades en v2.6.0
 
-- **Comprobación de actualizaciones sin tiempos de espera:** Se reemplazó el endpoint `/commits/main` (que incluía ~923 KB de diffs en commits grandes) por `/commits?sha=main&per_page=30` con `--compressed` y cálculo local de commits pendientes (`omen_types::parse_commits_list_ahead`), evitando el error `"Could not verify the upstream commit"`.
-- **Incluye todas las mejoras de `v2.5.3`:** Distribución de teclado turca Q (`TR-Q`), matriz Primax `0xFF13` y correcciones RGB (`#385`), recuperación tras limpieza de ventiladores (`#385`, `#364`), unificación en `omen-types` y pruebas de paridad TR/EN/ES.
+- **Preajustes de color por tecla en RGB Studio (`#397`):** Guarda, carga, sobrescribe y elimina distribuciones personalizadas de 104 teclas (`~/.config/omenspace/key_presets.json`) directamente en RGB Studio con detección de edición activa y traducción TR/EN/ES (contribución de [@Dmitriy-Romanov](https://github.com/Dmitriy-Romanov)).
+- **RGB Reactivo y Onda Primax de ultra baja latencia (`#385`):** Despertar instantáneo por pulsación en `evdev`, escritura HID por lotes en una sola apertura y diff por páginas sucias en `0461:4F03` (de 10 paquetes/fotograma a 1–3), junto con control completo del deslizador de velocidad en `Reactive` y `Ripple`.
+- **Perfiles de energía verificados y diagnóstico UMA (`#396`):** Exclusión de `amd-pmf`, verificación por relectura en `platform_profile` / `thermal_profile`, errores D-Bus explícitos con aviso de modo UMA (`gpu_mux_mode=3`) y reversión automática de la UI/bandeja/overlay si la BIOS rechaza el cambio.
+- **Estabilidad térmica en OMEN 16-wf1xxx (`8C76`/`8C77`/`8C78`) (`#395`):** Eliminado el bucle de oscilación `Balanced <-> Performance` con `power-profiles-daemon` y las escrituras a 1 Hz en reposo; modo `Auto` delegado al EC nativo (`prefer_ec_auto_fan`) y mejoras en `hp-wmi` (`PWM_MODE_AUTO` / `max_reset`) para evitar bloqueos al 100 %.
+- **Botón de parada inmediata en limpieza de ventiladores (`#364`, `#385`):** Nuevo botón **Detener y volver a Automático** (`CancelFanCleaning`) y corrección de detección monozona (`rgb_zone_count = 1`) en hardware (`#369`).
 
 ---
 

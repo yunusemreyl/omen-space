@@ -29,10 +29,17 @@ pub async fn handle(cmd: &PowerCommand, conn: &Connection) -> Result<()> {
     let proxy = PowerProxy::new(conn).await?;
 
     match cmd {
-        PowerCommand::SetProfile { profile } => {
-            let res = proxy.set_power_profile(profile).await?;
-            println!("Response: {}", res);
-        }
+        PowerCommand::SetProfile { profile } => match proxy.set_power_profile(profile).await {
+            Ok(res) if res.starts_with("FAIL") => {
+                eprintln!("Failed to set power profile '{}': {}", profile, res);
+                std::process::exit(1);
+            }
+            Ok(res) => println!("Response: {}", res),
+            Err(e) => {
+                eprintln!("Failed to set power profile '{}': {}", profile, e);
+                std::process::exit(1);
+            }
+        },
         PowerCommand::SetLimits { enabled, pl1, pl2 } => {
             let res = proxy.set_power_limits(*enabled, *pl1, *pl2).await?;
             println!("Response: {}", res);

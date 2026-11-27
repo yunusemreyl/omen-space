@@ -252,6 +252,10 @@ pub(super) async fn handle_ec_override_recovery(
     override_ticks: &mut u32,
     last_reset: &mut Option<std::time::Instant>,
 ) {
+    if state.prefer_ec_auto_fan && state.mode == "auto" && state.manual_target_pct.is_none() {
+        *override_ticks = 0;
+        return;
+    }
     let Some(ref hwmon) = state.hwmon_path.clone() else {
         *override_ticks = 0;
         return;

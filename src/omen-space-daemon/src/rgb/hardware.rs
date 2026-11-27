@@ -71,6 +71,16 @@ pub fn map_four_zone_index(board_id: &str, zone: usize) -> usize {
     }
 }
 
+pub fn max_zones_for_caps(caps: &ModelCapabilities) -> u32 {
+    if caps.rgb_zone_count == Some(1) {
+        1
+    } else if caps.has_four_zone_rgb {
+        4
+    } else {
+        8
+    }
+}
+
 impl RgbHardware {
     pub fn detect_with_override(zone_override: Option<u32>) -> Self {
         let mut hw = Self::detect_raw();
@@ -101,7 +111,7 @@ impl RgbHardware {
         let new_path = "/sys/devices/platform/omen-rgb-keyboard/rgb_zones";
         let custom_path = "/sys/devices/platform/hp-omen-extra";
         let hp_path2 = "/sys/devices/platform/hp_omen_extra";
-        let max_zones = if caps.has_four_zone_rgb { 4 } else { 8 };
+        let max_zones = max_zones_for_caps(caps);
 
         if Path::new(new_path).exists() {
             let mut zone_count =
@@ -381,5 +391,37 @@ impl RgbHardware {
             format!("{}/animation_speed", base),
             mapped_speed.to_string(),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_zone_rgb_caps_clamp_max_zones_to_one() {
+        let mut single_zone = ModelCapabilities {
+            rgb_zone_count: Some(1),
+            has_four_zone_rgb: false,
+            ..Default::default()
+        };
+        assert_eq!(max_zones_for_caps(&single_zone), 1);
+
+        single_zone.has_four_zone_rgb = true;
+        assert_eq!(max_zones_for_caps(&single_zone), 1);
+
+        let four_zone = ModelCapabilities {
+            rgb_zone_count: None,
+            has_four_zone_rgb: true,
+            ..Default::default()
+        };
+        assert_eq!(max_zones_for_caps(&four_zone), 4);
+
+        let eight_zone = ModelCapabilities {
+            rgb_zone_count: None,
+            has_four_zone_rgb: false,
+            ..Default::default()
+        };
+        assert_eq!(max_zones_for_caps(&eight_zone), 8);
     }
 }

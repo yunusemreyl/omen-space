@@ -5,6 +5,8 @@ use super::lamparray::{
 use glob::glob;
 use log::{info, warn};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone)]
 pub struct HidPerKeyBackend {
@@ -12,6 +14,8 @@ pub struct HidPerKeyBackend {
     pub device_pid: Option<u16>,
     pub lamparray: Option<LampArrayBackend>,
     pub is_primax_mcu: bool,
+    pub primax_mode_active: Arc<AtomicBool>,
+    pub primax_last_pages: Arc<Mutex<Option<[[u8; 65]; 9]>>>,
 }
 
 impl HidPerKeyBackend {
@@ -42,6 +46,8 @@ impl HidPerKeyBackend {
             device_pid,
             lamparray,
             is_primax_mcu,
+            primax_mode_active: Arc::new(AtomicBool::new(false)),
+            primax_last_pages: Arc::new(Mutex::new(None)),
         };
         if backend.is_available() {
             info!(
@@ -276,6 +282,13 @@ impl HidPerKeyBackend {
         }
     }
 
+    pub fn invalidate_primax_cache(&self) {
+        self.primax_mode_active.store(false, Ordering::SeqCst);
+        if let Ok(mut guard) = self.primax_last_pages.lock() {
+            *guard = None;
+        }
+    }
+
     fn write_primax_report(&self, report: &[u8; Self::PACKET_SIZE]) -> bool {
         if !Self::is_primax_cmd_allowed(report[1]) {
             warn!("Blocked non-whitelisted Primax command 0x{:02X}", report[1]);
@@ -284,26 +297,27 @@ impl HidPerKeyBackend {
         self.write_packet(report)
     }
 
-    /// Primax McuSDK2 (0461:4F03/4E9A/4E9B/4F1E/4ECB) static colour write across 3x60 LED pages (180 slots).
+    /// Primax McuSDK2 (0461:4F03/4E9A/4E9B/4F1E/4ECB) static colour write across 3x60 LED pages (180 slots)
+    /// using dirty-page diffing and single-open batched HID writes.
     pub fn write_primax_colors(&self, key_colors: &[(u8, u8, u8)]) -> bool {
-        let on_pkt = Self::build_primax_report(0x09, 0x00, 0x01, &[0x01]);
-        let _ = self.write_primax_report(&on_pkt);
-
-        let (r_leds, g_leds, b_leds) =
-            super::primax_map::encode_primax_channels(self.device_pid, key_colors);
-
-        let channels = [(0x05u8, &r_leds), (0x06u8, &g_leds), (0x07u8, &b_leds)];
-        for (cmd, leds) in channels {
-            for chunk_idx in 0..3 {
-                let start = chunk_idx * 60;
-                let end = (start + 60).min(Self::PRIMAX_LED_COUNT);
-                let pkt = Self::build_primax_report(cmd, chunk_idx as u8, 0x00, &leds[start..end]);
-                if !self.write_primax_report(&pkt) {
-                    return false;
-                }
-            }
+        let mut guard = match self.primax_last_pages.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let mut mode_active = self.primax_mode_active.load(Ordering::SeqCst);
+        let packets =
+            plan_primax_packets(self.device_pid, key_colors, &mut guard, &mut mode_active);
+        if packets.is_empty() {
+            return true;
         }
-        true
+        if self.write_packets_batch(&packets) {
+            self.primax_mode_active.store(mode_active, Ordering::SeqCst);
+            true
+        } else {
+            self.primax_mode_active.store(false, Ordering::SeqCst);
+            *guard = None;
+            false
+        }
     }
 
     pub fn write_darfon_colors(&self, key_colors: &[(u8, u8, u8)]) -> bool {
@@ -411,6 +425,64 @@ impl HidPerKeyBackend {
         any_ok
     }
 
+    pub fn write_packets_batch(&self, packets: &[[u8; Self::PACKET_SIZE]]) -> bool {
+        use std::io::Write;
+        use std::os::unix::fs::FileTypeExt;
+
+        if packets.is_empty() {
+            return true;
+        }
+        let mut any_ok = false;
+        for path in &self.hidraw_paths {
+            let is_char_dev = std::fs::metadata(path)
+                .map(|m| m.file_type().is_char_device())
+                .unwrap_or(false);
+            let open_res = if is_char_dev {
+                std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(path)
+            } else {
+                std::fs::OpenOptions::new().write(true).open(path)
+            };
+            match open_res {
+                Ok(mut file) => {
+                    if is_char_dev {
+                        Self::drain_hidraw_input(&mut file);
+                    }
+                    let mut all_ok = true;
+                    let mut wrote_any = false;
+                    for pkt in packets {
+                        if self.is_primax_mcu && !Self::is_primax_cmd_allowed(pkt[1]) {
+                            warn!("Blocked non-whitelisted Primax command 0x{:02X}", pkt[1]);
+                            all_ok = false;
+                            break;
+                        }
+                        if wrote_any && is_char_dev {
+                            std::thread::sleep(std::time::Duration::from_micros(300));
+                        }
+                        if let Err(e) = file.write_all(pkt) {
+                            warn!("Failed to write to {}: {}", path, e);
+                            all_ok = false;
+                            break;
+                        }
+                        wrote_any = true;
+                    }
+                    if is_char_dev {
+                        Self::drain_hidraw_input(&mut file);
+                    }
+                    if all_ok {
+                        any_ok = true;
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to open {} for writing: {}", path, e);
+                }
+            }
+        }
+        any_ok
+    }
+
     pub fn send_enter_per_key_mode(&self, brightness: u32) -> bool {
         if self.lamparray.is_some() {
             return true;
@@ -418,7 +490,13 @@ impl HidPerKeyBackend {
         if self.is_primax_mcu {
             let val = if brightness == 0 { 0x00 } else { 0x01 };
             let pkt = Self::build_primax_report(0x09, 0x00, 0x01, &[val]);
-            return self.write_primax_report(&pkt);
+            let ok = self.write_primax_report(&pkt);
+            if let Ok(mut guard) = self.primax_last_pages.lock() {
+                *guard = None;
+            }
+            self.primax_mode_active
+                .store(ok && brightness > 0, Ordering::SeqCst);
+            return ok;
         }
         let mut packet = self.build_packet(Self::SUB_ENTER_EFFECT);
         packet[3] = Self::STATIC_MODE_ID;
@@ -619,5 +697,138 @@ impl HidPerKeyBackend {
             key_colors[key_index] = (r, g, b);
         }
         self.write_per_key_colors(&key_colors)
+    }
+}
+
+pub(crate) fn plan_primax_packets(
+    pid: Option<u16>,
+    key_colors: &[(u8, u8, u8)],
+    cache: &mut Option<[[u8; 65]; 9]>,
+    mode_active: &mut bool,
+) -> Vec<[u8; 65]> {
+    let (r_leds, g_leds, b_leds) = super::primax_map::encode_primax_channels(pid, key_colors);
+    let mut pages = [[0u8; 65]; 9];
+    let channels = [(0x05u8, &r_leds), (0x06u8, &g_leds), (0x07u8, &b_leds)];
+    for (ch_idx, (cmd, leds)) in channels.into_iter().enumerate() {
+        for chunk_idx in 0..3 {
+            let start = chunk_idx * 60;
+            let end = (start + 60).min(HidPerKeyBackend::PRIMAX_LED_COUNT);
+            let pkt = HidPerKeyBackend::build_primax_report(
+                cmd,
+                chunk_idx as u8,
+                0x00,
+                &leds[start..end],
+            );
+            pages[ch_idx * 3 + chunk_idx] = pkt;
+        }
+    }
+
+    let mut out = Vec::with_capacity(10);
+    if !*mode_active || cache.is_none() {
+        let on_pkt = HidPerKeyBackend::build_primax_report(0x09, 0x00, 0x01, &[0x01]);
+        if HidPerKeyBackend::is_primax_cmd_allowed(on_pkt[1]) {
+            out.push(on_pkt);
+        }
+        for pkt in &pages {
+            if HidPerKeyBackend::is_primax_cmd_allowed(pkt[1]) {
+                out.push(*pkt);
+            }
+        }
+        *mode_active = true;
+        *cache = Some(pages);
+    } else if let Some(prev) = cache.as_ref() {
+        for (i, pkt) in pages.iter().enumerate() {
+            if *pkt != prev[i] && HidPerKeyBackend::is_primax_cmd_allowed(pkt[1]) {
+                out.push(*pkt);
+            }
+        }
+        *cache = Some(pages);
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn primax_packet_diffing_minimizes_bus_traffic() {
+        let mut cache = None;
+        let mut mode_active = false;
+        let base_colors = vec![(10u8, 20u8, 30u8); HidPerKeyBackend::TOTAL_KEY_COUNT];
+
+        // 1. First frame: 0x09 enter-per-key + 9 LED pages = 10 packets.
+        let first = plan_primax_packets(Some(0x4F03), &base_colors, &mut cache, &mut mode_active);
+        assert_eq!(first.len(), 10);
+        assert_eq!(first[0][1], 0x09);
+        assert!(mode_active);
+        assert!(cache.is_some());
+        for pkt in &first {
+            assert!(HidPerKeyBackend::is_primax_cmd_allowed(pkt[1]));
+        }
+
+        // 2. Identical frame: 0 packets.
+        let identical =
+            plan_primax_packets(Some(0x4F03), &base_colors, &mut cache, &mut mode_active);
+        assert_eq!(identical.len(), 0);
+
+        // 3. Single-key reactive change (slot 58 'G' -> LED 84, chunk 1): <= 3 pages, no 0x09.
+        let mut one_key = base_colors.clone();
+        one_key[58] = (255, 0, 128);
+        let diff = plan_primax_packets(Some(0x4F03), &one_key, &mut cache, &mut mode_active);
+        assert!(!diff.is_empty() && diff.len() <= 3);
+        assert!(diff.iter().all(|pkt| pkt[1] != 0x09));
+        for pkt in &diff {
+            assert!(HidPerKeyBackend::is_primax_cmd_allowed(pkt[1]));
+        }
+
+        // 4. Invalidation forces full 10-packet refresh.
+        mode_active = false;
+        cache = None;
+        let after_inv = plan_primax_packets(Some(0x4F03), &one_key, &mut cache, &mut mode_active);
+        assert_eq!(after_inv.len(), 10);
+        assert_eq!(after_inv[0][1], 0x09);
+    }
+
+    #[test]
+    fn write_packets_batch_writes_all_packets_to_temp_file_in_one_open() {
+        let path = std::env::temp_dir().join(format!(
+            "omen-primax-batch-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::write(&path, []).unwrap();
+
+        let backend = HidPerKeyBackend {
+            hidraw_paths: vec![path.to_string_lossy().to_string()],
+            device_pid: Some(0x4F03),
+            lamparray: None,
+            is_primax_mcu: true,
+            primax_mode_active: Arc::new(AtomicBool::new(false)),
+            primax_last_pages: Arc::new(Mutex::new(None)),
+        };
+
+        assert!(backend.write_packets_batch(&[]));
+
+        let batch = vec![
+            HidPerKeyBackend::build_primax_report(0x09, 0x00, 0x01, &[0x01]),
+            HidPerKeyBackend::build_primax_report(0x05, 0x00, 0x00, &[0xAA, 0xBB]),
+            HidPerKeyBackend::build_primax_report(0x07, 0x02, 0x00, &[0xCC]),
+        ];
+        assert!(backend.write_packets_batch(&batch));
+
+        let bytes = std::fs::read(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(bytes.len(), batch.len() * 65);
+        assert_eq!(&bytes[0..65], &batch[0][..]);
+        assert_eq!(&bytes[65..130], &batch[1][..]);
+        assert_eq!(&bytes[130..195], &batch[2][..]);
+
+        // Verify invalidate_primax_cache resets active flag and page cache.
+        backend.primax_mode_active.store(true, Ordering::SeqCst);
+        *backend.primax_last_pages.lock().unwrap() = Some([[0u8; 65]; 9]);
+        backend.invalidate_primax_cache();
+        assert!(!backend.primax_mode_active.load(Ordering::SeqCst));
+        assert!(backend.primax_last_pages.lock().unwrap().is_none());
     }
 }

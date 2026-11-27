@@ -487,7 +487,6 @@ pub fn build_interactive_keyboard(
         current_y += height + margin;
     }
 
-
     let drawing_area = gtk::DrawingArea::builder()
         .width_request(760)
         .height_request(260)
@@ -769,7 +768,7 @@ pub fn build_interactive_keyboard(
     let p_color_c = paint_color.clone();
     let kc_c = key_colors.clone();
     let pk_c = per_key_colors.clone();
-        let dirty_paint = colors_dirty.clone();
+    let dirty_paint = colors_dirty.clone();
     let zc_c = zone_colors.clone();
 
     let msl_click = msl_c.clone();
@@ -1406,7 +1405,6 @@ pub fn build_interactive_keyboard(
             .tooltip_text(crate::i18n::t("kp_load_tooltip"))
             .build();
 
-
         // Persist the current frame under a name chosen by the user.
         let do_save: Rc<dyn Fn()> = {
             let pk = per_key_colors.clone();
@@ -1415,7 +1413,12 @@ pub fn build_interactive_keyboard(
             Rc::new(move || {
                 let dialog = gtk::Window::builder()
                     .title(crate::i18n::t("kp_name_title"))
-                    .transient_for(&card.root().and_downcast::<gtk::Window>().unwrap_or_default())
+                    .transient_for(
+                        &card
+                            .root()
+                            .and_downcast::<gtk::Window>()
+                            .unwrap_or_default(),
+                    )
                     .modal(true)
                     .default_width(360)
                     .build();
@@ -1503,13 +1506,19 @@ pub fn build_interactive_keyboard(
             save_btn.connect_clicked(move |_| s());
         }
 
-        // Apply a stored preset to every key, then push one frame to the daemon.
+        // Apply a stored preset to every key, switch out of Off or animated
+        // effects so the loaded layout renders cleanly, then push to the daemon.
         let apply_preset: Rc<dyn Fn(&str)> = {
             let dirty_apply = colors_dirty.clone();
             let pk = per_key_colors.clone();
             let kc = key_colors.clone();
             let keys = keys_rc.clone();
             let da = drawing_area.clone();
+            let sm_apply = sel_mode.clone();
+            let btn_key_apply = btn_key.clone();
+            let dd_eff_apply = effects_dropdown.clone();
+            let msl_apply = msl_c.clone();
+            let globals_apply = globals.clone();
             Rc::new(move |name: &str| {
                 let Some(preset) = crate::keyboardrgb::presets::load_presets()
                     .into_iter()
@@ -1533,10 +1542,22 @@ pub fn build_interactive_keyboard(
                     let frame = pk.borrow();
                     let mut kc = kc.borrow_mut();
                     for k in keys.iter() {
-                        if let Some(c) = frame.get(k.id as usize) {
+                        if let Some(c) = frame.get(k.id) {
                             kc.insert(k.name.clone(), c.clone());
                         }
                     }
+                }
+                if *sm_apply.borrow() == SelectionMode::Off {
+                    btn_key_apply.set_active(true);
+                }
+                if let Some(pk_idx) = msl_apply.iter().position(|m| m == "per_key_custom") {
+                    if dd_eff_apply.selected() as usize != pk_idx {
+                        dd_eff_apply.set_selected(pk_idx as u32);
+                    }
+                }
+                {
+                    let mut st = globals_apply.borrow_mut();
+                    st.power = true;
                 }
                 crate::daemon_client::set_per_key_colors_sync(pk.borrow().clone());
                 da.queue_draw();
@@ -1593,9 +1614,12 @@ pub fn build_interactive_keyboard(
         // board no longer matches a saved preset, so fall back to the neutral
         // entry instead of claiming one is active.
         {
-            let dd = preset_dd.clone();
+            let dd_weak = preset_dd.downgrade();
             let dirty = colors_dirty.clone();
             gtk::glib::timeout_add_local(std::time::Duration::from_millis(300), move || {
+                let Some(dd) = dd_weak.upgrade() else {
+                    return gtk::glib::ControlFlow::Break;
+                };
                 if dirty.take() {
                     refresh_dropdown(&dd, None);
                 }

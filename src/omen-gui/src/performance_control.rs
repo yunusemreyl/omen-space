@@ -148,24 +148,94 @@ pub fn build_page() -> gtk::Box {
     bal_btn.set_group(Some(&eco_btn));
     perf_btn.set_group(Some(&eco_btn));
 
+    let perf_error_box = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .spacing(8)
+        .css_classes(["os-panel"])
+        .margin_bottom(18)
+        .visible(false)
+        .build();
+    let perf_err_icon = gtk::Image::builder()
+        .icon_name("dialog-warning-symbolic")
+        .css_classes(["warning"])
+        .valign(gtk::Align::Start)
+        .margin_top(2)
+        .build();
+    let perf_error_label = gtk::Label::builder()
+        .xalign(0.0)
+        .wrap(true)
+        .selectable(true)
+        .hexpand(true)
+        .css_classes(["warning"])
+        .build();
+    perf_error_box.append(&perf_err_icon);
+    perf_error_box.append(&perf_error_label);
+
     let updating_ext = Rc::new(std::cell::Cell::new(false));
 
+    let apply_power_profile_ui = {
+        let eco_r = eco_btn.clone();
+        let bal_r = bal_btn.clone();
+        let perf_r = perf_btn.clone();
+        let u_r = updating_ext.clone();
+        let err_box_r = perf_error_box.clone();
+        let err_lbl_r = perf_error_label.clone();
+        move |target: &str| {
+            let eco_c = eco_r.clone();
+            let bal_c = bal_r.clone();
+            let perf_c = perf_r.clone();
+            let u_c = u_r.clone();
+            let err_box_c = err_box_r.clone();
+            let err_lbl_c = err_lbl_r.clone();
+            daemon_client::set_power_profile_with_result(
+                target.to_string(),
+                move |res| match res {
+                    Ok(()) => {
+                        err_box_c.set_visible(false);
+                    }
+                    Err((err_msg, actual)) => {
+                        u_c.set(true);
+                        let p_lower = actual.to_lowercase();
+                        if p_lower == "performance" {
+                            perf_c.set_active(true);
+                        } else if p_lower == "power-saver" || p_lower == "quiet" || p_lower == "eco"
+                        {
+                            eco_c.set_active(true);
+                        } else {
+                            bal_c.set_active(true);
+                        }
+                        u_c.set(false);
+                        err_lbl_c.set_label(&format!(
+                            "{}: {}",
+                            i18n::t("perf_profile_apply_failed"),
+                            err_msg
+                        ));
+                        err_box_c.set_visible(true);
+                    }
+                },
+            );
+        }
+    };
+
     let u1 = updating_ext.clone();
+    let apply1 = apply_power_profile_ui.clone();
     eco_btn.connect_toggled(move |btn| {
         if btn.is_active() && !u1.get() {
-            daemon_client::set_power_profile_sync("power-saver".to_string());
+            apply1("power-saver");
         }
     });
     let u2 = updating_ext.clone();
+    let apply2 = apply_power_profile_ui.clone();
     bal_btn.connect_toggled(move |btn| {
         if btn.is_active() && !u2.get() {
-            daemon_client::set_power_profile_sync("balanced".to_string());
+            apply2("balanced");
         }
     });
     let u3 = updating_ext.clone();
+    let apply3 = apply_power_profile_ui;
     perf_btn.connect_toggled(move |btn| {
         if btn.is_active() && !u3.get() {
-            daemon_client::set_power_profile_sync("performance".to_string());
+            apply3("performance");
         }
     });
 
@@ -173,6 +243,7 @@ pub fn build_page() -> gtk::Box {
     perf_box.append(&bal_wrap);
     perf_box.append(&perf_wrap);
     page.append(&perf_box);
+    page.append(&perf_error_box);
 
     // ── Section 2: Fan Control ────────────────────────────────────────────────
     let fan_header = gtk::Box::builder()

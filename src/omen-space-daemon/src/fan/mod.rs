@@ -31,6 +31,7 @@ pub struct FanState {
     pub hwmon_path: Option<PathBuf>,
     pub minimum_manual_pwm: u32,
     pub zero_pct_manual_pwm: bool,
+    pub prefer_ec_auto_fan: bool,
     pub found_fans: Vec<u32>,
     pub max_speeds: HashMap<u32, u32>,
     pub fallback_paths: HashMap<u32, PathBuf>,
@@ -86,6 +87,7 @@ impl FanService {
             hwmon_path: None,
             minimum_manual_pwm: effective_min_pwm,
             zero_pct_manual_pwm: config.zero_pct_manual_pwm,
+            prefer_ec_auto_fan: caps.prefer_ec_auto_fan,
             found_fans: Vec::new(),
             max_speeds: HashMap::new(),
             fallback_paths: HashMap::new(),
@@ -367,6 +369,10 @@ impl FanService {
                     }
 
                     let mut state = self.state.lock().await;
+                    if state.prefer_ec_auto_fan {
+                        write_pwm_duty(&mut state, 0).await;
+                        continue;
+                    }
                     let is_fan_on = state.auto_fan_activated_at.is_some();
                     let is_performance_power = Self::is_performance_power_profile();
 
@@ -478,6 +484,7 @@ impl FanService {
         let pwm_enable_val = match mode {
             "ec" => 2,
             "max" => 0,
+            "auto" if state.prefer_ec_auto_fan => 2,
             "auto" | "custom" | "performance" => 1,
             _ => return false,
         };
@@ -514,11 +521,14 @@ impl FanService {
         let mut written_enable_val = pwm_enable_val;
         if let Some(ref hwmon) = state.hwmon_path {
             if pwm_enable_val == 0 {
-                if sysfs_exists(hwmon.join("pwm1")).await {
-                    let _ = sysfs_write(hwmon.join("pwm1_enable"), "1").await;
-                    let _ = sysfs_write(hwmon.join("pwm1"), "255").await;
-                }
                 ok = sysfs_write(hwmon.join("pwm1_enable"), "0").await;
+                if !ok && sysfs_exists(hwmon.join("pwm1")).await {
+                    let _ = sysfs_write(hwmon.join("pwm1_enable"), "1").await;
+                    ok = sysfs_write(hwmon.join("pwm1"), "255").await;
+                    if ok {
+                        written_enable_val = 1;
+                    }
+                }
             } else if pwm_enable_val == 1 {
                 if !sysfs_exists(hwmon.join("pwm1")).await {
                     if was_max {

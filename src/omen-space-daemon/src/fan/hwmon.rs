@@ -178,14 +178,20 @@ pub async fn refresh_active_platform_profile() {
     }
 }
 
-/// Clear the EC's sticky max-boost latch (`pwm1_enable = 0`) by transitioning through
-/// `pwm1_enable = 2` (`PWM_MODE_AUTO`), refreshing the active platform profile (WMI 0x1A),
-/// and waiting 150 ms for firmware handoff before switching back to manual duty (#364, #395).
+/// Clear the EC's sticky max-boost latch (`pwm1_enable = 0`) by transitioning
+/// cleanly back to `pwm1_enable = 2` (`PWM_MODE_AUTO`). Never writes
+/// `/sys/firmware/acpi/platform_profile` from the fan loop (#395).
 pub async fn leave_max_boost(hwmon: &Path) {
     let pwm_enable_path = hwmon.join("pwm1_enable");
     if sysfs_exists(&pwm_enable_path).await {
+        let current = sysfs_read(&pwm_enable_path, 2).await;
+        let pwm_path = hwmon.join("pwm1");
+        if current == 0 && sysfs_exists(&pwm_path).await {
+            let _ = sysfs_write(&pwm_enable_path, "1").await;
+            let _ = sysfs_write(&pwm_path, "52").await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        }
         let _ = sysfs_write(&pwm_enable_path, "2").await;
-        refresh_active_platform_profile().await;
         tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
     }
 }
@@ -262,12 +268,25 @@ pub async fn write_pwm_duty(state: &mut FanState, pct: u32) -> bool {
 
     if pct == 0 {
         if sysfs_exists(&pwm_enable_path).await {
-            leave_max_boost(&hwmon).await;
+            let current = sysfs_read(&pwm_enable_path, 2).await;
             if state.zero_pct_manual_pwm {
-                let _ = sysfs_write(&pwm_enable_path, "1").await;
-                let _ = sysfs_write(&pwm_path, "0").await;
-            } else {
-                let _ = sysfs_write(&pwm_enable_path, "2").await;
+                if current == 0 {
+                    leave_max_boost(&hwmon).await;
+                }
+                if current != 1 {
+                    let _ = sysfs_write(&pwm_enable_path, "1").await;
+                }
+                if state.last_written_duty != Some(0) {
+                    let _ = sysfs_write(&pwm_path, "0").await;
+                }
+            } else if current != 2 {
+                if current == 0 {
+                    leave_max_boost(&hwmon).await;
+                } else {
+                    let safe_min = state.minimum_manual_pwm.to_string();
+                    let _ = sysfs_write(&pwm_path, &safe_min).await;
+                    let _ = sysfs_write(&pwm_enable_path, "2").await;
+                }
             }
         }
         state.last_written_duty = Some(0);
