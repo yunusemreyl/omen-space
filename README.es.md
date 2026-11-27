@@ -8,7 +8,7 @@
 
   <p>
     <a href="https://github.com/yunusemreyl/omen-space/releases/latest">
-      <img src="https://img.shields.io/badge/Versi%C3%B3n-v2.6.1-e11d48?style=flat-square" alt="Versión v2.6.1" />
+      <img src="https://img.shields.io/badge/Versi%C3%B3n-v2.6.2-e11d48?style=flat-square" alt="Versión v2.6.2" />
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/Licencia-GPL--3.0-10b981?style=flat-square" alt="Licencia" />
@@ -87,7 +87,16 @@ curl -sSL https://raw.githubusercontent.com/yunusemreyl/omen-space/main/install.
 
 ---
 
-## Novedades en v2.6.1
+## Novedades en v2.6.2
+
+- **Sincronización de energía en Rendimiento y modo Eco por batería opcional (`#398`):** Se trasladó el cambio automático a Eco directamente a la página **Rendimiento** como **Sincronizar con el estado de la batería** (desactivado por defecto) junto a **Sincronizar con la gestión de energía del sistema** (`SetSystemPowerSync`, `omen-cli power system-sync on|off`). Cuando `TLP` o `auto-cpufreq` está activo o habilitado, el interruptor se oculta y muestra qué gestor controla la energía del sistema.
+- **Renderizado nativo en cuadrícula `LampArray` y corrección de columnas (`#401`):** Los efectos RGB por software ahora se renderizan directamente sobre la cuadrícula física `(x, y)` de `LampArray`, eliminando las columnas apagadas en OMEN MAX 16 (`8D88`, 120 LEDs en 6×20) y corrigiendo el redondeo de columnas en `KEY_COORDS`.
+- **Correcciones en Primax McuSDK2 (`0461:4F03`) (`#364`):** `plan_primax_packets` ahora envía las 9 páginas R/G/B ordenadas terminando en el cierre `0x07` chunk 2 ante cualquier cambio (corrigiendo efectos congelados y colores `B == 0` en `Reactive`/`Breathing`/`Blinking` sin tráfico en reposo), usa `Notify::notify_one()` para no perder pulsaciones en `evdev`, y sincroniza el desplegable de efectos con **Per-Key Custom** al pintar teclas o zonas individuales.
+- **Soporte verificado para Victus 15-fb2xxx (`8D07`) (`#399`, `#402`) y perfil `"custom"` (`#400`):** Se añadió la placa `8D07` a `driver/hp-wmi.c` y `boards.json` (`verified_boards`) e se integró el PR `#400` de [@Dmitriy-Romanov](https://github.com/Dmitriy-Romanov) para leer el perfil `"custom"` del firmware como `"balanced"`.
+
+---
+
+## Anteriormente en v2.6.1
 
 - **Motor RGB fluido con consumo mínimo de CPU:** Bucle unificado `rgb_engine_loop` con reposo a 0 % CPU mediante `tokio::sync::Notify`, renderizado en pila (`render_per_key_rgb`), mapeo precalculado de `LampArray` con diff por bloques sucios, envíos HID por lotes con `O_NONBLOCK`, y vista previa en `omen-gui` a 40 FPS con glifos en caché y fase continua al ajustar la velocidad (`~59.8 µs/fotograma`, `<0.18 %` de 1 núcleo a 30 FPS en `--release`).
 - **Cambio automático CA / Batería configurable y restauración completa al conectar CA (`#398`):** Nuevo interruptor **Auto-Switch Profile on AC / Battery** (`Ajustes -> Rendimiento`, `omen-cli power auto-switch on|off`, D-Bus `SetAcAutoSwitch`), restauración del perfil previo al reconectar el cargador, sincronización de `energy_performance_preference` (EPP) de CPU, recuperación de límites RAPL, fallback `performance -> balanced` en `power-profiles-daemon` y restauración de `PL1/PL2` en `hp-wmi.c` tanto en `Balanced` como en `Performance`.

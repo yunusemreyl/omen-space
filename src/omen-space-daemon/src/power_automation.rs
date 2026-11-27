@@ -178,8 +178,11 @@ mod tests {
         let svc = PowerService::new_with_paths(dir.join("power.json"), paths, Arc::new(io), false)
             .await
             .unwrap();
+        assert!(
+            !svc.is_ac_auto_switch_enabled().await,
+            "AC/battery auto-switch must be opt-in (disabled by default)"
+        );
         svc.set_profile_internal("performance").await;
-        svc.set_ac_auto_switch_enabled(false).await;
 
         let mut saved = None;
         handle_ac_transition(&svc, &mut saved, false, false).await;
@@ -207,6 +210,7 @@ mod tests {
             .await
             .unwrap();
         svc.set_profile_internal("balanced").await;
+        svc.set_ac_auto_switch_enabled(true).await;
         assert!(svc.is_ac_auto_switch_enabled().await);
 
         let mut saved = None;

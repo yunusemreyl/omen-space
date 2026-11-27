@@ -6,6 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ---
 
+## [2.6.2] - 2026-11-27
+
+### Added
+- **Performance Page Power Sync Controls (`#398`):** Added **Sync with System Power Management** (`SetSystemPowerSync`, `omen-cli power system-sync on|off`, two-way PPD/`system76-power` toggle that automatically hides its switch and displays an active `TLP` / `auto-cpufreq` badge notice when detected via fast-path + 10 s cache) and moved **Sync with Battery Status** directly onto the **Performance** page (`performance_control.rs`, removed duplicate Settings row), making automatic battery Eco switching opt-in (`ac_auto_switch = false` by default).
+- **Verified Victus 15-fb2xxx (`8D07`) Support (`#399`, `#402`):** Added board `8D07` to `driver/hp-wmi.c` (`victus_s_thermal_profile_boards`, `broken_omen_hpc_guid_boards`, and best-effort GPU cTGP/PPAB update on AMD iGPU builds) and `boards.json` (`verified_boards`, dual-fan WMI, single-zone backlight).
+
+### Changed
+- **Hardware-Native `LampArray` Grid Effect Rendering (`#401`):** Precomputed physical `(row, col, key_x, key_y)` grids from `GetLampMap` (`build_lamp_grid`, `render_effect_slice`) so animated/interactive effects drive every physical lamp (fixing missing columns on OMEN MAX 16 `8D88`'s 6×20 layout) with zero heap allocations and zero new locks, while keeping `slot_for_lamp` for static 104-key presets.
+
+### Fixed
+- **Firmware `"custom"` Profile Readback (`#400`):** Merged PR `#400` by [@Dmitriy-Romanov](https://github.com/Dmitriy-Romanov) mapping `"custom"` platform_profile readbacks to `"balanced"` instead of `"performance"`.
+- **104-Slot `KEY_COORDS` Column Quantization Holes (`#401`):** Evenly mapped `KEY_COORDS` `x` coordinates across all 20 columns `0..=19` (`slot_x_to_col`), eliminating dead columns `[15, 17, 19]`.
+- **Primax McuSDK2 (`0461:4F03`) Effect Latch, Wakeup & Dropdown Sync (`#364`):** Fixed `plan_primax_packets` to emit all 9 ordered pages ending with `0x07` chunk 2 on changed frames while emitting 0 packets on idle frames, switched `evdev_monitor::record_key_press` to `Notify::notify_one()`, and synced `effects_dropdown` to `per_key_custom` (matching GUI `breathing`/`blinking` floors) when painting keys or zones.
+
+---
+
 ## [2.6.1] - 2026-11-27
 
 ### Added

@@ -471,4 +471,18 @@ mod tests {
         );
         assert!(found.is_empty());
     }
+
+    #[test]
+    fn board_8d07_verified_victus_15_fb2xxx() {
+        let json = boards_json();
+        let board = get_board(&json, "8D07")
+            .expect("Board 8D07 (Victus 15-fb2xxx) must be in boards.json (#399, #402)");
+        assert!(
+            is_verified(&json, "8D07"),
+            "Board 8D07 must appear in verified_boards (#399, #402)"
+        );
+        assert_eq!(board["rgb_zone_count"].as_u64(), Some(1));
+        assert_eq!(board["fan_zone_count"].as_u64(), Some(2));
+        assert_eq!(board["has_mux_switch"].as_bool(), Some(false));
+    }
 }

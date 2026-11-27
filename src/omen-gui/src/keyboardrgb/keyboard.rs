@@ -624,7 +624,7 @@ pub fn build_interactive_keyboard(
 
             match anim_mode.as_str() {
                 "breathing" => {
-                    let factor = (anim_phase * 0.05).sin().abs() * 0.8 + 0.2;
+                    let factor = ((anim_phase * 0.05).sin() * 0.5 + 0.5) * 0.97 + 0.03;
                     r *= factor;
                     g *= factor;
                     b *= factor;
@@ -662,7 +662,7 @@ pub fn build_interactive_keyboard(
                     let factor = if (anim_phase * 0.12).sin() >= 0.0 {
                         1.0
                     } else {
-                        0.08
+                        0.03
                     };
                     r *= factor;
                     g *= factor;
@@ -900,6 +900,7 @@ pub fn build_interactive_keyboard(
 
     let msl_click = msl_c.clone();
     let am_click = active_mode_idx.clone();
+    let dd_click = effects_dropdown.clone();
 
     click.connect_pressed(move |_g, _n_press, x, y| {
         let mode = *sm_click.borrow();
@@ -938,50 +939,68 @@ pub fn build_interactive_keyboard(
         }
 
         if !hit_names.is_empty() {
-            let mut kc_mut = kc_c.borrow_mut();
-            let mut pk_mut = pk_c.borrow_mut();
-            let mut zc_mut = zc_c.borrow_mut();
+            let mut pk_to_send: Option<Vec<String>> = None;
             let mut zones_changed = Vec::new();
+            {
+                let mut kc_mut = kc_c.borrow_mut();
+                let mut pk_mut = pk_c.borrow_mut();
+                let mut zc_mut = zc_c.borrow_mut();
 
-            for n in &hit_names {
-                kc_mut.insert(n.clone(), hex.clone());
-                if detected_mode == KeyboardMode::Omen4Zone {
-                    let z = get_zone_for_key(n);
-                    zc_mut[(z - 1) as usize] = hex.clone();
-                    if !zones_changed.contains(&z) {
-                        zones_changed.push(z);
-                    }
-                } else if detected_mode == KeyboardMode::PerKey {
-                    if let Some(k) = keys_click.iter().find(|x| &x.name == n) {
-                        if k.id < pk_mut.len() {
-                            pk_mut[k.id] = hex.clone();
+                for n in &hit_names {
+                    kc_mut.insert(n.clone(), hex.clone());
+                    if detected_mode == KeyboardMode::Omen4Zone {
+                        let z = get_zone_for_key(n);
+                        zc_mut[(z - 1) as usize] = hex.clone();
+                        if !zones_changed.contains(&z) {
+                            zones_changed.push(z);
+                        }
+                    } else if detected_mode == KeyboardMode::PerKey {
+                        if let Some(k) = keys_click.iter().find(|x| &x.name == n) {
+                            if k.id < pk_mut.len() {
+                                pk_mut[k.id] = hex.clone();
+                            }
+                        }
+                    } else if detected_mode == KeyboardMode::Victus1Zone {
+                        zc_mut[0] = hex.clone();
+                        if !zones_changed.contains(&1) {
+                            zones_changed.push(1);
                         }
                     }
-                } else if detected_mode == KeyboardMode::Victus1Zone {
-                    zc_mut[0] = hex.clone();
-                    if !zones_changed.contains(&1) {
-                        zones_changed.push(1);
+                }
+                sync_parsed_rgb(&keys_click, &kc_mut, &pr_c);
+
+                if detected_mode == KeyboardMode::PerKey {
+                    dirty_paint.set(true);
+                    if mode == SelectionMode::All {
+                        fill_all_key_slots(&mut pk_mut, &hex);
+                        zc_mut.iter_mut().take(4).for_each(|z| *z = hex.clone());
                     }
+                    pk_to_send = Some(pk_mut.clone());
                 }
             }
-            sync_parsed_rgb(&keys_click, &kc_mut, &pr_c);
 
             if detected_mode == KeyboardMode::PerKey {
-                dirty_paint.set(true);
                 if mode == SelectionMode::All {
-                    fill_all_key_slots(&mut pk_mut, &hex);
-                    zc_mut.iter_mut().take(4).for_each(|z| *z = hex.clone());
                     let cur_m = msl_click
                         .get(*am_click.borrow())
                         .map(|s| s.as_str())
                         .unwrap_or("static");
                     if cur_m == "per_key_custom" {
-                        crate::daemon_client::set_per_key_colors_sync(pk_mut.clone());
+                        if let Some(pk_vec) = pk_to_send {
+                            crate::daemon_client::set_per_key_colors_sync(pk_vec);
+                        }
                     } else {
                         crate::daemon_client::set_color_sync(8, hex.clone());
                     }
                 } else {
-                    crate::daemon_client::set_per_key_colors_sync(pk_mut.clone());
+                    if let Some(pk_idx) = msl_click.iter().position(|m| m == "per_key_custom") {
+                        if dd_click.selected() as usize != pk_idx {
+                            dd_click.set_selected(pk_idx as u32);
+                        }
+                    }
+                    if let Some(pk_vec) = pk_to_send {
+                        crate::daemon_client::set_per_key_colors_sync(pk_vec);
+                    }
                 }
             } else if detected_mode == KeyboardMode::Omen4Zone {
                 for z in zones_changed {
@@ -1087,6 +1106,8 @@ pub fn build_interactive_keyboard(
     let keys_d = keys_rc.clone();
     let painted_d = painted_during_drag.clone();
     let hex_d = paint_color.clone();
+    let dd_drag = effects_dropdown.clone();
+    let msl_drag = msl_c.clone();
 
     drag.connect_drag_end(move |_, _, _| {
         let painted = painted_d.borrow().clone();
@@ -1098,33 +1119,46 @@ pub fn build_interactive_keyboard(
         if detected_mode == KeyboardMode::PerKey {
             dirty_drag.set(true);
         }
-        let mut pk_mut = pk_d.borrow_mut();
-        let mut zc_mut = zc_d.borrow_mut();
+        let mut pk_to_send: Option<Vec<String>> = None;
         let mut zones_changed = Vec::new();
+        {
+            let mut pk_mut = pk_d.borrow_mut();
+            let mut zc_mut = zc_d.borrow_mut();
 
-        for n in &painted {
-            if detected_mode == KeyboardMode::Omen4Zone {
-                let z = get_zone_for_key(n);
-                zc_mut[(z - 1) as usize] = hex.clone();
-                if !zones_changed.contains(&z) {
-                    zones_changed.push(z);
-                }
-            } else if detected_mode == KeyboardMode::PerKey {
-                if let Some(k) = keys_d.iter().find(|x| &x.name == n) {
-                    if k.id < pk_mut.len() {
-                        pk_mut[k.id] = hex.clone();
+            for n in &painted {
+                if detected_mode == KeyboardMode::Omen4Zone {
+                    let z = get_zone_for_key(n);
+                    zc_mut[(z - 1) as usize] = hex.clone();
+                    if !zones_changed.contains(&z) {
+                        zones_changed.push(z);
+                    }
+                } else if detected_mode == KeyboardMode::PerKey {
+                    if let Some(k) = keys_d.iter().find(|x| &x.name == n) {
+                        if k.id < pk_mut.len() {
+                            pk_mut[k.id] = hex.clone();
+                        }
+                    }
+                } else if detected_mode == KeyboardMode::Victus1Zone {
+                    zc_mut[0] = hex.clone();
+                    if !zones_changed.contains(&1) {
+                        zones_changed.push(1);
                     }
                 }
-            } else if detected_mode == KeyboardMode::Victus1Zone {
-                zc_mut[0] = hex.clone();
-                if !zones_changed.contains(&1) {
-                    zones_changed.push(1);
-                }
+            }
+            if detected_mode == KeyboardMode::PerKey {
+                pk_to_send = Some(pk_mut.clone());
             }
         }
 
         if detected_mode == KeyboardMode::PerKey {
-            crate::daemon_client::set_per_key_colors_sync(pk_mut.clone());
+            if let Some(pk_idx) = msl_drag.iter().position(|m| m == "per_key_custom") {
+                if dd_drag.selected() as usize != pk_idx {
+                    dd_drag.set_selected(pk_idx as u32);
+                }
+            }
+            if let Some(pk_vec) = pk_to_send {
+                crate::daemon_client::set_per_key_colors_sync(pk_vec);
+            }
         } else if detected_mode == KeyboardMode::Omen4Zone {
             for z in zones_changed {
                 crate::daemon_client::set_color_sync(z - 1, hex.clone());

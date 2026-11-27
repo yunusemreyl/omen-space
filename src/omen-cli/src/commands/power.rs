@@ -26,6 +26,11 @@ pub enum PowerCommand {
         #[arg(value_parser = ["on", "off", "true", "false"])]
         state: String,
     },
+    /// Enable or disable two-way synchronization with system power management (PPD)
+    SystemSync {
+        #[arg(value_parser = ["on", "off", "true", "false"])]
+        state: String,
+    },
     /// Get current power profile and limits
     Info,
 }
@@ -69,6 +74,11 @@ pub async fn handle(cmd: &PowerCommand, conn: &Connection) -> Result<()> {
         PowerCommand::AutoSwitch { state } => {
             let enabled = matches!(state.as_str(), "on" | "true");
             let res = proxy.set_ac_auto_switch(enabled).await?;
+            println!("Response: {}", res);
+        }
+        PowerCommand::SystemSync { state } => {
+            let enabled = matches!(state.as_str(), "on" | "true");
+            let res = proxy.set_system_power_sync(enabled).await?;
             println!("Response: {}", res);
         }
         PowerCommand::Info => {

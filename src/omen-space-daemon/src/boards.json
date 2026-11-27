@@ -3475,6 +3475,41 @@
             "supports_battery_care": true,
             "linux_assessment": null,
             "notes": "Added for Issue #394 — HyperX OMEN Gaming Laptop 15-ga0xxx (Intel Core Ultra 7 251HX + RTX 5070). Keyboard backlight uses USB HID 0C45:7D18; WMI 0x20009 (hp-omen-extra) is disabled to prevent shutting down the keyboard backlight rail."
+        },
+        {
+            "product_id": "8D07",
+            "model_name": "Victus by HP Gaming Laptop 15-fb2xxx (8D07)",
+            "model_year": 2024,
+            "family": "Victus15",
+            "supports_fan_control_wmi": true,
+            "supports_fan_control_ec": false,
+            "supports_fan_curves": true,
+            "supports_independent_fan_curves": false,
+            "supports_rpm_readback": true,
+            "fan_zone_count": 2,
+            "max_fan_speed_percent": 100,
+            "min_fan_speed_percent": 0,
+            "supports_performance_modes": true,
+            "performance_modes": [
+                "Default",
+                "Performance",
+                "Cool"
+            ],
+            "allow_decoupled_wmi_thermal_policy_fallback": false,
+            "has_mux_switch": false,
+            "supports_gpu_power_boost": false,
+            "supports_advanced_optimus": false,
+            "has_keyboard_backlight": true,
+            "has_four_zone_rgb": false,
+            "has_per_key_rgb": false,
+            "has_light_bar": false,
+            "rgb_zone_count": 1,
+            "supports_undervolt": false,
+            "supports_tcc_offset": true,
+            "supports_power_limits": true,
+            "supports_battery_care": true,
+            "linux_assessment": null,
+            "notes": "Added for Issues #399 / #402 — Victus by HP Gaming Laptop 15-fb2xxx (AMD Ryzen 5 7535HS with Radeon Graphics, BIOS F.10). Dual-fan WMI RPM/PWM and single-zone keyboard backlight."
         }
     ],
     "verified_boards": [
@@ -3565,7 +3600,8 @@
         "8912",
         "8DCF",
         "8D42",
-        "8EDF"
+        "8EDF",
+        "8D07"
     ],
     "wmaa_abort_prone_boards": [
         "8C75",

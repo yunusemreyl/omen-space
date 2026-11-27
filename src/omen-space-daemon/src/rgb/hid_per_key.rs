@@ -43,6 +43,7 @@ impl HidPerKeyBackend {
     pub const MCU_RECORD_LEN: usize = 36;
     const KEYS_PER_SEGMENT: usize = 20;
     pub const TOTAL_KEY_COUNT: usize = 104;
+    pub const MAX_STACK_LAMPS: usize = 256;
 
     pub fn new() -> Self {
         let (hidraw_paths, device_pid, lamparray_path, is_primax_mcu) = Self::find_devices();
@@ -434,7 +435,7 @@ impl HidPerKeyBackend {
                             break;
                         }
                         if wrote_any && is_char_dev {
-                            std::thread::sleep(std::time::Duration::from_micros(150));
+                            std::thread::sleep(std::time::Duration::from_micros(350));
                         }
                         if let Err(e) = file.write_all(pkt) {
                             warn!("Failed to write to {}: {}", path, e);
@@ -678,6 +679,42 @@ impl HidPerKeyBackend {
         la.set_frame(colors)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_lamparray_rgb(
+        &self,
+        mode: &str,
+        step: f64,
+        speed: u32,
+        direction: &str,
+        primary: (u8, u8, u8),
+        secondary: (u8, u8, u8),
+        scaler: f64,
+        recent_keys: &[(f64, f64, f64)],
+        out: &mut [(u8, u8, u8); Self::MAX_STACK_LAMPS],
+    ) -> Option<usize> {
+        let la = self.lamparray.as_ref()?;
+        if la.lamp_count() > out.len() {
+            return None;
+        }
+        Some(la.render_effect_slice(
+            mode,
+            step,
+            speed,
+            direction,
+            primary,
+            secondary,
+            scaler,
+            recent_keys,
+            out,
+        ))
+    }
+
+    pub fn write_lamparray_colors(&self, colors: &[(u8, u8, u8)]) -> bool {
+        self.lamparray
+            .as_ref()
+            .is_some_and(|la| la.set_frame(colors))
+    }
+
     pub fn test_single_key(&self, key_index: usize, r: u8, g: u8, b: u8) -> bool {
         if !self.is_available() {
             return false;
@@ -728,8 +765,13 @@ pub(crate) fn plan_primax_packets(
         *mode_active = true;
         *cache = Some(pages);
     } else if let Some(prev) = cache.as_ref() {
-        for (i, pkt) in pages.iter().enumerate() {
-            if *pkt != prev[i] && HidPerKeyBackend::is_primax_cmd_allowed(pkt[1]) {
+        // Primax McuSDK2 latches a frame on page 8 (0x07 chunk 2); emit all 9 pages whenever any LED
+        // changes so B=0 colors and left-side updates still latch reliably, while skipping identical frames.
+        if *prev == pages {
+            return out;
+        }
+        for pkt in &pages {
+            if HidPerKeyBackend::is_primax_cmd_allowed(pkt[1]) {
                 out.push(*pkt);
             }
         }
@@ -826,17 +868,24 @@ mod tests {
             plan_primax_packets(Some(0x4F03), &base_colors, &mut cache, &mut mode_active);
         assert_eq!(identical.len(), 0);
 
-        // 3. Single-key reactive change (slot 58 'G' -> LED 84, chunk 1): <= 3 pages, no 0x09.
+        // 3. Single-key B=0 (pure red) reactive change: emits all 9 ordered pages (no 0x09),
+        //    ending in 0x07 chunk 2 so the MCU latches the updated frame even when Blue == 0.
         let mut one_key = base_colors.clone();
-        one_key[58] = (255, 0, 128);
+        one_key[58] = (255, 0, 0);
         let diff = plan_primax_packets(Some(0x4F03), &one_key, &mut cache, &mut mode_active);
-        assert!(!diff.is_empty() && diff.len() <= 3);
+        assert_eq!(diff.len(), 9);
         assert!(diff.iter().all(|pkt| pkt[1] != 0x09));
+        assert_eq!(diff[8][1], 0x07);
+        assert_eq!(diff[8][2], 0x02);
         for pkt in &diff {
             assert!(HidPerKeyBackend::is_primax_cmd_allowed(pkt[1]));
         }
 
-        // 4. Invalidation forces full 10-packet refresh.
+        // 4. Repeating that B=0 frame emits 0 packets.
+        let repeat = plan_primax_packets(Some(0x4F03), &one_key, &mut cache, &mut mode_active);
+        assert_eq!(repeat.len(), 0);
+
+        // 5. Invalidation forces full 10-packet refresh.
         mode_active = false;
         cache = None;
         let after_inv = plan_primax_packets(Some(0x4F03), &one_key, &mut cache, &mut mode_active);

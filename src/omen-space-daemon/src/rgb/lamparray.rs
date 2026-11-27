@@ -46,6 +46,14 @@ pub struct LampInfo {
     pub binding: u8,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct LampGridPos {
+    pub row: u8,
+    pub col: u8,
+    pub key_x: f64,
+    pub key_y: f64,
+}
+
 #[derive(Debug, Default)]
 struct LampArrayRuntime {
     file: Option<std::fs::File>,
@@ -60,6 +68,8 @@ pub struct LampArrayBackend {
     pub lamps: Arc<[LampInfo]>,
     pub width_um: u32,
     slot_for_lamp: Arc<[usize]>,
+    pub(crate) lamp_grid: Arc<[LampGridPos]>,
+    pub(crate) grid_cols: usize,
     acquired: Arc<AtomicBool>,
     runtime: Arc<Mutex<LampArrayRuntime>>,
 }
@@ -254,10 +264,12 @@ impl LampArrayBackend {
         }
         lamps.sort_by_key(|l| l.id);
         let slot_for_lamp = Self::build_lamp_slot_map(&lamps, is_omen_max_lamparray_board());
+        let (lamp_grid, grid_cols) = Self::build_lamp_grid(&lamps);
         info!(
-            "LampArray on {}: {} lamps, {}x{} mm, min_interval={}us",
+            "LampArray on {}: {} lamps ({} cols), {}x{} mm, min_interval={}us",
             path,
             lamps.len(),
+            grid_cols,
             width_um / 1000,
             height_um / 1000,
             min_interval_us
@@ -267,6 +279,8 @@ impl LampArrayBackend {
             lamps: Arc::from(lamps),
             width_um,
             slot_for_lamp: Arc::from(slot_for_lamp),
+            lamp_grid: Arc::from(lamp_grid),
+            grid_cols,
             acquired: Arc::new(AtomicBool::new(false)),
             runtime: Arc::new(Mutex::new(LampArrayRuntime::default())),
         })
@@ -546,6 +560,140 @@ impl LampArrayBackend {
         out
     }
 
+    pub(crate) fn build_lamp_grid(lamps: &[LampInfo]) -> (Vec<LampGridPos>, usize) {
+        let n = lamps.len();
+        if n == 0 {
+            return (Vec::new(), 0);
+        }
+        let mut min_x = u32::MAX;
+        let mut max_x = 0u32;
+        let mut min_y = u32::MAX;
+        let mut max_y = 0u32;
+        for lamp in lamps {
+            min_x = min_x.min(lamp.x);
+            max_x = max_x.max(lamp.x);
+            min_y = min_y.min(lamp.y);
+            max_y = max_y.max(lamp.y);
+        }
+        let span_x = (max_x - min_x).max(1) as f64;
+        let span_y = (max_y - min_y).max(1) as f64;
+
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by_key(|&i| (lamps[i].y, lamps[i].x, lamps[i].id));
+
+        let mut rows: Vec<Vec<usize>> = Vec::new();
+        let mut row_anchor_y = 0u32;
+        for idx in order {
+            let y = lamps[idx].y;
+            if rows.is_empty() || y.abs_diff(row_anchor_y) > 9_000 {
+                row_anchor_y = y;
+                rows.push(vec![idx]);
+            } else if let Some(last) = rows.last_mut() {
+                last.push(idx);
+            }
+        }
+        for row in &mut rows {
+            row.sort_by_key(|&i| (lamps[i].x, lamps[i].id));
+        }
+        let grid_cols = rows.iter().map(|r| r.len()).max().unwrap_or(1).max(1);
+
+        let mut grid = vec![
+            LampGridPos {
+                row: 0,
+                col: 0,
+                key_x: 0.5,
+                key_y: 0.0,
+            };
+            n
+        ];
+        for (row_idx, row) in rows.iter().enumerate() {
+            for (pos_in_row, &lamp_idx) in row.iter().enumerate() {
+                let col = if row.len() == grid_cols {
+                    pos_in_row
+                } else if grid_cols <= 1 {
+                    0
+                } else {
+                    (((lamps[lamp_idx].x.saturating_sub(min_x) as f64) / span_x)
+                        * (grid_cols - 1) as f64)
+                        .round() as usize
+                };
+                let key_x =
+                    0.5 + ((lamps[lamp_idx].x.saturating_sub(min_x) as f64) / span_x) * 18.0;
+                let key_y = ((lamps[lamp_idx].y.saturating_sub(min_y) as f64) / span_y) * 5.0;
+                grid[lamp_idx] = LampGridPos {
+                    row: row_idx.min(255) as u8,
+                    col: col.min(255) as u8,
+                    key_x,
+                    key_y,
+                };
+            }
+        }
+        (grid, grid_cols)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn render_grid_into(
+        grid: &[LampGridPos],
+        grid_cols: usize,
+        mode: &str,
+        step: f64,
+        speed: u32,
+        direction: &str,
+        primary: (u8, u8, u8),
+        secondary: (u8, u8, u8),
+        scaler: f64,
+        recent_keys: &[(f64, f64, f64)],
+        out: &mut [(u8, u8, u8)],
+    ) -> usize {
+        let n = grid.len().min(out.len());
+        for (i, (gp, slot)) in grid.iter().zip(out.iter_mut()).take(n).enumerate() {
+            *slot = super::effects::compute_point_effect_rgb(
+                mode,
+                step,
+                speed,
+                direction,
+                i,
+                gp.col as usize,
+                grid_cols,
+                gp.key_x,
+                gp.key_y,
+                primary,
+                secondary,
+                scaler,
+                recent_keys,
+            );
+        }
+        n
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_effect_slice(
+        &self,
+        mode: &str,
+        step: f64,
+        speed: u32,
+        direction: &str,
+        primary: (u8, u8, u8),
+        secondary: (u8, u8, u8),
+        scaler: f64,
+        recent_keys: &[(f64, f64, f64)],
+        out: &mut [(u8, u8, u8)],
+    ) -> usize {
+        Self::render_grid_into(
+            &self.lamp_grid,
+            self.grid_cols,
+            mode,
+            step,
+            speed,
+            direction,
+            primary,
+            secondary,
+            scaler,
+            recent_keys,
+            out,
+        )
+    }
+
     pub fn lamp_count(&self) -> usize {
         self.lamps.len()
     }
@@ -756,5 +904,66 @@ mod tests {
                 "scratch_reports reallocated on step {step}"
             );
         }
+    }
+
+    #[test]
+    fn omen_max_8d88_120_lamp_grid_lights_all_20_columns_with_zero_gaps() {
+        // Exact 8D88 GetLampMap layout: 6 rows at y = [9000, 25000, 44000, 62000, 81000, 99000],
+        // 20 lamps per row spanning x = 12000..=328000 micrometres.
+        let ys = [9_000u32, 25_000, 44_000, 62_000, 81_000, 99_000];
+        let mut lamps = Vec::with_capacity(120);
+        let mut id = 0u16;
+        for &y in &ys {
+            for c in 0..20u32 {
+                let x = 12_000 + (c * (328_000 - 12_000)) / 19;
+                lamps.push(mk_lamp(id, x, y, 0));
+                id += 1;
+            }
+        }
+
+        let (grid, grid_cols) = LampArrayBackend::build_lamp_grid(&lamps);
+        assert_eq!(grid.len(), 120);
+        assert_eq!(grid_cols, 20);
+        for row in 0..6usize {
+            let cols: Vec<u8> = grid[row * 20..(row + 1) * 20]
+                .iter()
+                .map(|g| g.col)
+                .collect();
+            let expected: Vec<u8> = (0..20).collect();
+            assert_eq!(
+                cols, expected,
+                "row {row} must map to all 20 columns 0..=19"
+            );
+        }
+
+        // Sweep marquee across the full grid and ensure every single one of the 120 lamps hits peak brightness.
+        let mut buf = [(0u8, 0u8, 0u8); 120];
+        let mut lit = [false; 120];
+        for tick in 0..40 {
+            let step = tick as f64 * 0.125;
+            let written = LampArrayBackend::render_grid_into(
+                &grid,
+                grid_cols,
+                "marquee",
+                step,
+                50,
+                "ltr",
+                (255, 0, 0),
+                (0, 0, 0),
+                1.0,
+                &[],
+                &mut buf,
+            );
+            assert_eq!(written, 120);
+            for (i, &(r, _, _)) in buf.iter().enumerate() {
+                if r >= 200 {
+                    lit[i] = true;
+                }
+            }
+        }
+        assert!(
+            lit.iter().all(|&v| v),
+            "every lamp across all 6 rows and 20 columns must light during sweep"
+        );
     }
 }

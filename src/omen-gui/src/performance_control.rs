@@ -1,9 +1,14 @@
-use gtk::prelude::*;
+use adw::prelude::*;
+use libadwaita as adw;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::daemon_client;
 use crate::i18n;
+
+fn format_managed_by_subtitle(template: &str, manager: &str) -> String {
+    template.replace("{manager}", manager)
+}
 
 /// Builds a concise, human-readable one-line hardware identity string for the Performance header.
 fn format_hardware_subtitle(specs: &omen_types::HardwareSpecs) -> String {
@@ -115,7 +120,7 @@ pub fn build_page() -> gtk::Box {
         .spacing(12)
         .homogeneous(true)
         .valign(gtk::Align::Start)
-        .margin_bottom(26)
+        .margin_bottom(12)
         .build();
 
     let (eco_btn, eco_wrap) = build_mode_card(
@@ -152,7 +157,7 @@ pub fn build_page() -> gtk::Box {
         .orientation(gtk::Orientation::Horizontal)
         .spacing(8)
         .css_classes(["os-panel"])
-        .margin_bottom(18)
+        .margin_bottom(12)
         .visible(false)
         .build();
     let perf_err_icon = gtk::Image::builder()
@@ -244,6 +249,109 @@ pub fn build_page() -> gtk::Box {
     perf_box.append(&perf_wrap);
     page.append(&perf_box);
     page.append(&perf_error_box);
+
+    // Power sync controls right below the mode cards (Row 1: System PM sync / external PM notice; Row 2: opt-in Battery Eco sync)
+    let power_sync_group = adw::PreferencesGroup::builder().margin_bottom(26).build();
+
+    let sys_sync_row = adw::ActionRow::builder()
+        .title(i18n::t("perf_sys_sync_title"))
+        .subtitle(i18n::t("perf_sys_sync_sub"))
+        .build();
+    let sys_mgr_badge = gtk::Label::builder()
+        .css_classes(["badge-neutral"])
+        .valign(gtk::Align::Center)
+        .visible(false)
+        .build();
+    let sys_sync_switch = gtk::Switch::builder()
+        .valign(gtk::Align::Center)
+        .active(true)
+        .build();
+    sys_sync_row.add_suffix(&sys_mgr_badge);
+    sys_sync_row.add_suffix(&sys_sync_switch);
+    sys_sync_row.set_activatable_widget(Some(&sys_sync_switch));
+    power_sync_group.add(&sys_sync_row);
+
+    let bat_sync_row = adw::SwitchRow::builder()
+        .title(i18n::t("perf_bat_sync_title"))
+        .subtitle(i18n::t("perf_bat_sync_sub"))
+        .active(false)
+        .build();
+    power_sync_group.add(&bat_sync_row);
+    page.append(&power_sync_group);
+
+    let syncing_toggles = Rc::new(std::cell::Cell::new(false));
+    {
+        let st = syncing_toggles.clone();
+        sys_sync_switch.connect_active_notify(move |sw| {
+            if !st.get() {
+                daemon_client::set_system_power_sync_sync(sw.is_active());
+            }
+        });
+    }
+    {
+        let st = syncing_toggles.clone();
+        bat_sync_row.connect_active_notify(move |row| {
+            if !st.get() {
+                daemon_client::set_ac_auto_switch_sync(row.is_active());
+            }
+        });
+    }
+
+    let apply_power_sync_state = {
+        let sys_row = sys_sync_row.clone();
+        let sys_sw = sys_sync_switch.clone();
+        let sys_badge = sys_mgr_badge.clone();
+        let bat_row = bat_sync_row.clone();
+        let st = syncing_toggles.clone();
+        move |sys_sync: bool, bat_sync: bool, ext_mgr: Option<&str>| {
+            st.set(true);
+            match ext_mgr.filter(|m| !m.trim().is_empty()) {
+                Some(mgr) => {
+                    sys_sw.set_visible(false);
+                    sys_row.set_activatable_widget(None::<&gtk::Widget>);
+                    sys_row.set_subtitle(&format_managed_by_subtitle(
+                        i18n::t("perf_sys_managed_by"),
+                        mgr,
+                    ));
+                    sys_badge.set_label(mgr);
+                    sys_badge.set_visible(true);
+                }
+                None => {
+                    sys_badge.set_visible(false);
+                    sys_row.set_subtitle(i18n::t("perf_sys_sync_sub"));
+                    if sys_sw.is_active() != sys_sync {
+                        sys_sw.set_active(sys_sync);
+                    }
+                    sys_sw.set_visible(true);
+                    sys_row.set_activatable_widget(Some(&sys_sw));
+                }
+            }
+            if bat_row.is_active() != bat_sync {
+                bat_row.set_active(bat_sync);
+            }
+            st.set(false);
+        }
+    };
+
+    {
+        let apply_init = apply_power_sync_state.clone();
+        glib::spawn_future_local(async move {
+            if let Ok(raw) = daemon_client::get_power_profile_raw_async().await {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&raw) {
+                    let sys_sync = val
+                        .get("system_power_sync")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+                    let bat_sync = val
+                        .get("ac_auto_switch")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let ext_mgr = val.get("external_power_manager").and_then(|v| v.as_str());
+                    apply_init(sys_sync, bat_sync, ext_mgr);
+                }
+            }
+        });
+    }
 
     // ── Section 2: Fan Control ────────────────────────────────────────────────
     let fan_header = gtk::Box::builder()
@@ -390,7 +498,7 @@ pub fn build_page() -> gtk::Box {
     ]));
     let preset_btns: Rc<RefCell<Vec<gtk::ToggleButton>>> = Rc::new(RefCell::new(Vec::new()));
 
-    // Live sync timer to reflect profile/fan changes from overlay, tray, or CLI
+    // Live sync timer to reflect profile/fan/power-sync changes from overlay, tray, or CLI
     {
         let eco_c = eco_btn.clone();
         let bal_c = bal_btn.clone();
@@ -401,14 +509,17 @@ pub fn build_page() -> gtk::Box {
         let ec_c = ec_btn.clone();
         let u_sync = updating_ext.clone();
         let p_btns_c = preset_btns.clone();
+        let apply_sync_c = apply_power_sync_state.clone();
 
         glib::timeout_add_local(std::time::Duration::from_millis(1500), move || {
             if !eco_c.is_mapped() {
                 return glib::ControlFlow::Continue;
             }
             #[allow(deprecated)]
-            let (tx, rx) =
-                glib::MainContext::channel::<(String, String)>(glib::Priority::default());
+            let (tx, rx) = glib::MainContext::channel::<(
+                Option<(String, bool, bool, Option<String>)>,
+                String,
+            )>(glib::Priority::default());
             let eco_c2 = eco_c.clone();
             let bal_c2 = bal_c.clone();
             let perf_c2 = perf_c.clone();
@@ -418,20 +529,24 @@ pub fn build_page() -> gtk::Box {
             let ec_c2 = ec_c.clone();
             let u_s2 = u_sync.clone();
             let p_btns_c2 = p_btns_c.clone();
+            let apply_sync_c2 = apply_sync_c.clone();
 
-            rx.attach(None, move |(p, f)| {
+            rx.attach(None, move |(power_state, f)| {
                 u_s2.set(true);
-                let p_lower = p.to_lowercase();
-                if p_lower == "performance" {
-                    if !perf_c2.is_active() {
-                        perf_c2.set_active(true);
+                if let Some((p, sys_sync, bat_sync, ext_mgr)) = power_state {
+                    let p_lower = p.to_lowercase();
+                    if p_lower == "performance" {
+                        if !perf_c2.is_active() {
+                            perf_c2.set_active(true);
+                        }
+                    } else if p_lower == "power-saver" || p_lower == "quiet" || p_lower == "eco" {
+                        if !eco_c2.is_active() {
+                            eco_c2.set_active(true);
+                        }
+                    } else if !bal_c2.is_active() {
+                        bal_c2.set_active(true);
                     }
-                } else if p_lower == "power-saver" || p_lower == "quiet" || p_lower == "eco" {
-                    if !eco_c2.is_active() {
-                        eco_c2.set_active(true);
-                    }
-                } else if !bal_c2.is_active() {
-                    bal_c2.set_active(true);
+                    apply_sync_c2(sys_sync, bat_sync, ext_mgr.as_deref());
                 }
 
                 let f_lower = f.to_lowercase();
@@ -457,13 +572,35 @@ pub fn build_page() -> gtk::Box {
 
             let rt = daemon_client::get_runtime();
             rt.spawn(async move {
-                let p = daemon_client::get_power_profile_async()
-                    .await
-                    .unwrap_or_else(|_| "balanced".into());
+                let power_state = match daemon_client::get_power_profile_raw_async().await {
+                    Ok(raw) => serde_json::from_str::<serde_json::Value>(&raw)
+                        .ok()
+                        .map(|val| {
+                            let active = val
+                                .get("active")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("balanced")
+                                .to_string();
+                            let sys_sync = val
+                                .get("system_power_sync")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(true);
+                            let bat_sync = val
+                                .get("ac_auto_switch")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
+                            let ext_mgr = val
+                                .get("external_power_manager")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
+                            (active, sys_sync, bat_sync, ext_mgr)
+                        }),
+                    Err(_) => None,
+                };
                 let f = daemon_client::get_fan_mode_async()
                     .await
                     .unwrap_or_else(|_| "auto".into());
-                let _ = tx.send((p, f));
+                let _ = tx.send((power_state, f));
             });
 
             glib::ControlFlow::Continue
@@ -1247,4 +1384,27 @@ fn add_preset_to_box(
     });
 
     fan_box.append(&overlay);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn managed_by_subtitle_substitutes_active_power_manager() {
+        assert_eq!(
+            format_managed_by_subtitle(
+                "System power management is controlled by {manager}.",
+                "TLP"
+            ),
+            "System power management is controlled by TLP."
+        );
+        assert_eq!(
+            format_managed_by_subtitle(
+                "Sistem güç yönetimi {manager} tarafından yönetilmektedir.",
+                "auto-cpufreq"
+            ),
+            "Sistem güç yönetimi auto-cpufreq tarafından yönetilmektedir."
+        );
+    }
 }

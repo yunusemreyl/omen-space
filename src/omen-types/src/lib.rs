@@ -193,6 +193,7 @@ pub trait Power {
     async fn set_app_profiles_enabled(&self, enabled: bool) -> zbus::Result<String>;
     async fn set_app_profiles(&self, profiles_json: &str) -> zbus::Result<String>;
     async fn set_ac_auto_switch(&self, enabled: bool) -> zbus::Result<String>;
+    async fn set_system_power_sync(&self, enabled: bool) -> zbus::Result<String>;
     async fn ping(&self) -> zbus::Result<String>;
 }
 

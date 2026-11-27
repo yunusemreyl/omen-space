@@ -195,8 +195,10 @@ struct PowerConfig {
     pl2_w: u32,
     pl_enabled: bool,
     gpu_w: u32,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     ac_auto_switch: bool,
+    #[serde(default = "default_true")]
+    system_power_sync: bool,
 }
 
 impl Default for PowerConfig {
@@ -211,7 +213,8 @@ impl Default for PowerConfig {
             pl2_w: 80,
             pl_enabled: false,
             gpu_w: 0,
-            ac_auto_switch: true,
+            ac_auto_switch: false,
+            system_power_sync: true,
         }
     }
 }
@@ -260,6 +263,10 @@ impl PowerService {
 
     pub async fn is_ac_auto_switch_enabled(&self) -> bool {
         self.config.lock().await.ac_auto_switch
+    }
+
+    pub async fn is_system_power_sync_enabled(&self) -> bool {
+        self.config.lock().await.system_power_sync
     }
 
     pub async fn current_profile(&self) -> String {
@@ -327,6 +334,13 @@ impl PowerService {
     /// Handle external `net.hadess.PowerProfiles` `ActiveProfile` updates without
     /// echoing back to `powerprofilesctl` and while suppressing self-triggered signals (#395).
     pub async fn set_profile_from_ppd(&self, profile: &str) -> bool {
+        if !self.is_system_power_sync_enabled().await || Self::has_custom_power_manager() {
+            debug!(
+                "[PPD sync] Ignoring external ActiveProfile '{}' (system_power_sync disabled or external manager active)",
+                profile
+            );
+            return true;
+        }
         if self.is_ppd_echo_suppressed().await {
             debug!(
                 "[PPD sync] Ignoring echo ActiveProfile '{}' during suppression window",
@@ -435,10 +449,123 @@ impl PowerService {
 
     // ── Profile detection ──────────────────────────────────────────────────────
 
+    pub(crate) fn format_external_power_manager(
+        has_tlp: bool,
+        has_auto_cpufreq: bool,
+    ) -> Option<String> {
+        match (has_tlp, has_auto_cpufreq) {
+            (true, true) => Some("TLP & auto-cpufreq".to_string()),
+            (true, false) => Some("TLP".to_string()),
+            (false, true) => Some("auto-cpufreq".to_string()),
+            (false, false) => None,
+        }
+    }
+
+    fn systemd_unit_active_or_enabled(unit: &str) -> bool {
+        if let Ok(status) = std::process::Command::new("systemctl")
+            .args(["is-active", "--quiet", unit])
+            .status()
+        {
+            if status.success() {
+                return true;
+            }
+        }
+        if let Ok(out) = std::process::Command::new("systemctl")
+            .args(["is-enabled", unit])
+            .output()
+        {
+            if out.status.success() {
+                let state = String::from_utf8_lossy(&out.stdout);
+                let trimmed = state.trim();
+                return trimmed == "enabled" || trimmed == "enabled-runtime";
+            }
+        }
+        false
+    }
+
+    /// Detect active/enabled TLP or auto-cpufreq with zero-subprocess fast path and 10s cache.
+    pub(crate) fn detect_external_power_manager() -> Option<String> {
+        type ExtPmCache =
+            std::sync::OnceLock<std::sync::Mutex<Option<(std::time::Instant, Option<String>)>>>;
+        static EXT_PM_CACHE: ExtPmCache = std::sync::OnceLock::new();
+        let cache = EXT_PM_CACHE.get_or_init(|| std::sync::Mutex::new(None));
+        let now = std::time::Instant::now();
+        if let Ok(guard) = cache.lock() {
+            if let Some((ts, ref cached)) = *guard {
+                if now.duration_since(ts) < std::time::Duration::from_secs(10) {
+                    return cached.clone();
+                }
+            }
+        }
+
+        let tlp_bin = [
+            "/usr/bin/tlp",
+            "/usr/sbin/tlp",
+            "/sbin/tlp",
+            "/run/current-system/sw/bin/tlp",
+        ]
+        .iter()
+        .any(|p| Path::new(p).exists());
+        let tlp_unit = [
+            "/usr/lib/systemd/system/tlp.service",
+            "/lib/systemd/system/tlp.service",
+            "/etc/systemd/system/tlp.service",
+        ]
+        .iter()
+        .any(|p| Path::new(p).exists());
+        let tlp_run = Path::new("/run/tlp").exists();
+
+        let ac_bin = [
+            "/usr/bin/auto-cpufreq",
+            "/usr/local/bin/auto-cpufreq",
+            "/snap/bin/auto-cpufreq",
+            "/var/lib/snapd/snap/bin/auto-cpufreq",
+            "/opt/auto-cpufreq/venv/bin/auto-cpufreq",
+            "/run/current-system/sw/bin/auto-cpufreq",
+        ]
+        .iter()
+        .any(|p| Path::new(p).exists());
+        let ac_unit = [
+            "/usr/lib/systemd/system/auto-cpufreq.service",
+            "/lib/systemd/system/auto-cpufreq.service",
+            "/etc/systemd/system/auto-cpufreq.service",
+            "/etc/systemd/system/snap.auto-cpufreq.service.service",
+        ]
+        .iter()
+        .any(|p| Path::new(p).exists());
+        let ac_run = Path::new("/run/auto-cpufreq.pid").exists()
+            || Path::new("/var/run/auto-cpufreq.pid").exists();
+
+        let detected = if !tlp_bin && !tlp_unit && !tlp_run && !ac_bin && !ac_unit && !ac_run {
+            None
+        } else {
+            let has_systemd = Path::new("/run/systemd/system").exists();
+            let has_tlp = if tlp_run {
+                true
+            } else if has_systemd && (tlp_bin || tlp_unit) {
+                Self::systemd_unit_active_or_enabled("tlp.service")
+            } else {
+                tlp_bin
+            };
+            let has_auto_cpufreq = if ac_run {
+                true
+            } else if has_systemd && (ac_bin || ac_unit) {
+                Self::systemd_unit_active_or_enabled("auto-cpufreq.service")
+                    || Self::systemd_unit_active_or_enabled("snap.auto-cpufreq.service.service")
+            } else {
+                ac_bin
+            };
+            Self::format_external_power_manager(has_tlp, has_auto_cpufreq)
+        };
+
+        if let Ok(mut guard) = cache.lock() {
+            *guard = Some((now, detected.clone()));
+        }
+        detected
+    }
+
     fn has_custom_power_manager() -> bool {
-        std::path::Path::new("/usr/bin/tlp").exists()
-            || std::path::Path::new("/usr/sbin/tlp").exists()
-            || std::path::Path::new("/usr/bin/auto-cpufreq").exists()
+        Self::detect_external_power_manager().is_some()
     }
 
     // ── PPD two-way sync (fix #283) ────────────────────────────────────────────
@@ -898,12 +1025,15 @@ impl PowerService {
             false
         };
 
+        let allow_sys_sync =
+            self.is_system_power_sync_enabled().await && !Self::has_custom_power_manager();
+
         if hw_found {
             if !hw_succeeded {
                 return Err(first_error
                     .unwrap_or_else(|| format!("Hardware rejected power profile '{}'", profile)));
             }
-            if is_real_sys && sync_to_ppd && !Self::has_custom_power_manager() {
+            if is_real_sys && sync_to_ppd && allow_sys_sync {
                 let s76_profile = match profile {
                     "performance" => "performance",
                     "power-saver" => "battery",
@@ -922,7 +1052,7 @@ impl PowerService {
         }
 
         // Fallback when no hardware platform_profile/thermal_profile node exists:
-        if is_real_sys && !Self::has_custom_power_manager() {
+        if is_real_sys && allow_sys_sync {
             if sync_to_ppd {
                 self.arm_ppd_suppression().await;
                 if Self::sync_ppd(profile).await {
@@ -973,6 +1103,27 @@ impl PowerService {
         cfg.ac_auto_switch = enabled;
         cfg.save_to(&self.config_path);
         info!("AC/Battery auto-switch set to {}", enabled);
+    }
+
+    pub async fn set_system_power_sync_enabled(&self, enabled: bool) {
+        {
+            let mut cfg = self.config.lock().await;
+            cfg.system_power_sync = enabled;
+            cfg.save_to(&self.config_path);
+        }
+        info!("System power management sync set to {}", enabled);
+        if enabled
+            && self.sysfs_paths.acpi_platform_profile
+                == Path::new("/sys/firmware/acpi/platform_profile")
+            && !Self::has_custom_power_manager()
+        {
+            let svc = self.clone();
+            tokio::spawn(async move {
+                let active = svc.current_profile().await;
+                svc.arm_ppd_suppression().await;
+                let _ = Self::sync_ppd(&active).await;
+            });
+        }
     }
 
     /// Sync CPU `energy_performance_preference` (EPP) under a given `cpufreq` sysfs root so
@@ -1044,8 +1195,10 @@ impl PowerService {
         }
 
         if !Self::has_custom_power_manager() {
-            self.arm_ppd_suppression().await;
-            let _ = Self::sync_ppd(&active).await;
+            if self.is_system_power_sync_enabled().await {
+                self.arm_ppd_suppression().await;
+                let _ = Self::sync_ppd(&active).await;
+            }
             let active_epp = active.clone();
             let _ = tokio::task::spawn_blocking(move || Self::sync_cpu_epp(&active_epp)).await;
         }
@@ -1183,12 +1336,19 @@ impl PowerService {
             "pl_enabled": cfg.pl_enabled,
             "gpu_w": cfg.gpu_w,
             "ac_auto_switch": cfg.ac_auto_switch,
+            "system_power_sync": cfg.system_power_sync,
+            "external_power_manager": Self::detect_external_power_manager(),
         });
         json.to_string()
     }
 
     async fn set_ac_auto_switch(&self, enabled: bool) -> String {
         self.set_ac_auto_switch_enabled(enabled).await;
+        "OK".to_string()
+    }
+
+    async fn set_system_power_sync(&self, enabled: bool) -> String {
+        self.set_system_power_sync_enabled(enabled).await;
         "OK".to_string()
     }
 
@@ -1613,5 +1773,79 @@ pub(crate) mod tests {
             "performance"
         );
         assert_eq!(PowerService::normalize_profile("low-power"), "power-saver");
+    }
+
+    #[test]
+    fn external_power_manager_formatting_identifies_tlp_and_auto_cpufreq() {
+        assert_eq!(
+            PowerService::format_external_power_manager(false, false),
+            None
+        );
+        assert_eq!(
+            PowerService::format_external_power_manager(true, false).as_deref(),
+            Some("TLP")
+        );
+        assert_eq!(
+            PowerService::format_external_power_manager(false, true).as_deref(),
+            Some("auto-cpufreq")
+        );
+        assert_eq!(
+            PowerService::format_external_power_manager(true, true).as_deref(),
+            Some("TLP & auto-cpufreq")
+        );
+    }
+
+    #[tokio::test]
+    async fn sim_system_power_sync_toggle_controls_ppd_listener_and_persists() {
+        let dir = std::env::temp_dir().join(format!("omen-power-syssync-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cfg_path = dir.join("power.json");
+        let paths = mock_paths(&dir);
+        let io = MockSysfsIo::default();
+
+        io.set_file(&paths.acpi_platform_profile, "balanced");
+        io.set_file(
+            dir.join("acpi/platform_profile_choices"),
+            "low-power balanced performance",
+        );
+
+        let svc = PowerService::new_with_paths(
+            cfg_path.clone(),
+            paths.clone(),
+            Arc::new(io.clone()),
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert!(!svc.is_ac_auto_switch_enabled().await);
+        assert!(svc.is_system_power_sync_enabled().await);
+
+        // Disable system power sync -> incoming PPD ActiveProfile events must be ignored
+        svc.set_system_power_sync_enabled(false).await;
+        assert!(!svc.is_system_power_sync_enabled().await);
+        assert!(svc.set_profile_from_ppd("power-saver").await);
+        assert_eq!(svc.current_profile().await, "balanced");
+        assert_eq!(
+            io.read_trimmed(&paths.acpi_platform_profile).unwrap(),
+            "balanced"
+        );
+
+        let state_json: serde_json::Value =
+            serde_json::from_str(&svc.get_power_profile().await).unwrap();
+        assert_eq!(state_json["system_power_sync"], false);
+        assert_eq!(state_json["ac_auto_switch"], false);
+
+        // Re-enable system power sync -> PPD ActiveProfile updates hardware/config again
+        svc.set_system_power_sync_enabled(true).await;
+        assert!(svc.is_system_power_sync_enabled().await);
+        assert!(svc.set_profile_from_ppd("power-saver").await);
+        assert_eq!(svc.current_profile().await, "power-saver");
+        assert_eq!(
+            io.read_trimmed(&paths.acpi_platform_profile).unwrap(),
+            "low-power"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

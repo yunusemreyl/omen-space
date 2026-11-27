@@ -428,8 +428,11 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("updater_commits_ahead", "nuevo(s) commit(s) disponible(s)"),
     ("perf_profile_apply_failed", "No se pudo cambiar el perfil de energía"),
     ("fan_clean_stop_btn", "Detener y volver a Automático"),
-    ("ac_auto_switch_title", "Cambio automático de perfil con CA / Batería"),
-    ("ac_auto_switch_sub", "Cambia a Eco con batería y restaura tu perfil anterior al conectar el cargador"),
+    ("perf_sys_sync_title", "Sincronizar con la gestión de energía del sistema"),
+    ("perf_sys_sync_sub", "Sincronizar perfiles bidireccionalmente con power-profiles-daemon o system76-power"),
+    ("perf_sys_managed_by", "La gestión de energía del sistema está controlada por {manager}."),
+    ("perf_bat_sync_title", "Sincronizar con el estado de la batería"),
+    ("perf_bat_sync_sub", "Cambiar a Eco al desconectar el cargador y restaurar el perfil anterior con corriente CA"),
 ];
 
 pub(super) fn translate(key: &str) -> Option<&'static str> {

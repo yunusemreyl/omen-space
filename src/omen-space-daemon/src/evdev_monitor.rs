@@ -40,7 +40,7 @@ pub(crate) async fn record_key_press(
             lock.remove(0);
         }
     }
-    wakeup.notify_waiters();
+    wakeup.notify_one();
 }
 
 /// Returns `true` when an `evdev::Device` exposes a full alpha/enter keyboard report set.

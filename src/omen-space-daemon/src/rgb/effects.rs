@@ -160,6 +160,109 @@ pub fn compute_anim_color(
     }
 }
 
+/// Compute a single key or physical lamp RGB color from normalized coordinates and grid column,
+/// performing zero heap allocations. `recent_keys` supplies `(x, y, age_secs)` for `reactive`/`ripple`.
+#[allow(clippy::too_many_arguments)]
+pub fn compute_point_effect_rgb(
+    mode: &str,
+    step: f64,
+    speed: u32,
+    direction: &str,
+    point_idx: usize,
+    col: usize,
+    col_count: usize,
+    key_x: f64,
+    key_y: f64,
+    primary: (u8, u8, u8),
+    secondary: (u8, u8, u8),
+    scaler: f64,
+    recent_keys: &[(f64, f64, f64)],
+) -> (u8, u8, u8) {
+    let (r1, g1, b1) = primary;
+    let (r2, g2, b2) = secondary;
+    let clamped_speed = speed.clamp(1, 100) as f64 / 100.0;
+    let (mut rf, mut gf, mut bf) = (0.0f64, 0.0f64, 0.0f64);
+
+    match mode {
+        "reactive" => {
+            let decay_rate = 1.2 + clamped_speed * 4.8;
+            let mut max_intensity = 0.0f64;
+            for &(kx, ky, age) in recent_keys {
+                let dist = ((kx - key_x).powi(2) + (ky - key_y).powi(2)).sqrt();
+                if dist < 0.85 {
+                    let intensity = (1.0 - age * decay_rate).clamp(0.0, 1.0);
+                    max_intensity = max_intensity.max(intensity);
+                }
+            }
+            rf = r1 as f64 * max_intensity;
+            gf = g1 as f64 * max_intensity;
+            bf = b1 as f64 * max_intensity;
+        }
+        "ripple" => {
+            let wave_speed = 8.0 + clamped_speed * 20.0;
+            let fade_rate = 0.55 + clamped_speed * 1.1;
+            for &(kx, ky, age) in recent_keys {
+                let dist = ((kx - key_x).powi(2) + (ky - key_y).powi(2)).sqrt();
+                let radius = age * wave_speed;
+                let thickness = 1.15;
+                if (dist - radius).abs() < thickness {
+                    let intensity = (1.0 - age * fade_rate).clamp(0.0, 1.0);
+                    rf += r1 as f64 * intensity;
+                    gf += g1 as f64 * intensity;
+                    bf += b1 as f64 * intensity;
+                }
+            }
+            rf = rf.clamp(0.0, 255.0);
+            gf = gf.clamp(0.0, 255.0);
+            bf = bf.clamp(0.0, 255.0);
+        }
+        "starlight" => {
+            let phase = (point_idx as f64 * 2.39996323) + ((point_idx % 7) as f64 * 0.7);
+            let s = (((step * 1.6 + phase).sin() - 0.62) / 0.38).clamp(0.0, 1.0);
+            let intensity = s * s;
+            rf = r1 as f64 * intensity;
+            gf = g1 as f64 * intensity;
+            bf = b1 as f64 * intensity;
+        }
+        "raindrop" => {
+            let drop_pos = (step * 4.0 + (col as f64) * 2.7).rem_euclid(8.0);
+            let dy = (key_y - drop_pos).abs();
+            if dy < 1.25 {
+                let f = 1.0 - dy / 1.25;
+                let intensity = f * f;
+                rf = r1 as f64 * intensity;
+                gf = g1 as f64 * intensity;
+                bf = b1 as f64 * intensity;
+            }
+        }
+        _ => {
+            let n_cols = col_count.max(1);
+            let c = col.min(n_cols - 1);
+            let eff_idx = if direction == "rtl" {
+                n_cols - 1 - c
+            } else {
+                c
+            };
+            let (rc, gc, bc) =
+                compute_anim_color(mode, step, eff_idx, n_cols, r1, g1, b1, r2, g2, b2);
+            rf = rc as f64;
+            gf = gc as f64;
+            bf = bc as f64;
+        }
+    }
+
+    (
+        (rf * scaler) as u8,
+        (gf * scaler) as u8,
+        (bf * scaler) as u8,
+    )
+}
+
+#[inline]
+pub(crate) fn slot_x_to_col(x: f64) -> usize {
+    (((x - 0.5).clamp(0.0, 18.0) / 18.0) * 19.0).round() as usize
+}
+
 /// Render a full 104-slot per-key RGB array with zero heap allocations.
 /// `recent_keys` supplies `(x, y, age_secs)` for `reactive` and `ripple`.
 #[allow(clippy::too_many_arguments)]
@@ -173,83 +276,25 @@ pub fn render_per_key_rgb(
     scaler: f64,
     recent_keys: &[(f64, f64, f64)],
 ) -> [(u8, u8, u8); 104] {
-    let (r1, g1, b1) = primary;
-    let (r2, g2, b2) = secondary;
-    let clamped_speed = speed.clamp(1, 100) as f64 / 100.0;
     let mut out = [(0u8, 0u8, 0u8); 104];
 
     for (i, slot) in out.iter_mut().enumerate() {
         let (x, y) = slot_coords(i);
-        let (mut rf, mut gf, mut bf) = (0.0f64, 0.0f64, 0.0f64);
-
-        match mode {
-            "reactive" => {
-                let decay_rate = 1.2 + clamped_speed * 4.8;
-                let mut max_intensity = 0.0f64;
-                for &(kx, ky, age) in recent_keys {
-                    let dist = ((kx - x).powi(2) + (ky - y).powi(2)).sqrt();
-                    if dist < 0.85 {
-                        let intensity = (1.0 - age * decay_rate).clamp(0.0, 1.0);
-                        max_intensity = max_intensity.max(intensity);
-                    }
-                }
-                rf = r1 as f64 * max_intensity;
-                gf = g1 as f64 * max_intensity;
-                bf = b1 as f64 * max_intensity;
-            }
-            "ripple" => {
-                let wave_speed = 8.0 + clamped_speed * 20.0;
-                let fade_rate = 0.55 + clamped_speed * 1.1;
-                for &(kx, ky, age) in recent_keys {
-                    let dist = ((kx - x).powi(2) + (ky - y).powi(2)).sqrt();
-                    let radius = age * wave_speed;
-                    let thickness = 1.15;
-                    if (dist - radius).abs() < thickness {
-                        let intensity = (1.0 - age * fade_rate).clamp(0.0, 1.0);
-                        rf += r1 as f64 * intensity;
-                        gf += g1 as f64 * intensity;
-                        bf += b1 as f64 * intensity;
-                    }
-                }
-                rf = rf.clamp(0.0, 255.0);
-                gf = gf.clamp(0.0, 255.0);
-                bf = bf.clamp(0.0, 255.0);
-            }
-            "starlight" => {
-                let phase = (i as f64 * 2.39996323) + ((i % 7) as f64 * 0.7);
-                let s = (((step * 1.6 + phase).sin() - 0.62) / 0.38).clamp(0.0, 1.0);
-                let intensity = s * s;
-                rf = r1 as f64 * intensity;
-                gf = g1 as f64 * intensity;
-                bf = b1 as f64 * intensity;
-            }
-            "raindrop" => {
-                let col = x.round();
-                let drop_pos = (step * 4.0 + col * 2.7).rem_euclid(8.0);
-                let dy = (y - drop_pos).abs();
-                if dy < 1.25 {
-                    let f = 1.0 - dy / 1.25;
-                    let intensity = f * f;
-                    rf = r1 as f64 * intensity;
-                    gf = g1 as f64 * intensity;
-                    bf = b1 as f64 * intensity;
-                }
-            }
-            _ => {
-                let col = (x.round() as usize).min(19);
-                let eff_idx = if direction == "rtl" { 19 - col } else { col };
-                let (rc, gc, bc) =
-                    compute_anim_color(mode, step, eff_idx, 20, r1, g1, b1, r2, g2, b2);
-                rf = rc as f64;
-                gf = gc as f64;
-                bf = bc as f64;
-            }
-        }
-
-        *slot = (
-            (rf * scaler) as u8,
-            (gf * scaler) as u8,
-            (bf * scaler) as u8,
+        let col = slot_x_to_col(x);
+        *slot = compute_point_effect_rgb(
+            mode,
+            step,
+            speed,
+            direction,
+            i,
+            col,
+            20,
+            x,
+            y,
+            primary,
+            secondary,
+            scaler,
+            recent_keys,
         );
     }
 
@@ -564,6 +609,22 @@ mod tests {
             sparkle_vals.len() >= 2,
             "sparkle must cross-fade across substeps: {:?}",
             sparkle_vals
+        );
+    }
+
+    #[test]
+    fn key_coords_column_mapping_covers_all_twenty_columns_without_holes() {
+        let mut cols = std::collections::BTreeSet::new();
+        for slot in 0..99usize {
+            let (x, _) = slot_coords(slot);
+            let col = slot_x_to_col(x);
+            assert!(col < 20, "slot {slot} col {col} out of range");
+            cols.insert(col);
+        }
+        let expected: std::collections::BTreeSet<usize> = (0..20).collect();
+        assert_eq!(
+            cols, expected,
+            "104-slot column quantization must cover every column 0..=19 with no holes (#401)"
         );
     }
 }

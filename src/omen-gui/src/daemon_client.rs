@@ -302,6 +302,16 @@ pub fn set_ac_auto_switch_sync(enabled: bool) {
     });
 }
 
+pub fn set_system_power_sync_sync(enabled: bool) {
+    spawn_dbus(move |conn| async move {
+        if let Ok(proxy) = PowerProxy::new(&conn).await {
+            if let Err(e) = proxy.set_system_power_sync(enabled).await {
+                notify_dbus_error(crate::i18n::t("dbus_err_ctx_power"), &e).await;
+            }
+        }
+    });
+}
+
 pub fn set_hw_effects_sync(enabled: bool) {
     spawn_dbus(move |conn| async move {
         if let Ok(proxy) = RgbProxy::new(&conn).await {

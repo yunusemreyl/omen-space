@@ -435,7 +435,9 @@ impl RgbService {
             last_lightbar_level: i32,
         }
 
+        type LampFrameCache = ([(u8, u8, u8); HidPerKeyBackend::MAX_STACK_LAMPS], usize);
         let mut last_per_key_rgb: Option<[(u8, u8, u8); 104]> = None;
+        let mut last_lamp_rgb: Option<LampFrameCache> = None;
         let mut last_sysfs_rgb: Option<[(u8, u8, u8); 8]> = None;
         let mut last_sysfs_zones: usize = 0;
         let mut last_lightbar_rgb: Option<[(u8, u8, u8); 4]> = None;
@@ -604,6 +606,7 @@ impl RgbService {
 
             if snap.dirty_state {
                 last_per_key_rgb = None;
+                last_lamp_rgb = None;
                 last_sysfs_rgb = None;
                 last_sysfs_zones = 0;
                 mcu_sig = None;
@@ -614,6 +617,7 @@ impl RgbService {
 
             if snap.calibrating {
                 last_per_key_rgb = None;
+                last_lamp_rgb = None;
                 last_sysfs_rgb = None;
                 last_sysfs_zones = 0;
                 if let Some(cfg) = snap.save_config {
@@ -647,6 +651,7 @@ impl RgbService {
                 if has_per_key {
                     if snap.hw_effects && is_primax_mcu {
                         last_per_key_rgb = None;
+                        last_lamp_rgb = None;
                         mcu_sig = None;
                     } else if !should_stream_software_frame(snap.hw_effects, snap.mcu_rec.is_some())
                     {
@@ -656,6 +661,7 @@ impl RgbService {
                             }
                         }
                         last_per_key_rgb = None;
+                        last_lamp_rgb = None;
                     } else {
                         if mcu_sig.take().is_some() {
                             enter_per_key_brightness = Some(snap.brightness);
@@ -668,6 +674,7 @@ impl RgbService {
                 }
             } else {
                 last_per_key_rgb = None;
+                last_lamp_rgb = None;
                 last_sysfs_rgb = None;
                 last_sysfs_zones = 0;
                 mcu_sig = None;
@@ -689,6 +696,7 @@ impl RgbService {
 
             type SysfsZonesFrame = ([(u8, u8, u8); 8], usize);
             let mut per_key_to_write: Option<[(u8, u8, u8); 104]> = None;
+            let mut lamp_to_write: Option<LampFrameCache> = None;
             let mut sysfs_to_write: Option<SysfsZonesFrame> = None;
 
             if kb_streaming {
@@ -696,7 +704,8 @@ impl RgbService {
                 let scaler = (snap.brightness as f64 / 100.0).clamp(0.0, 1.0);
 
                 if has_per_key {
-                    let rgb_frame = render_per_key_rgb(
+                    let mut lamp_buf = [(0u8, 0u8, 0u8); HidPerKeyBackend::MAX_STACK_LAMPS];
+                    if let Some(n) = snap.hid_per_key.render_lamparray_rgb(
                         mode_str,
                         anim_step,
                         snap.speed,
@@ -705,10 +714,33 @@ impl RgbService {
                         snap.secondary_rgb,
                         scaler,
                         &recent_keys,
-                    );
-                    if last_per_key_rgb.as_ref() != Some(&rgb_frame) {
-                        per_key_to_write = Some(rgb_frame);
-                        last_per_key_rgb = Some(rgb_frame);
+                        &mut lamp_buf,
+                    ) {
+                        let changed = match last_lamp_rgb {
+                            Some((ref prev, prev_n)) => prev_n != n || prev[..n] != lamp_buf[..n],
+                            None => true,
+                        };
+                        if changed {
+                            lamp_to_write = Some((lamp_buf, n));
+                            last_lamp_rgb = Some((lamp_buf, n));
+                        }
+                        last_per_key_rgb = None;
+                    } else {
+                        let rgb_frame = render_per_key_rgb(
+                            mode_str,
+                            anim_step,
+                            snap.speed,
+                            dir_str,
+                            snap.primary_rgb,
+                            snap.secondary_rgb,
+                            scaler,
+                            &recent_keys,
+                        );
+                        if last_per_key_rgb.as_ref() != Some(&rgb_frame) {
+                            per_key_to_write = Some(rgb_frame);
+                            last_per_key_rgb = Some(rgb_frame);
+                        }
+                        last_lamp_rgb = None;
                     }
                 }
 
@@ -794,6 +826,7 @@ impl RgbService {
                 || enter_per_key_brightness.is_some()
                 || mcu_to_send.is_some()
                 || per_key_to_write.is_some()
+                || lamp_to_write.is_some()
                 || sysfs_to_write.is_some()
                 || lb_to_write.is_some();
 
@@ -834,6 +867,9 @@ impl RgbService {
                     } else {
                         None
                     };
+                    if let Some((lamp_frame, n)) = lamp_to_write {
+                        hid_per_key.write_lamparray_colors(&lamp_frame[..n]);
+                    }
                     if let Some(frame) = per_key_to_write {
                         hid_per_key.write_per_key_colors(&frame);
                     }
@@ -863,9 +899,15 @@ impl RgbService {
 
             let interactive_idle = is_interactive
                 && recent_keys_empty
-                && last_per_key_rgb
-                    .as_ref()
-                    .is_none_or(|f| f.iter().all(|&c| c == (0, 0, 0)));
+                && if is_lamparray {
+                    last_lamp_rgb
+                        .as_ref()
+                        .is_none_or(|(arr, n)| arr[..*n].iter().all(|&c| c == (0, 0, 0)))
+                } else {
+                    last_per_key_rgb
+                        .as_ref()
+                        .is_none_or(|f| f.iter().all(|&c| c == (0, 0, 0)))
+                };
 
             if interactive_idle && !lb_streaming {
                 if let Some(wait_ms) = snap.save_pending_wait_ms {

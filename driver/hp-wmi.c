@@ -485,6 +485,11 @@ static const struct dmi_system_id victus_s_thermal_profile_boards[] __initconst 
 		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8A4F")},
 		.driver_data = (void *)&victus_s_thermal_params,
 	},
+	{
+		/* 8D07: Victus by HP Gaming Laptop 15-fb2xxx (#399, #402) */
+		.matches    = {DMI_MATCH(DMI_BOARD_NAME, "8D07")},
+		.driver_data = (void *)&omen_v1_unknown_ec_thermal_params,
+	},
 	{},
 };
 
@@ -2908,10 +2913,8 @@ static int platform_profile_victus_s_set_ec(
 
 	err = victus_s_gpu_thermal_profile_set(gpu_ctgp_enable, gpu_ppab_enable,
 					       gpu_dstate);
-	if (err < 0) {
-		pr_err("Failed to set GPU profile %d: %d\n", profile, err);
-		return err;
-	}
+	if (err < 0)
+		pr_debug("Best-effort GPU thermal profile update skipped (%d)\n", err);
 
 	/*
 	 * After a battery Eco cycle, Victus-S / modern OMEN EC firmware can keep
@@ -4169,6 +4172,10 @@ static const struct dmi_system_id broken_omen_hpc_guid_boards[] __initconst = {
 	{
 		/* 8A4F: Victus by HP Gaming Laptop 15-fa0xxx (#356) */
 		.matches = { DMI_MATCH(DMI_BOARD_NAME, "8A4F") },
+	},
+	{
+		/* 8D07: Victus by HP Gaming Laptop 15-fb2xxx (#399, #402) */
+		.matches = { DMI_MATCH(DMI_BOARD_NAME, "8D07") },
 	},
 	{}
 };

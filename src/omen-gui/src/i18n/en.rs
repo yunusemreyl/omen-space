@@ -428,8 +428,11 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("lightbar_sync_btn", "Paint All Segments"),
     ("perf_profile_apply_failed", "Failed to switch power profile"),
     ("fan_clean_stop_btn", "Stop & Restore Auto"),
-    ("ac_auto_switch_title", "Auto-Switch Profile on AC / Battery"),
-    ("ac_auto_switch_sub", "Automatically switch to Eco on battery and restore your previous profile on AC"),
+    ("perf_sys_sync_title", "Sync with System Power Management"),
+    ("perf_sys_sync_sub", "Keep power profiles synchronized two-way with power-profiles-daemon or system76-power"),
+    ("perf_sys_managed_by", "System power management is controlled by {manager}."),
+    ("perf_bat_sync_title", "Sync with Battery Status"),
+    ("perf_bat_sync_sub", "Switch to Eco (power-saver) when unplugged and restore your previous profile on AC power"),
 ];
 
 pub(super) fn translate(key: &str) -> Option<&'static str> {
