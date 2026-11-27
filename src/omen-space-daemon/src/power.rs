@@ -1608,7 +1608,10 @@ pub(crate) mod tests {
     fn firmware_custom_profile_maps_to_balanced_not_performance() {
         assert_eq!(PowerService::normalize_profile("custom"), "balanced");
         assert_eq!(PowerService::normalize_profile("custom\n"), "balanced");
-        assert_eq!(PowerService::normalize_profile("PERFORMANCE"), "performance");
+        assert_eq!(
+            PowerService::normalize_profile("PERFORMANCE"),
+            "performance"
+        );
         assert_eq!(PowerService::normalize_profile("low-power"), "power-saver");
     }
 }
