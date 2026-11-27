@@ -60,8 +60,11 @@ fn estimate_max_watts(specs: &HardwareSpecs) -> (f64, f64) {
 }
 
 fn format_gpu_power(stats: &SystemStats) -> String {
-    if stats.gpu_sample_state == GpuSampleState::Deferred || stats.gpu_pwr <= -1.5 {
-        i18n::t("mon_gpu_not_sampled").to_string()
+    if stats.gpu_sample_state == GpuSampleState::Unavailable && stats.gpu_pwr < 0.0 {
+        // Real sampling failure (e.g. NVML timeout), not an idle GPU.
+        "──".to_string()
+    } else if stats.gpu_sample_state == GpuSampleState::Deferred || stats.gpu_pwr <= -1.5 {
+        i18n::t("mon_gpu_not_in_use").to_string()
     } else if stats.gpu_sample_state == GpuSampleState::Suspended || stats.gpu_pwr < 0.0 {
         i18n::t("mon_gpu_suspended").to_string()
     } else {
@@ -1148,7 +1151,15 @@ pub fn build_monitor_page() -> gtk::Box {
         }
 
         // GPU panel update
-        if stats.gpu_temp <= 0 || g_avg <= 0 {
+        // The daemon deliberately stops polling an idle dGPU so it can sleep.
+        // Say so instead of showing placeholder dashes that look like an error.
+        let gpu_idle = matches!(
+            stats.gpu_sample_state,
+            GpuSampleState::Deferred | GpuSampleState::Suspended
+        ) || (stats.gpu_sample_state == GpuSampleState::Unknown && stats.gpu_pwr < 0.0);
+        if gpu_idle {
+            gpu_panel.temp_label.set_label(i18n::t("mon_gpu_idle"));
+        } else if stats.gpu_temp <= 0 || g_avg <= 0 {
             gpu_panel.temp_label.set_label("──");
         } else {
             gpu_panel.temp_label.set_label(&format!("{}°C", g_avg));
