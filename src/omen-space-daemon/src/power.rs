@@ -646,8 +646,12 @@ impl PowerService {
 
     fn normalize_profile(raw: &str) -> String {
         match raw.to_lowercase().as_str() {
-            "performance" | "custom" => "performance".to_string(),
+            "performance" => "performance".to_string(),
             "low-power" | "quiet" | "cool" | "power-saver" => "power-saver".to_string(),
+            // "custom" is what the firmware leaves behind when it refuses a
+            // write (seen in UMA mode on 8D88, #396). It is not performance:
+            // mapping it there made a failed switch report itself as success
+            // and the GUI reverted to the wrong card.
             _ => "balanced".to_string(),
         }
     }
@@ -1594,5 +1598,20 @@ pub(crate) mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The firmware leaves platform_profile at "custom" when it rejects a
+    /// write (UMA mode on 8D88, #396). It must not be read back as
+    /// "performance": that made a failed switch look applied and the GUI
+    /// reverted to the Performance card instead of the real mode.
+    #[test]
+    fn firmware_custom_profile_maps_to_balanced_not_performance() {
+        assert_eq!(PowerService::normalize_profile("custom"), "balanced");
+        assert_eq!(PowerService::normalize_profile("custom\n"), "balanced");
+        assert_eq!(
+            PowerService::normalize_profile("PERFORMANCE"),
+            "performance"
+        );
+        assert_eq!(PowerService::normalize_profile("low-power"), "power-saver");
     }
 }
