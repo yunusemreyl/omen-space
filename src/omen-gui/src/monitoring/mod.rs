@@ -1156,7 +1156,8 @@ pub fn build_monitor_page() -> gtk::Box {
         let gpu_idle = matches!(
             stats.gpu_sample_state,
             GpuSampleState::Deferred | GpuSampleState::Suspended
-        ) || (stats.gpu_sample_state == GpuSampleState::Unknown && stats.gpu_pwr < 0.0);
+        ) || (stats.gpu_sample_state == GpuSampleState::Unknown
+            && stats.gpu_pwr < 0.0);
         if gpu_idle {
             gpu_panel.temp_label.set_label(i18n::t("mon_gpu_idle"));
         } else if stats.gpu_temp <= 0 || g_avg <= 0 {
