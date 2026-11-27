@@ -276,10 +276,28 @@ pub fn save_custom_gpu_curve_sync(curve_json: String) {
 }
 
 pub fn set_mode_sync(mode_str: &str, speed_val: i32) {
+    static GENERATION: AtomicU64 = AtomicU64::new(0);
+    let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     let mode = mode_str.to_string();
+    get_runtime().spawn(async move {
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        if GENERATION.load(Ordering::SeqCst) != generation {
+            return;
+        }
+        if let Ok(conn) = get_conn().await {
+            if let Ok(proxy) = RgbProxy::new(&conn).await {
+                let _ = proxy.set_mode(&mode, speed_val).await;
+            }
+        }
+    });
+}
+
+pub fn set_ac_auto_switch_sync(enabled: bool) {
     spawn_dbus(move |conn| async move {
-        if let Ok(proxy) = RgbProxy::new(&conn).await {
-            let _ = proxy.set_mode(&mode, speed_val).await;
+        if let Ok(proxy) = PowerProxy::new(&conn).await {
+            if let Err(e) = proxy.set_ac_auto_switch(enabled).await {
+                notify_dbus_error(crate::i18n::t("dbus_err_ctx_power"), &e).await;
+            }
         }
     });
 }

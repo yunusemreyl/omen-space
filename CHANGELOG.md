@@ -6,6 +6,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ---
 
+## [2.6.1] - 2026-11-27
+
+### Added
+- **Configurable AC / Battery Profile Automation (`#398`):** Added `ac_auto_switch` setting (`PowerConfig`, `SetAcAutoSwitch` D-Bus method, `omen-cli power auto-switch on|off`, and **Auto-Switch Profile on AC / Battery** `SwitchRow` in GUI Settings with EN/TR/ES translations) plus simulation tests covering both enabled (save & restore `pre_battery_profile`) and disabled (preserve manual profile on unplug and refresh AC hardware state on reconnect) modes.
+- **RGB & GUI Resource Benchmarks:** Added automated `--release` resource verification (`resource_streaming_cpu_time_stays_under_strict_budget`, `resource_idle_and_inactive_reactive_consume_zero_background_writes`, `resource_set_gui_frame_reuses_scratch_buffers_with_zero_reallocations`, and `resource_preview_phase_and_color_math_stays_microsecond_fast`).
+
+### Changed
+- **Smooth, Zero-Allocation Daemon RGB Pipeline (Zero New Locks):**
+  - Merged keyboard and lightbar streaming into a single-writer `rgb_engine_loop` (`rgb/mod.rs`) using `tokio::sync::Notify` zero-CPU idle parking (including `reactive`/`ripple` with no active keys), wall-clock `dt` pacing (`advance_anim_step`), Copy snapshot metadata (`CompactStr24`), debounced 400 ms config writes, and lock-free `AtomicU64` GUI `set_mode_sync` coalescing (`daemon_client.rs`).
+  - Added stack-allocated `render_per_key_rgb(...) -> [(u8, u8, u8); 104]` and continuous sub-step interpolation for `chase`, `sparkle`, `starlight`, and `raindrop` (`rgb/effects.rs`).
+  - Precomputed `LampArrayBackend::slot_for_lamp` at probe time, added zero-reallocation `diff_frame_reports_into` + `set_gui_frame` (`rgb/lamparray.rs`), batched `O_NONBLOCK` Darfon/Primax/HP HID writes (`rgb/hid_per_key.rs`), and added single-write `write_zones_rgb` & `write_lightbar_zones_rgb` (`rgb/hardware.rs`).
+- **Smooth 40 FPS GUI RGB Studio Preview (`keyboard.rs`, `helpers.rs`):** Precomputed `KeyGeom::zone`, maintained flat `parsed_rgb` cache, cached Cairo glyph extents per layout, hoisted frame borrows, prevented phase jumps during speed slider drags (`advance_anim_phase`), skipped occluded/suspended draws, and capped preview ticks at 40 FPS.
+
+### Fixed
+- **Sluggish Performance After Unplugging & Replugging AC Adapter (`#398`):**
+  - `driver/hp-wmi.c`: Restored Victus-S default `PL1/PL2` limits on AC attach and EC profile switches for both `Balanced` and `Performance` profiles (previously only triggered for `Performance`, leaving `Balanced` laptops battery-clamped after Eco auto-switch until reboot).
+  - `src/omen-space-daemon/src/power.rs` & `power_automation.rs`: Restored CPU `energy_performance_preference` (EPP) out of `power`, unclamped RAPL limits below boot baseline after a 600 ms AC attach settle delay, added `power-profiles-daemon` `performance -> balanced` fallback when PPD lacks a `performance` profile, and switched AC adapter detection to `sysmon::battery::probe_ac_online`.
+
+---
+
 ## [2.6.0] - 2026-11-27
 
 ### Added

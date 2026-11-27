@@ -180,6 +180,10 @@ async fn acpi_is_healthy_at(paths: &PowerSysfsPaths, io: Arc<dyn PowerSysfsIo>) 
 
 const CONFIG_PATH: &str = "/etc/omen-space/power.json";
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct PowerConfig {
     power_profile: String,
@@ -191,6 +195,8 @@ struct PowerConfig {
     pl2_w: u32,
     pl_enabled: bool,
     gpu_w: u32,
+    #[serde(default = "default_true")]
+    ac_auto_switch: bool,
 }
 
 impl Default for PowerConfig {
@@ -205,6 +211,7 @@ impl Default for PowerConfig {
             pl2_w: 80,
             pl_enabled: false,
             gpu_w: 0,
+            ac_auto_switch: true,
         }
     }
 }
@@ -251,6 +258,10 @@ impl PowerService {
         self.config.lock().await.app_profiles_enabled
     }
 
+    pub async fn is_ac_auto_switch_enabled(&self) -> bool {
+        self.config.lock().await.ac_auto_switch
+    }
+
     pub async fn current_profile(&self) -> String {
         self.config.lock().await.power_profile.clone()
     }
@@ -283,9 +294,15 @@ impl PowerService {
                     == Path::new("/sys/firmware/acpi/platform_profile")
                 {
                     let p = normalized.clone();
+                    let sync_epp = !Self::has_custom_power_manager();
                     tokio::spawn(async move {
                         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                         Self::sync_gpu_power(&p).await;
+                        if sync_epp {
+                            let p_epp = p;
+                            let _ = tokio::task::spawn_blocking(move || Self::sync_cpu_epp(&p_epp))
+                                .await;
+                        }
                     });
                 }
                 info!("Power profile set to '{}'", normalized);
@@ -428,14 +445,8 @@ impl PowerService {
     /// Notify power-profiles-daemon of the new profile so desktop environments
     /// (GNOME, KDE, Noctalia, etc.) that subscribe to PPD stay in sync.
     /// Returns `true` when either `powerprofilesctl` or the PPD D-Bus call succeeded.
-    async fn sync_ppd(profile: &str) -> bool {
-        // Map omen-space profile names to the PPD profile IDs.
-        let ppd_profile = match profile {
-            "performance" => "performance",
-            "power-saver" => "power-saver",
-            _ => "balanced",
-        };
-
+    async fn sync_ppd_once(ppd_profile: &str) -> Result<(), bool> {
+        let mut rejected = false;
         // 1. Try powerprofilesctl CLI (works on most distros).
         let cli_result = tokio::time::timeout(
             tokio::time::Duration::from_secs(3),
@@ -447,11 +458,12 @@ impl PowerService {
         match cli_result {
             Ok(Ok(out)) if out.status.success() => {
                 info!("[PPD sync] powerprofilesctl set '{}' OK", ppd_profile);
-                return true;
+                return Ok(());
             }
             Ok(Ok(out)) => {
                 let stderr = String::from_utf8_lossy(&out.stderr);
                 if out.status.code() == Some(2) || stderr.contains("choose from ") {
+                    rejected = true;
                     log::debug!(
                         "[PPD sync] powerprofilesctl set '{}' unavailable (exit {}): {}",
                         ppd_profile,
@@ -492,10 +504,16 @@ impl PowerService {
             match result {
                 Ok(Ok(_)) => {
                     info!("[PPD sync] D-Bus ActiveProfile set to '{}' OK", ppd_profile);
-                    return true;
+                    return Ok(());
                 }
                 Ok(Err(e)) => {
                     let msg = e.to_string();
+                    if msg.contains("Invalid")
+                        || msg.contains("not valid")
+                        || msg.contains("performance")
+                    {
+                        rejected = true;
+                    }
                     if msg.contains("NameHasNoOwner")
                         || msg.contains("ServiceUnknown")
                         || msg.contains("unit is masked")
@@ -508,7 +526,26 @@ impl PowerService {
                 Err(_) => warn!("[PPD sync] D-Bus call to net.hadess.PowerProfiles timed out"),
             }
         }
-        false
+        Err(rejected)
+    }
+
+    async fn sync_ppd(profile: &str) -> bool {
+        // Map omen-space profile names to the PPD profile IDs.
+        let ppd_profile = match profile {
+            "performance" => "performance",
+            "power-saver" => "power-saver",
+            _ => "balanced",
+        };
+
+        match Self::sync_ppd_once(ppd_profile).await {
+            Ok(()) => true,
+            Err(true) if ppd_profile == "performance" => {
+                // Many HP laptops expose only `power-saver` and `balanced` in PPD; fall back to
+                // `balanced` so PPD does not remain stuck in `power-saver` after AC reconnect (#398).
+                Self::sync_ppd_once("balanced").await.is_ok()
+            }
+            Err(_) => false,
+        }
     }
 
     async fn detect_current_profile_with(&self) -> String {
@@ -927,6 +964,117 @@ impl PowerService {
         info!("GPU TGP/PPAB synced for profile '{}'", profile);
     }
 
+    pub async fn set_ac_auto_switch_enabled(&self, enabled: bool) {
+        let mut cfg = self.config.lock().await;
+        cfg.ac_auto_switch = enabled;
+        cfg.save_to(&self.config_path);
+        info!("AC/Battery auto-switch set to {}", enabled);
+    }
+
+    /// Sync CPU `energy_performance_preference` (EPP) under a given `cpufreq` sysfs root so
+    /// switching out of Eco / Power Saver never leaves CPUs throttled in `power` EPP (#398).
+    pub(crate) fn sync_cpu_epp_in(cpufreq_root: &Path, profile: &str) {
+        let candidates: &[&str] = match profile {
+            "performance" => &["performance", "balance_performance"],
+            "power-saver" | "quiet" | "low-power" => &["power", "balance_power"],
+            _ => &["balance_performance", "default", "balance_power"],
+        };
+
+        let Ok(entries) = std::fs::read_dir(cpufreq_root) else {
+            return;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            let dir = entry.path();
+            let Some(name) = dir.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if !name.starts_with("policy") || !dir.is_dir() {
+                continue;
+            }
+            let epp_path = dir.join("energy_performance_preference");
+            if !epp_path.exists() {
+                continue;
+            }
+
+            let target = {
+                let avail_path = dir.join("energy_performance_available_preferences");
+                if let Ok(avail_raw) = std::fs::read_to_string(&avail_path) {
+                    let tokens: Vec<&str> = avail_raw.split_whitespace().collect();
+                    if tokens.is_empty() {
+                        candidates[0]
+                    } else {
+                        match candidates.iter().copied().find(|c| tokens.contains(c)) {
+                            Some(found) => found,
+                            None => continue,
+                        }
+                    }
+                } else {
+                    candidates[0]
+                }
+            };
+
+            let already_set = std::fs::read_to_string(&epp_path)
+                .ok()
+                .is_some_and(|cur| cur.trim() == target);
+            if !already_set {
+                let _ = std::fs::write(&epp_path, target);
+            }
+        }
+    }
+
+    pub fn sync_cpu_epp(profile: &str) {
+        Self::sync_cpu_epp_in(Path::new("/sys/devices/system/cpu/cpufreq"), profile);
+    }
+
+    /// Restore full AC performance state after AC attach: optionally switch to `target_profile`,
+    /// re-sync PPD + GPU TGP/PPAB + CPU EPP, and unclamp RAPL PL1/PL2 if firmware left them low (#398).
+    pub async fn restore_ac_power_state(&self, target_profile: Option<&str>) {
+        if let Some(target) = target_profile {
+            let _ = self.set_profile_result(target, true).await;
+        }
+        let active = self.current_profile().await;
+        let is_real_sys = self.sysfs_paths.acpi_platform_profile
+            == Path::new("/sys/firmware/acpi/platform_profile");
+        if !is_real_sys {
+            return;
+        }
+
+        if !Self::has_custom_power_manager() {
+            self.arm_ppd_suppression().await;
+            let _ = Self::sync_ppd(&active).await;
+            let active_epp = active.clone();
+            let _ = tokio::task::spawn_blocking(move || Self::sync_cpu_epp(&active_epp)).await;
+        }
+        Self::sync_gpu_power(&active).await;
+
+        let (pl_enabled, pl1_w, pl2_w) = {
+            let cfg = self.config.lock().await;
+            (cfg.pl_enabled, cfg.pl1_w, cfg.pl2_w)
+        };
+        if pl_enabled {
+            Self::apply_rapl_limits(pl1_w, pl2_w).await;
+        } else if let Some((baseline, _)) = &self.rapl_baseline {
+            if baseline.pl1_w >= 35 {
+                if let Some(val) = sysfs_read_async(
+                    "/sys/class/powercap/intel-rapl/intel-rapl:0/constraint_0_power_limit_uw",
+                )
+                .await
+                {
+                    if let Ok(uw) = val.parse::<u32>() {
+                        let current_w = uw / 1_000_000;
+                        if current_w < baseline.pl1_w.saturating_sub(10) {
+                            info!(
+                                "AC reconnect: RAPL PL1 clamped at {}W (baseline {}W); restoring baseline limits",
+                                current_w, baseline.pl1_w
+                            );
+                            Self::apply_rapl_limits(baseline.pl1_w, baseline.pl2_w).await;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ── Intel RAPL power limits ────────────────────────────────────────────────
 
     async fn apply_rapl_limits(pl1: u32, pl2: u32) {
@@ -1030,8 +1178,14 @@ impl PowerService {
             "baseline_persisted": self.rapl_baseline.as_ref().is_some_and(|(_,persisted)| *persisted),
             "pl_enabled": cfg.pl_enabled,
             "gpu_w": cfg.gpu_w,
+            "ac_auto_switch": cfg.ac_auto_switch,
         });
         json.to_string()
+    }
+
+    async fn set_ac_auto_switch(&self, enabled: bool) -> String {
+        self.set_ac_auto_switch_enabled(enabled).await;
+        "OK".to_string()
     }
 
     /// SetPowerProfile — applies and verifies hardware profile, returning a D-Bus
@@ -1147,12 +1301,12 @@ impl PowerService {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
     #[derive(Default)]
-    struct MockSysfsState {
+    pub(crate) struct MockSysfsState {
         files: BTreeMap<PathBuf, String>,
         einval_paths: Vec<PathBuf>,
         silent_noop_paths: Vec<PathBuf>,
@@ -1161,10 +1315,10 @@ mod tests {
     }
 
     #[derive(Clone, Default)]
-    struct MockSysfsIo(Arc<std::sync::Mutex<MockSysfsState>>);
+    pub(crate) struct MockSysfsIo(Arc<std::sync::Mutex<MockSysfsState>>);
 
     impl MockSysfsIo {
-        fn set_file(&self, path: impl AsRef<Path>, val: &str) {
+        pub(crate) fn set_file(&self, path: impl AsRef<Path>, val: &str) {
             self.0
                 .lock()
                 .unwrap()
@@ -1238,7 +1392,7 @@ mod tests {
         }
     }
 
-    fn mock_paths(root: &Path) -> PowerSysfsPaths {
+    pub(crate) fn mock_paths(root: &Path) -> PowerSysfsPaths {
         PowerSysfsPaths {
             acpi_platform_profile: root.join("acpi/platform_profile"),
             hp_wmi_platform_profile: root.join("hp-wmi/platform_profile"),
@@ -1392,6 +1546,51 @@ mod tests {
             io.writes().len(),
             count_after,
             "idempotent PPD signal must not re-write sysfs"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sim_epp_sync_restores_cpu_preference_out_of_power_saver() {
+        let dir = std::env::temp_dir().join(format!("omen-epp-sync-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let p0 = dir.join("policy0");
+        let p1 = dir.join("policy1");
+        std::fs::create_dir_all(&p0).unwrap();
+        std::fs::create_dir_all(&p1).unwrap();
+
+        std::fs::write(
+            p0.join("energy_performance_available_preferences"),
+            "default performance balance_performance balance_power power\n",
+        )
+        .unwrap();
+        std::fs::write(p0.join("energy_performance_preference"), "power\n").unwrap();
+        std::fs::write(
+            p1.join("energy_performance_available_preferences"),
+            "performance balance_performance power\n",
+        )
+        .unwrap();
+        std::fs::write(p1.join("energy_performance_preference"), "power\n").unwrap();
+
+        PowerService::sync_cpu_epp_in(&dir, "balanced");
+        assert_eq!(
+            std::fs::read_to_string(p0.join("energy_performance_preference")).unwrap(),
+            "balance_performance"
+        );
+        assert_eq!(
+            std::fs::read_to_string(p1.join("energy_performance_preference")).unwrap(),
+            "balance_performance"
+        );
+
+        PowerService::sync_cpu_epp_in(&dir, "performance");
+        assert_eq!(
+            std::fs::read_to_string(p0.join("energy_performance_preference")).unwrap(),
+            "performance"
+        );
+        assert_eq!(
+            std::fs::read_to_string(p1.join("energy_performance_preference")).unwrap(),
+            "performance"
         );
 
         let _ = std::fs::remove_dir_all(&dir);

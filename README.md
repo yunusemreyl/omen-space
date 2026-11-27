@@ -8,7 +8,7 @@
 
   <p>
     <a href="https://github.com/yunusemreyl/omen-space/releases/latest">
-      <img src="https://img.shields.io/badge/Release-v2.6.0-e11d48?style=flat-square" alt="Release v2.6.0" />
+      <img src="https://img.shields.io/badge/Release-v2.6.1-e11d48?style=flat-square" alt="Release v2.6.1" />
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/License-GPL--3.0-10b981?style=flat-square" alt="License" />
@@ -131,7 +131,14 @@ sudo ./setup.sh uninstall   # Remove daemon, UI, and DKMS modules cleanly
 
 ---
 
-## What's New in v2.6.0
+## What's New in v2.6.1
+
+- **Ultra-Low-CPU Smooth RGB Engine & Preview:** Unified daemon RGB streaming (`rgb_engine_loop`) with `tokio::sync::Notify` zero-CPU idle parking (including `reactive`/`ripple` between keypresses), wall-clock `dt` pacing, stack-allocated `render_per_key_rgb`, precomputed `LampArray` slot mapping + dirty HID diffing (`R_RANGE`/`R_MULTI`), single-open `O_NONBLOCK` HID batching across Darfon/Primax/HP backends, and 40 FPS GUI RGB Studio preview with cached Cairo glyph extents and continuous speed-slider phase updates (`~59.8 µs/frame` / `<0.18%` of 1 CPU core at 30 FPS in `--release`).
+- **Configurable AC / Battery Switching & Full AC Performance Restore (`#398`):** Added **Auto-Switch Profile on AC / Battery** toggle (`Settings -> Performance`, `omen-cli power auto-switch on|off`, `SetAcAutoSwitch` D-Bus), saved and restored the user's pre-battery profile on AC reconnect instead of overriding unconditionally, added CPU `energy_performance_preference` (EPP) & RAPL baseline restore on AC attach, added `power-profiles-daemon` `performance -> balanced` fallback, and updated `hp-wmi.c` so Victus-S `PL1/PL2` defaults are restored cleanly on both `Balanced` and `Performance`.
+
+---
+
+## Previously in v2.6.0
 
 - **Saved Per-Key RGB Colour Presets (`#397`):** Save, load, overwrite, and delete named custom 104-key layouts (`~/.config/omenspace/key_presets.json`) directly in RGB Studio with live edit tracking, animation stop on preset load, and full TR/EN/ES localization (contributed by [@Dmitriy-Romanov](https://github.com/Dmitriy-Romanov)).
 - **Ultra-Low-Latency Primax Reactive & Ripple RGB (`#385`):** Added instant `evdev` keypress wakeup to the daemon animation loop, single-open HID batching with dirty-page diffing (cutting USB bus traffic from 10 reports/frame down to 1–3 changed pages on `0461:4F03`), and full **Effect Speed** slider scaling for `Reactive` and `Ripple`.

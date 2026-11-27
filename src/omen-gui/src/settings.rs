@@ -165,6 +165,7 @@ fn build_general_page(
     let mut init_startup_profile = 0u32;
     let mut init_thermal_alerts = true;
     let mut init_thermal_prot = true;
+    let mut init_ac_auto_switch = true;
     let mut init_zone_override = 0u32;
     let mut init_appearance_mode = 0u32;
     let mut init_lightbar = true;
@@ -190,6 +191,9 @@ fn build_general_page(
                 }
                 if let Some(tp) = json.get("thermal_protection").and_then(|v| v.as_bool()) {
                     init_thermal_prot = tp;
+                }
+                if let Some(aas) = json.get("ac_auto_switch").and_then(|v| v.as_bool()) {
+                    init_ac_auto_switch = aas;
                 }
                 if let Some(zo) = json.get("zone_override").and_then(|v| v.as_u64()) {
                     init_zone_override = zo as u32;
@@ -365,6 +369,13 @@ fn build_general_page(
     thermal_prot_row.set_active(init_thermal_prot);
     perf_group.add(&thermal_prot_row);
 
+    let ac_auto_row = adw::SwitchRow::builder()
+        .title(i18n::t("ac_auto_switch_title"))
+        .subtitle(i18n::t("ac_auto_switch_sub"))
+        .build();
+    ac_auto_row.set_active(init_ac_auto_switch);
+    perf_group.add(&ac_auto_row);
+
     page.append(&perf_group);
 
     // ── 4. Quick HUD Hotkey ───────────────────────────────────
@@ -499,6 +510,7 @@ fn build_general_page(
     let sm_row_clone = startup_mode_row.clone();
     let thm_row_clone = thermal_row.clone();
     let thm_prot_clone = thermal_prot_row.clone();
+    let ac_auto_clone = ac_auto_row.clone();
     let zone_row_clone = zone_override_row.clone();
     let lb_row_clone = lightbar_row.clone();
     let hk_spec_clone = hotkey_spec.clone();
@@ -509,6 +521,7 @@ fn build_general_page(
         let sp = sm_row_clone.selected();
         let ta = thm_row_clone.is_active();
         let tp = thm_prot_clone.is_active();
+        let ac_auto = ac_auto_clone.is_active();
         let zo = zone_row_clone.selected();
         let lb = lb_row_clone.is_active();
         if let Ok(home) = std::env::var("HOME") {
@@ -526,6 +539,7 @@ fn build_general_page(
             json["startup_profile"] = serde_json::json!(sp);
             json["thermal_alerts"] = serde_json::json!(ta);
             json["thermal_protection"] = serde_json::json!(tp);
+            json["ac_auto_switch"] = serde_json::json!(ac_auto);
             json["zone_override"] = serde_json::json!(zo);
             json["lightbar_enabled"] = serde_json::json!(lb);
             hk_spec_clone.borrow().write_settings(&mut json);
@@ -594,8 +608,20 @@ fn build_general_page(
         }
     });
 
+    let syncing_ac_auto = Rc::new(std::cell::Cell::new(false));
+    let s5_ac = save_settings_rc.clone();
+    let syncing_ac_notify = syncing_ac_auto.clone();
+    ac_auto_row.connect_active_notify(move |r| {
+        s5_ac();
+        if !syncing_ac_notify.get() {
+            crate::daemon_client::set_ac_auto_switch_sync(r.is_active());
+        }
+    });
+
     let tp_row_sync = thermal_prot_row.clone();
     let syncing_tp_load = syncing_thermal_prot.clone();
+    let ac_row_sync = ac_auto_row.clone();
+    let syncing_ac_load = syncing_ac_auto.clone();
     glib::spawn_future_local(async move {
         if let Ok(fan_json) = crate::daemon_client::get_fan_info_async().await {
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(&fan_json) {
@@ -607,6 +633,17 @@ fn build_general_page(
                         syncing_tp_load.set(true);
                         tp_row_sync.set_active(enabled);
                         syncing_tp_load.set(false);
+                    }
+                }
+            }
+        }
+        if let Ok(power_json) = crate::daemon_client::get_power_profile_raw_async().await {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&power_json) {
+                if let Some(enabled) = val.get("ac_auto_switch").and_then(|v| v.as_bool()) {
+                    if ac_row_sync.is_active() != enabled {
+                        syncing_ac_load.set(true);
+                        ac_row_sync.set_active(enabled);
+                        syncing_ac_load.set(false);
                     }
                 }
             }

@@ -176,10 +176,19 @@ pub struct KeyGeom {
     pub id: usize,
     pub name: String,
     pub display: String,
+    pub zone: i32,
     pub x: f64,
     pub y: f64,
     pub w: f64,
     pub h: f64,
+}
+
+/// Integrate animation phase smoothly over real frame delta so speed slider changes
+/// never cause phase discontinuities (`anim_time * speed` jumps).
+pub fn advance_anim_phase(phase: f64, dt_secs: f64, speed: f64) -> f64 {
+    let dt = dt_secs.clamp(0.0, 0.25);
+    let spd = speed.clamp(1.0, 100.0);
+    (phase + dt * spd).rem_euclid(10_000.0)
 }
 
 pub fn fast_hex_val(b: u8) -> f64 {
@@ -625,5 +634,47 @@ mod capability_detection_tests {
         ] {
             assert_eq!(trq.get(us).map(String::as_str), Some(tr), "key={us}");
         }
+    }
+
+    #[test]
+    fn anim_phase_advances_continuously_when_speed_changes() {
+        let p0 = super::advance_anim_phase(0.0, 0.016, 20.0);
+        let p1 = super::advance_anim_phase(p0, 0.016, 80.0);
+        assert!(p1 > p0, "phase must remain monotonic across speed change");
+        // Compare against naive `t * speed` jump: phase delta over one 16ms frame at speed=80
+        // must be 0.016 * 80 = 1.28 regardless of accumulated prior phase.
+        let p_late = super::advance_anim_phase(500.0, 0.016, 80.0);
+        assert!((p_late - 501.28).abs() < 1e-6);
+    }
+
+    #[test]
+    fn resource_preview_phase_and_color_math_stays_microsecond_fast() {
+        let start = std::time::Instant::now();
+        let mut phase = 0.0f64;
+        let mut acc = 0.0f64;
+        for frame in 0..1_000usize {
+            phase = super::advance_anim_phase(phase, 0.025, 65.0);
+            for key_id in 0..98usize {
+                let x = (key_id % 18) as f64 * 38.0;
+                let hue =
+                    ((phase * 4.0) - (x / 10.0) * 8.0 + frame as f64 * 0.001).rem_euclid(360.0);
+                let (r, g, b) = super::hsl_to_rgb(hue, 1.0, 0.5);
+                acc += r + g + b;
+            }
+        }
+        let elapsed_us = start.elapsed().as_secs_f64() * 1_000_000.0;
+        let per_frame_us = elapsed_us / 1_000.0;
+        println!(
+            "GUI_PREVIEW_BENCH: total_us={:.1} per_frame_us={:.2} fps40_cpu_pct={:.4}% checksum={:.1}",
+            elapsed_us,
+            per_frame_us,
+            (per_frame_us / 25_000.0) * 100.0,
+            acc
+        );
+        assert!(
+            per_frame_us < 500.0,
+            "GUI preview math exceeded 500 us/frame budget: {:.2} us",
+            per_frame_us
+        );
     }
 }

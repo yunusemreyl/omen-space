@@ -8,6 +8,12 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+#[derive(Debug, Default)]
+pub struct HidPageCache {
+    pub primax: Option<[[u8; 65]; 9]>,
+    pub darfon: Option<[[u8; 64]; 9]>,
+}
+
 #[derive(Debug, Clone)]
 pub struct HidPerKeyBackend {
     pub hidraw_paths: Vec<String>,
@@ -15,7 +21,7 @@ pub struct HidPerKeyBackend {
     pub lamparray: Option<LampArrayBackend>,
     pub is_primax_mcu: bool,
     pub primax_mode_active: Arc<AtomicBool>,
-    pub primax_last_pages: Arc<Mutex<Option<[[u8; 65]; 9]>>>,
+    pub cached_pages: Arc<Mutex<HidPageCache>>,
 }
 
 impl HidPerKeyBackend {
@@ -47,7 +53,7 @@ impl HidPerKeyBackend {
             lamparray,
             is_primax_mcu,
             primax_mode_active: Arc::new(AtomicBool::new(false)),
-            primax_last_pages: Arc::new(Mutex::new(None)),
+            cached_pages: Arc::new(Mutex::new(HidPageCache::default())),
         };
         if backend.is_available() {
             info!(
@@ -282,11 +288,36 @@ impl HidPerKeyBackend {
         }
     }
 
-    pub fn invalidate_primax_cache(&self) {
-        self.primax_mode_active.store(false, Ordering::SeqCst);
-        if let Ok(mut guard) = self.primax_last_pages.lock() {
-            *guard = None;
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        hidraw_paths: Vec<String>,
+        device_pid: Option<u16>,
+        is_primax_mcu: bool,
+    ) -> Self {
+        Self {
+            hidraw_paths,
+            device_pid,
+            lamparray: None,
+            is_primax_mcu,
+            primax_mode_active: Arc::new(AtomicBool::new(false)),
+            cached_pages: Arc::new(Mutex::new(HidPageCache::default())),
         }
+    }
+
+    pub fn invalidate_cache(&self) {
+        self.primax_mode_active.store(false, Ordering::SeqCst);
+        if let Ok(mut guard) = self.cached_pages.lock() {
+            guard.primax = None;
+            guard.darfon = None;
+        }
+        if let Some(ref la) = self.lamparray {
+            la.invalidate_cache();
+        }
+    }
+
+    #[cfg(test)]
+    pub fn invalidate_primax_cache(&self) {
+        self.invalidate_cache();
     }
 
     fn write_primax_report(&self, report: &[u8; Self::PACKET_SIZE]) -> bool {
@@ -300,13 +331,17 @@ impl HidPerKeyBackend {
     /// Primax McuSDK2 (0461:4F03/4E9A/4E9B/4F1E/4ECB) static colour write across 3x60 LED pages (180 slots)
     /// using dirty-page diffing and single-open batched HID writes.
     pub fn write_primax_colors(&self, key_colors: &[(u8, u8, u8)]) -> bool {
-        let mut guard = match self.primax_last_pages.lock() {
+        let mut guard = match self.cached_pages.lock() {
             Ok(g) => g,
             Err(poisoned) => poisoned.into_inner(),
         };
         let mut mode_active = self.primax_mode_active.load(Ordering::SeqCst);
-        let packets =
-            plan_primax_packets(self.device_pid, key_colors, &mut guard, &mut mode_active);
+        let packets = plan_primax_packets(
+            self.device_pid,
+            key_colors,
+            &mut guard.primax,
+            &mut mode_active,
+        );
         if packets.is_empty() {
             return true;
         }
@@ -315,54 +350,31 @@ impl HidPerKeyBackend {
             true
         } else {
             self.primax_mode_active.store(false, Ordering::SeqCst);
-            *guard = None;
+            guard.primax = None;
             false
         }
     }
 
     pub fn write_darfon_colors(&self, key_colors: &[(u8, u8, u8)]) -> bool {
-        let mut on_pkt = [0u8; 64];
-        on_pkt[0] = 0x09;
-        on_pkt[2] = 0x01;
-        on_pkt[4] = 0x01;
-        let _ = self.write_packet(&on_pkt);
-
-        let mut r_leds = [0u8; 176];
-        let mut g_leds = [0u8; 176];
-        let mut b_leds = [0u8; 176];
-
-        let total_keys = key_colors.len().max(1);
-        for (i, &(r, g, b)) in key_colors.iter().enumerate().take(104) {
-            let base_led = (i * 176) / total_keys;
-            let end_led = ((i + 1) * 176) / total_keys;
-            for led in base_led..end_led.min(176) {
-                r_leds[led] = r;
-                g_leds[led] = g;
-                b_leds[led] = b;
-            }
+        let mut guard = match self.cached_pages.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let mut mode_active = self.primax_mode_active.load(Ordering::SeqCst);
+        let packets = plan_darfon_packets(key_colors, &mut guard.darfon, &mut mode_active);
+        if packets.is_empty() {
+            return true;
         }
-
-        let channels = [(0x05u8, &r_leds), (0x06u8, &g_leds), (0x07u8, &b_leds)];
-        for (cmd, leds) in channels {
-            for chunk_idx in 0..3 {
-                let mut pkt = [0u8; 64];
-                pkt[0] = cmd;
-                pkt[1] = chunk_idx as u8;
-                pkt[2] = 0x00;
-                pkt[3] = 0x00;
-                let start_idx = chunk_idx * 60;
-                for led in 0..60 {
-                    let pos = start_idx + led;
-                    if pos < 176 {
-                        pkt[4 + led] = leds[pos];
-                    }
-                }
-                if !self.write_packet(&pkt) {
-                    return false;
-                }
-            }
+        let slices: [&[u8]; 10] =
+            std::array::from_fn(|i| packets.get(i).map(|p| p.as_slice()).unwrap_or(&[]));
+        if self.write_slices_batch(&slices[..packets.len()]) {
+            self.primax_mode_active.store(mode_active, Ordering::SeqCst);
+            true
+        } else {
+            self.primax_mode_active.store(false, Ordering::SeqCst);
+            guard.darfon = None;
+            false
         }
-        true
     }
 
     fn build_packet(&self, sub_command: u8) -> [u8; Self::PACKET_SIZE] {
@@ -375,91 +387,54 @@ impl HidPerKeyBackend {
 
     fn drain_hidraw_input(file: &mut std::fs::File) {
         use std::io::Read;
-        use std::os::fd::AsRawFd;
-        let fd = file.as_raw_fd();
-        unsafe {
-            let flags = libc::fcntl(fd, libc::F_GETFL);
-            if flags >= 0 {
-                let _ = libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+        let mut drain = [0u8; 64];
+        while let Ok(n) = file.read(&mut drain) {
+            if n == 0 {
+                break;
             }
         }
-        let mut drain = [0u8; 64];
-        while file.read(&mut drain).is_ok() {}
     }
 
     fn write_packet(&self, packet: &[u8]) -> bool {
-        use std::io::Write;
-        use std::os::unix::fs::FileTypeExt;
-        let mut any_ok = false;
-        for path in &self.hidraw_paths {
-            let is_char_dev = std::fs::metadata(path)
-                .map(|m| m.file_type().is_char_device())
-                .unwrap_or(false);
-            let open_res = if is_char_dev {
-                std::fs::OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .open(path)
-            } else {
-                std::fs::OpenOptions::new().write(true).open(path)
-            };
-            match open_res {
-                Ok(mut file) => {
-                    if is_char_dev {
-                        Self::drain_hidraw_input(&mut file);
-                    }
-                    if let Err(e) = file.write_all(packet) {
-                        warn!("Failed to write to {}: {}", path, e);
-                    } else {
-                        if is_char_dev {
-                            Self::drain_hidraw_input(&mut file);
-                        }
-                        any_ok = true;
-                    }
-                }
-                Err(e) => {
-                    warn!("Failed to open {} for writing: {}", path, e);
-                }
-            }
-        }
-        any_ok
+        self.write_slices_batch(&[packet])
     }
 
-    pub fn write_packets_batch(&self, packets: &[[u8; Self::PACKET_SIZE]]) -> bool {
+    pub fn write_slices_batch(&self, packets: &[&[u8]]) -> bool {
         use std::io::Write;
-        use std::os::unix::fs::FileTypeExt;
+        use std::os::unix::fs::{FileTypeExt, OpenOptionsExt};
 
         if packets.is_empty() {
             return true;
         }
         let mut any_ok = false;
         for path in &self.hidraw_paths {
-            let is_char_dev = std::fs::metadata(path)
-                .map(|m| m.file_type().is_char_device())
-                .unwrap_or(false);
-            let open_res = if is_char_dev {
-                std::fs::OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .open(path)
-            } else {
-                std::fs::OpenOptions::new().write(true).open(path)
-            };
+            let open_res = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(path);
             match open_res {
                 Ok(mut file) => {
+                    let is_char_dev = file
+                        .metadata()
+                        .map(|m| m.file_type().is_char_device())
+                        .unwrap_or(false);
                     if is_char_dev {
                         Self::drain_hidraw_input(&mut file);
                     }
                     let mut all_ok = true;
                     let mut wrote_any = false;
                     for pkt in packets {
-                        if self.is_primax_mcu && !Self::is_primax_cmd_allowed(pkt[1]) {
+                        if self.is_primax_mcu
+                            && pkt.len() > 1
+                            && !Self::is_primax_cmd_allowed(pkt[1])
+                        {
                             warn!("Blocked non-whitelisted Primax command 0x{:02X}", pkt[1]);
                             all_ok = false;
                             break;
                         }
                         if wrote_any && is_char_dev {
-                            std::thread::sleep(std::time::Duration::from_micros(300));
+                            std::thread::sleep(std::time::Duration::from_micros(150));
                         }
                         if let Err(e) = file.write_all(pkt) {
                             warn!("Failed to write to {}: {}", path, e);
@@ -483,6 +458,20 @@ impl HidPerKeyBackend {
         any_ok
     }
 
+    pub fn write_packets_batch(&self, packets: &[[u8; Self::PACKET_SIZE]]) -> bool {
+        if packets.is_empty() {
+            return true;
+        }
+        if packets.len() <= 16 {
+            let refs: [&[u8]; 16] =
+                std::array::from_fn(|i| packets.get(i).map(|p| p.as_slice()).unwrap_or(&[]));
+            self.write_slices_batch(&refs[..packets.len()])
+        } else {
+            let refs: Vec<&[u8]> = packets.iter().map(|p| p.as_slice()).collect();
+            self.write_slices_batch(&refs)
+        }
+    }
+
     pub fn send_enter_per_key_mode(&self, brightness: u32) -> bool {
         if self.lamparray.is_some() {
             return true;
@@ -491,12 +480,18 @@ impl HidPerKeyBackend {
             let val = if brightness == 0 { 0x00 } else { 0x01 };
             let pkt = Self::build_primax_report(0x09, 0x00, 0x01, &[val]);
             let ok = self.write_primax_report(&pkt);
-            if let Ok(mut guard) = self.primax_last_pages.lock() {
-                *guard = None;
+            if let Ok(mut guard) = self.cached_pages.lock() {
+                guard.primax = None;
             }
             self.primax_mode_active
                 .store(ok && brightness > 0, Ordering::SeqCst);
             return ok;
+        }
+        if self.is_darfon() {
+            if let Ok(mut guard) = self.cached_pages.lock() {
+                guard.darfon = None;
+            }
+            self.primax_mode_active.store(false, Ordering::SeqCst);
         }
         let mut packet = self.build_packet(Self::SUB_ENTER_EFFECT);
         packet[3] = Self::STATIC_MODE_ID;
@@ -504,14 +499,9 @@ impl HidPerKeyBackend {
         self.write_packet(&packet)
     }
 
-    fn send_commit(&self) -> bool {
-        self.write_packet(&self.build_packet(Self::SUB_COMMIT))
-    }
-
     pub fn write_per_key_colors(&self, key_colors: &[(u8, u8, u8)]) -> bool {
         if let Some(ref la) = self.lamparray {
-            let mapped = la.key_colors(key_colors, Self::TOTAL_KEY_COUNT);
-            return la.set_frame(&mapped);
+            return la.set_gui_frame(key_colors, Self::TOTAL_KEY_COUNT);
         }
         if self.is_primax_mcu {
             return self.write_primax_colors(key_colors);
@@ -520,6 +510,7 @@ impl HidPerKeyBackend {
             return self.write_darfon_colors(key_colors);
         }
         let segment_count = key_colors.len().div_ceil(Self::KEYS_PER_SEGMENT);
+        let mut packets = Vec::with_capacity(segment_count + 1);
         for seg in 0..segment_count {
             let mut packet = self.build_packet(Self::SUB_SET_COLORS);
             packet[3] = seg as u8;
@@ -536,11 +527,10 @@ impl HidPerKeyBackend {
                 packet[offset + 2] = b;
             }
 
-            if !self.write_packet(&packet) {
-                return false;
-            }
+            packets.push(packet);
         }
-        self.send_commit()
+        packets.push(self.build_packet(Self::SUB_COMMIT));
+        self.write_packets_batch(&packets)
     }
 
     /// Map an OMEN Space mode to the closest built-in effect of the Darfon MCU
@@ -615,6 +605,7 @@ impl HidPerKeyBackend {
             return false;
         }
         self.release_lamparray();
+        self.invalidate_cache();
         let mut on = [0u8; 64];
         on[0] = 0x09;
         on[2] = 1;
@@ -747,6 +738,69 @@ pub(crate) fn plan_primax_packets(
     out
 }
 
+pub(crate) fn plan_darfon_packets(
+    key_colors: &[(u8, u8, u8)],
+    cache: &mut Option<[[u8; 64]; 9]>,
+    mode_active: &mut bool,
+) -> Vec<[u8; 64]> {
+    let mut r_leds = [0u8; 176];
+    let mut g_leds = [0u8; 176];
+    let mut b_leds = [0u8; 176];
+
+    let total_keys = key_colors.len().max(1);
+    for (i, &(r, g, b)) in key_colors.iter().enumerate().take(104) {
+        let base_led = (i * 176) / total_keys;
+        let end_led = ((i + 1) * 176) / total_keys;
+        for led in base_led..end_led.min(176) {
+            r_leds[led] = r;
+            g_leds[led] = g;
+            b_leds[led] = b;
+        }
+    }
+
+    let mut pages = [[0u8; 64]; 9];
+    let channels = [(0x05u8, &r_leds), (0x06u8, &g_leds), (0x07u8, &b_leds)];
+    for (ch_idx, (cmd, leds)) in channels.into_iter().enumerate() {
+        for chunk_idx in 0..3 {
+            let mut pkt = [0u8; 64];
+            pkt[0] = cmd;
+            pkt[1] = chunk_idx as u8;
+            pkt[2] = 0x00;
+            pkt[3] = 0x00;
+            let start_idx = chunk_idx * 60;
+            for led in 0..60 {
+                let pos = start_idx + led;
+                if pos < 176 {
+                    pkt[4 + led] = leds[pos];
+                }
+            }
+            pages[ch_idx * 3 + chunk_idx] = pkt;
+        }
+    }
+
+    let mut out = Vec::with_capacity(10);
+    if !*mode_active || cache.is_none() {
+        let mut on_pkt = [0u8; 64];
+        on_pkt[0] = 0x09;
+        on_pkt[2] = 0x01;
+        on_pkt[4] = 0x01;
+        out.push(on_pkt);
+        for pkt in &pages {
+            out.push(*pkt);
+        }
+        *mode_active = true;
+        *cache = Some(pages);
+    } else if let Some(prev) = cache.as_ref() {
+        for (i, pkt) in pages.iter().enumerate() {
+            if *pkt != prev[i] {
+                out.push(*pkt);
+            }
+        }
+        *cache = Some(pages);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -799,14 +853,11 @@ mod tests {
         ));
         std::fs::write(&path, []).unwrap();
 
-        let backend = HidPerKeyBackend {
-            hidraw_paths: vec![path.to_string_lossy().to_string()],
-            device_pid: Some(0x4F03),
-            lamparray: None,
-            is_primax_mcu: true,
-            primax_mode_active: Arc::new(AtomicBool::new(false)),
-            primax_last_pages: Arc::new(Mutex::new(None)),
-        };
+        let backend = HidPerKeyBackend::for_test(
+            vec![path.to_string_lossy().to_string()],
+            Some(0x4F03),
+            true,
+        );
 
         assert!(backend.write_packets_batch(&[]));
 
@@ -826,9 +877,61 @@ mod tests {
 
         // Verify invalidate_primax_cache resets active flag and page cache.
         backend.primax_mode_active.store(true, Ordering::SeqCst);
-        *backend.primax_last_pages.lock().unwrap() = Some([[0u8; 65]; 9]);
+        backend.cached_pages.lock().unwrap().primax = Some([[0u8; 65]; 9]);
         backend.invalidate_primax_cache();
         assert!(!backend.primax_mode_active.load(Ordering::SeqCst));
-        assert!(backend.primax_last_pages.lock().unwrap().is_none());
+        assert!(backend.cached_pages.lock().unwrap().primax.is_none());
+    }
+
+    #[test]
+    fn darfon_dirty_pages_and_single_open_batch_preserve_zero_blength() {
+        let mut cache = None;
+        let mut mode_active = false;
+        let base_colors = vec![(15u8, 30u8, 45u8); HidPerKeyBackend::TOTAL_KEY_COUNT];
+
+        // 1. Initial frame emits 0x09 + 9 channel pages (10 packets), all pages keep BLength=0.
+        let first = plan_darfon_packets(&base_colors, &mut cache, &mut mode_active);
+        assert_eq!(first.len(), 10);
+        assert_eq!(first[0][0], 0x09);
+        assert!(mode_active);
+        for pkt in &first[1..] {
+            assert_eq!(
+                &pkt[2..4],
+                &[0x00, 0x00],
+                "Darfon pages must preserve BLength=0"
+            );
+        }
+
+        // 2. Identical frame emits 0 packets.
+        let same = plan_darfon_packets(&base_colors, &mut cache, &mut mode_active);
+        assert!(same.is_empty());
+
+        // 3. Single-key change emits only dirty channel pages (1..=3), no 0x09.
+        let mut changed = base_colors.clone();
+        changed[50] = (255, 0, 128);
+        let diff = plan_darfon_packets(&changed, &mut cache, &mut mode_active);
+        assert!(!diff.is_empty() && diff.len() <= 3);
+        assert!(diff
+            .iter()
+            .all(|pkt| pkt[0] != 0x09 && pkt[2] == 0x00 && pkt[3] == 0x00));
+
+        // 4. Single-open write_darfon_colors writes all 10 packets (640 bytes) in one pass.
+        let path = std::env::temp_dir().join(format!(
+            "omen-darfon-batch-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::write(&path, []).unwrap();
+        let backend = HidPerKeyBackend::for_test(
+            vec![path.to_string_lossy().to_string()],
+            Some(0x54BF),
+            false,
+        );
+        assert!(backend.write_darfon_colors(&changed));
+        let bytes = std::fs::read(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(bytes.len(), 640);
+        assert_eq!(bytes[0], 0x09);
+        assert_eq!(&bytes[640 - 64..640 - 60], &[0x07, 0x02, 0x00, 0x00]);
     }
 }

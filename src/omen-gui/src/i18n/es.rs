@@ -428,6 +428,8 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("updater_commits_ahead", "nuevo(s) commit(s) disponible(s)"),
     ("perf_profile_apply_failed", "No se pudo cambiar el perfil de energía"),
     ("fan_clean_stop_btn", "Detener y volver a Automático"),
+    ("ac_auto_switch_title", "Cambio automático de perfil con CA / Batería"),
+    ("ac_auto_switch_sub", "Cambia a Eco con batería y restaura tu perfil anterior al conectar el cargador"),
 ];
 
 pub(super) fn translate(key: &str) -> Option<&'static str> {

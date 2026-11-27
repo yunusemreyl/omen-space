@@ -46,13 +46,22 @@ pub struct LampInfo {
     pub binding: u8,
 }
 
+#[derive(Debug, Default)]
+struct LampArrayRuntime {
+    file: Option<std::fs::File>,
+    last_colors: Vec<(u8, u8, u8)>,
+    scratch_colors: Vec<(u8, u8, u8)>,
+    scratch_reports: Vec<(usize, [u8; 51])>,
+}
+
 #[derive(Debug, Clone)]
 pub struct LampArrayBackend {
     pub path: String,
-    pub lamps: Vec<LampInfo>,
+    pub lamps: Arc<[LampInfo]>,
     pub width_um: u32,
+    slot_for_lamp: Arc<[usize]>,
     acquired: Arc<AtomicBool>,
-    fd: Arc<Mutex<Option<std::fs::File>>>,
+    runtime: Arc<Mutex<LampArrayRuntime>>,
 }
 
 impl LampArrayBackend {
@@ -116,13 +125,25 @@ impl LampArrayBackend {
                 "empty report",
             ));
         }
-        let mut buf = data.to_vec();
-        let rc = unsafe {
-            libc::ioctl(
-                file.as_raw_fd(),
-                Self::hidioc(0x06, buf.len()),
-                buf.as_mut_ptr(),
-            )
+        let rc = if data.len() <= 64 {
+            let mut buf = [0u8; 64];
+            buf[..data.len()].copy_from_slice(data);
+            unsafe {
+                libc::ioctl(
+                    file.as_raw_fd(),
+                    Self::hidioc(0x06, data.len()),
+                    buf.as_mut_ptr(),
+                )
+            }
+        } else {
+            let mut buf = data.to_vec();
+            unsafe {
+                libc::ioctl(
+                    file.as_raw_fd(),
+                    Self::hidioc(0x06, buf.len()),
+                    buf.as_mut_ptr(),
+                )
+            }
         };
         if rc < 0 {
             Err(std::io::Error::last_os_error())
@@ -138,18 +159,57 @@ impl LampArrayBackend {
             .open(&self.path)
     }
 
-    fn with_file<T>(&self, f: impl FnOnce(&std::fs::File) -> T) -> Option<T> {
-        let mut guard = self.fd.lock().ok()?;
-        if guard.is_none() {
-            match self.open() {
-                Ok(file) => *guard = Some(file),
-                Err(e) => {
-                    warn!("LampArray {}: cannot open: {}", self.path, e);
-                    return None;
+    pub(crate) fn build_lamp_slot_map(lamps: &[LampInfo], is_omen_max: bool) -> Vec<usize> {
+        let n = lamps.len();
+        if n == 0 {
+            return Vec::new();
+        }
+        let mut slots = vec![0usize; n];
+        let mut mapped = vec![false; n];
+
+        if is_omen_max && n == 120 {
+            for &(lamp, slot) in LAMP_SLOT_OVERRIDES_OMEN_MAX {
+                if lamp < n && slot < Self::KEY_USAGES.len() {
+                    slots[lamp] = slot;
+                    mapped[lamp] = true;
                 }
             }
         }
-        guard.as_ref().map(f)
+
+        for (i, lamp) in lamps.iter().enumerate() {
+            if mapped[i] || lamp.binding == 0 {
+                continue;
+            }
+            if let Some(idx) = Self::KEY_USAGES
+                .iter()
+                .position(|&usage| usage != 0 && usage == lamp.binding)
+            {
+                slots[i] = idx;
+                mapped[i] = true;
+            }
+        }
+
+        for i in 0..n {
+            if mapped[i] {
+                continue;
+            }
+            let mut best: Option<usize> = None;
+            let mut best_d = u64::MAX;
+            for (j, other) in lamps.iter().enumerate() {
+                if !mapped[j] {
+                    continue;
+                }
+                let dx = lamps[i].x as i64 - other.x as i64;
+                let dy = lamps[i].y as i64 - other.y as i64;
+                let d = (dx * dx + dy * dy) as u64;
+                if d < best_d {
+                    best_d = d;
+                    best = Some(j);
+                }
+            }
+            slots[i] = best.map(|j| slots[j]).unwrap_or(0);
+        }
+        slots
     }
 
     pub fn probe(path: &str) -> Option<Self> {
@@ -193,6 +253,7 @@ impl LampArrayBackend {
             return None;
         }
         lamps.sort_by_key(|l| l.id);
+        let slot_for_lamp = Self::build_lamp_slot_map(&lamps, is_omen_max_lamparray_board());
         info!(
             "LampArray on {}: {} lamps, {}x{} mm, min_interval={}us",
             path,
@@ -203,10 +264,11 @@ impl LampArrayBackend {
         );
         Some(Self {
             path: path.to_string(),
-            lamps,
+            lamps: Arc::from(lamps),
             width_um,
+            slot_for_lamp: Arc::from(slot_for_lamp),
             acquired: Arc::new(AtomicBool::new(false)),
-            fd: Arc::new(Mutex::new(None)),
+            runtime: Arc::new(Mutex::new(LampArrayRuntime::default())),
         })
     }
 
@@ -215,107 +277,246 @@ impl LampArrayBackend {
     }
 
     pub fn release(&self) {
-        let _ = self.with_file(|file| {
-            let _ = Self::set_feature(file, &[Self::R_CONTROL, 1]);
-        });
+        if let Ok(mut guard) = self.runtime.lock() {
+            if guard.file.is_none() {
+                if let Ok(file) = self.open() {
+                    guard.file = Some(file);
+                }
+            }
+            if let Some(ref file) = guard.file {
+                let _ = Self::set_feature(file, &[Self::R_CONTROL, 1]);
+            }
+            guard.last_colors.clear();
+        }
         self.acquired.store(false, Ordering::Relaxed);
     }
 
-    fn range_report(start: u16, end: u16, color: (u8, u8, u8)) -> Vec<u8> {
-        vec![
-            Self::R_RANGE,
-            Self::FLAG_COMPLETE,
-            (start & 0xFF) as u8,
-            (start >> 8) as u8,
-            (end & 0xFF) as u8,
-            (end >> 8) as u8,
-            color.0,
-            color.1,
-            color.2,
-            255,
-        ]
+    pub fn invalidate_cache(&self) {
+        if let Ok(mut guard) = self.runtime.lock() {
+            guard.last_colors.clear();
+        }
     }
 
-    fn multi_report(
-        lamps: &[LampInfo],
-        offset: usize,
-        chunk: &[(u8, u8, u8)],
-        complete: bool,
-    ) -> Vec<u8> {
-        let mut rep = vec![0u8; 51];
-        rep[0] = Self::R_MULTI;
-        rep[1] = chunk.len() as u8;
-        rep[2] = if complete { Self::FLAG_COMPLETE } else { 0 };
-        for k in 0..Self::LAMPS_PER_MULTI {
-            let id = lamps.get(offset + k).map(|l| l.id).unwrap_or(0);
-            let p = 3 + k * 2;
-            rep[p] = (id & 0xFF) as u8;
-            rep[p + 1] = (id >> 8) as u8;
-        }
-        for (k, &(r, g, b)) in chunk.iter().enumerate() {
-            let p = 19 + k * 4;
-            rep[p] = r;
-            rep[p + 1] = g;
-            rep[p + 2] = b;
-            rep[p + 3] = 255;
-        }
+    fn range_report(start: u16, end: u16, color: (u8, u8, u8)) -> [u8; 51] {
+        let mut rep = [0u8; 51];
+        rep[0] = Self::R_RANGE;
+        rep[1] = Self::FLAG_COMPLETE;
+        rep[2] = (start & 0xFF) as u8;
+        rep[3] = (start >> 8) as u8;
+        rep[4] = (end & 0xFF) as u8;
+        rep[5] = (end >> 8) as u8;
+        rep[6] = color.0;
+        rep[7] = color.1;
+        rep[8] = color.2;
+        rep[9] = 255;
         rep
     }
 
-    fn frame_reports(&self, colors: &[(u8, u8, u8)]) -> Vec<Vec<u8>> {
-        let n = self.lamps.len();
-        if n == 0 {
-            return Vec::new();
+    fn pack_multi_report(entries: &[(u16, (u8, u8, u8))], complete: bool) -> (usize, [u8; 51]) {
+        let mut rep = [0u8; 51];
+        rep[0] = Self::R_MULTI;
+        rep[1] = entries.len() as u8;
+        rep[2] = if complete { Self::FLAG_COMPLETE } else { 0 };
+        for (k, &(id, (r, g, b))) in entries.iter().enumerate() {
+            let id_p = 3 + k * 2;
+            rep[id_p] = (id & 0xFF) as u8;
+            rep[id_p + 1] = (id >> 8) as u8;
+            let c_p = 19 + k * 4;
+            rep[c_p] = r;
+            rep[c_p + 1] = g;
+            rep[c_p + 2] = b;
+            rep[c_p + 3] = 255;
         }
-        let mut cols = colors.to_vec();
-        cols.resize(n, (0, 0, 0));
-        cols.truncate(n);
-        if cols.iter().all(|c| *c == cols[0]) {
-            return vec![Self::range_report(0, (n - 1) as u16, cols[0])];
-        }
-        let mut reports = Vec::with_capacity(n.div_ceil(Self::LAMPS_PER_MULTI));
-        let mut off = 0;
-        while off < n {
-            let end = (off + Self::LAMPS_PER_MULTI).min(n);
-            reports.push(Self::multi_report(
-                &self.lamps,
-                off,
-                &cols[off..end],
-                end >= n,
-            ));
-            off = end;
-        }
-        reports
+        (51, rep)
     }
 
-    pub fn set_frame(&self, colors: &[(u8, u8, u8)]) -> bool {
-        let reports = self.frame_reports(colors);
-        if reports.is_empty() {
-            return false;
+    /// Diff `colors` against `prev`, writing dirty HID reports into `out` and updating
+    /// `prev` in-place so steady-state frames perform zero heap allocations once warmed up.
+    pub(crate) fn diff_frame_reports_into(
+        lamps: &[LampInfo],
+        prev: &mut Vec<(u8, u8, u8)>,
+        colors: &[(u8, u8, u8)],
+        out: &mut Vec<(usize, [u8; 51])>,
+    ) {
+        out.clear();
+        let n = lamps.len();
+        if n == 0 {
+            return;
         }
-        let result = self.with_file(|file| {
-            if !self.acquired.load(Ordering::Relaxed) {
-                self.acquire(file);
-                self.acquired.store(true, Ordering::Relaxed);
+        let copy_len = colors.len().min(n);
+        if prev.len() == n
+            && prev[..copy_len] == colors[..copy_len]
+            && prev[copy_len..].iter().all(|&c| c == (0, 0, 0))
+        {
+            return;
+        }
+
+        let first = colors.first().copied().unwrap_or((0, 0, 0));
+        let all_uniform = (0..n).all(|i| colors.get(i).copied().unwrap_or((0, 0, 0)) == first);
+        if all_uniform {
+            prev.clear();
+            prev.resize(n, first);
+            out.push((10, Self::range_report(0, (n - 1) as u16, first)));
+            return;
+        }
+
+        let mut batch = [(0u16, (0u8, 0u8, 0u8)); Self::LAMPS_PER_MULTI];
+        let mut batch_len = 0usize;
+        if prev.len() != n {
+            prev.clear();
+            prev.extend_from_slice(&colors[..copy_len]);
+            prev.resize(n, (0, 0, 0));
+            for (i, lamp) in lamps.iter().enumerate() {
+                batch[batch_len] = (lamp.id, prev[i]);
+                batch_len += 1;
+                if batch_len == Self::LAMPS_PER_MULTI {
+                    out.push(Self::pack_multi_report(&batch[..batch_len], false));
+                    batch_len = 0;
+                }
             }
-            for rep in &reports {
-                if let Err(e) = Self::set_feature(file, rep) {
-                    warn!(
-                        "LampArray {}: report 0x{:02X} failed: {}",
-                        self.path, rep[0], e
-                    );
-                    self.acquired.store(false, Ordering::Relaxed);
+        } else {
+            for (i, lamp) in lamps.iter().enumerate() {
+                let c = colors.get(i).copied().unwrap_or((0, 0, 0));
+                if prev[i] == c {
+                    continue;
+                }
+                prev[i] = c;
+                batch[batch_len] = (lamp.id, c);
+                batch_len += 1;
+                if batch_len == Self::LAMPS_PER_MULTI {
+                    out.push(Self::pack_multi_report(&batch[..batch_len], false));
+                    batch_len = 0;
+                }
+            }
+        }
+        if batch_len > 0 {
+            out.push(Self::pack_multi_report(&batch[..batch_len], false));
+        }
+        if let Some((_, last)) = out.last_mut() {
+            last[2] = Self::FLAG_COMPLETE;
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn diff_frame_reports(
+        lamps: &[LampInfo],
+        prev: &mut Vec<(u8, u8, u8)>,
+        colors: &[(u8, u8, u8)],
+    ) -> Vec<(usize, [u8; 51])> {
+        let mut out = Vec::new();
+        Self::diff_frame_reports_into(lamps, prev, colors, &mut out);
+        out
+    }
+
+    pub(crate) fn fill_gui_colors_into(
+        lamp_count: usize,
+        slot_for_lamp: &[usize],
+        key_colors: &[(u8, u8, u8)],
+        total_key_count: usize,
+        out: &mut Vec<(u8, u8, u8)>,
+    ) {
+        out.clear();
+        if lamp_count == 0 {
+            return;
+        }
+        if key_colors.is_empty() {
+            out.resize(lamp_count, (0, 0, 0));
+        } else if key_colors.len() == lamp_count {
+            out.extend_from_slice(key_colors);
+        } else if key_colors.len() == total_key_count {
+            let fallback = key_colors.first().copied().unwrap_or((0, 0, 0));
+            out.extend(
+                slot_for_lamp
+                    .iter()
+                    .take(lamp_count)
+                    .map(|&slot| key_colors.get(slot).copied().unwrap_or(fallback)),
+            );
+            out.resize(lamp_count, fallback);
+        } else {
+            out.extend((0..lamp_count).map(|i| {
+                let k = (i * key_colors.len()) / lamp_count;
+                key_colors[k.min(key_colors.len() - 1)]
+            }));
+        }
+    }
+
+    fn send_runtime_reports(&self, guard: &mut LampArrayRuntime) -> bool {
+        if guard.scratch_reports.is_empty() {
+            return true;
+        }
+        if guard.file.is_none() {
+            match self.open() {
+                Ok(file) => guard.file = Some(file),
+                Err(e) => {
+                    warn!("LampArray {}: cannot open: {}", self.path, e);
+                    guard.last_colors.clear();
                     return false;
                 }
             }
-            true
-        });
-        if result != Some(true) {
-            if let Ok(mut guard) = self.fd.lock() {
-                *guard = None;
+        }
+        let Some(file) = guard.file.as_ref() else {
+            return false;
+        };
+        if !self.acquired.load(Ordering::Relaxed) {
+            self.acquire(file);
+            self.acquired.store(true, Ordering::Relaxed);
+        }
+        for (len, rep) in &guard.scratch_reports {
+            if let Err(e) = Self::set_feature(file, &rep[..*len]) {
+                warn!(
+                    "LampArray {}: report 0x{:02X} failed: {}",
+                    self.path, rep[0], e
+                );
+                self.acquired.store(false, Ordering::Relaxed);
+                guard.file = None;
+                guard.last_colors.clear();
+                return false;
             }
         }
-        result.unwrap_or(false)
+        true
+    }
+
+    pub fn set_frame(&self, colors: &[(u8, u8, u8)]) -> bool {
+        if self.lamps.is_empty() {
+            return false;
+        }
+        let mut guard = match self.runtime.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let LampArrayRuntime {
+            ref mut last_colors,
+            ref mut scratch_reports,
+            ..
+        } = *guard;
+        Self::diff_frame_reports_into(&self.lamps, last_colors, colors, scratch_reports);
+        self.send_runtime_reports(&mut guard)
+    }
+
+    pub fn set_gui_frame(&self, key_colors: &[(u8, u8, u8)], total_key_count: usize) -> bool {
+        let n = self.lamps.len();
+        if n == 0 {
+            return false;
+        }
+        let mut guard = match self.runtime.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let LampArrayRuntime {
+            ref mut last_colors,
+            ref mut scratch_colors,
+            ref mut scratch_reports,
+            ..
+        } = *guard;
+        Self::fill_gui_colors_into(
+            n,
+            &self.slot_for_lamp,
+            key_colors,
+            total_key_count,
+            scratch_colors,
+        );
+        Self::diff_frame_reports_into(&self.lamps, last_colors, scratch_colors, scratch_reports);
+        self.send_runtime_reports(&mut guard)
     }
 
     pub fn zone_colors(&self, colors: &[(u8, u8, u8)]) -> Vec<(u8, u8, u8)> {
@@ -334,79 +535,226 @@ impl LampArrayBackend {
         key_colors: &[(u8, u8, u8)],
         total_key_count: usize,
     ) -> Vec<(u8, u8, u8)> {
-        let n = self.lamps.len();
-        if key_colors.is_empty() {
-            return vec![(0, 0, 0); n];
-        }
-        if key_colors.len() == n {
-            return key_colors.to_vec();
-        }
-        if key_colors.len() == total_key_count {
-            return self.map_gui_frame(key_colors);
-        }
-        (0..n)
-            .map(|i| {
-                let k = (i * key_colors.len()) / n;
-                key_colors[k.min(key_colors.len() - 1)]
-            })
-            .collect()
-    }
-
-    fn map_gui_frame(&self, key_colors: &[(u8, u8, u8)]) -> Vec<(u8, u8, u8)> {
-        let n = self.lamps.len();
-        let mut out = vec![(0u8, 0u8, 0u8); n];
-        let mut mapped = vec![false; n];
-
-        if is_omen_max_lamparray_board() && n == 120 {
-            for &(lamp, slot) in LAMP_SLOT_OVERRIDES_OMEN_MAX {
-                if lamp < n && slot < key_colors.len() {
-                    out[lamp] = key_colors[slot];
-                    mapped[lamp] = true;
-                }
-            }
-        }
-
-        for (i, lamp) in self.lamps.iter().enumerate() {
-            if mapped[i] || lamp.binding == 0 {
-                continue;
-            }
-            if let Some(idx) = Self::KEY_USAGES
-                .iter()
-                .position(|&usage| usage != 0 && usage == lamp.binding)
-            {
-                if let Some(color) = key_colors.get(idx) {
-                    out[i] = *color;
-                    mapped[i] = true;
-                }
-            }
-        }
-
-        for i in 0..n {
-            if mapped[i] {
-                continue;
-            }
-            let mut best: Option<usize> = None;
-            let mut best_d = u64::MAX;
-            for (j, other) in self.lamps.iter().enumerate() {
-                if !mapped[j] {
-                    continue;
-                }
-                let dx = self.lamps[i].x as i64 - other.x as i64;
-                let dy = self.lamps[i].y as i64 - other.y as i64;
-                let d = (dx * dx + dy * dy) as u64;
-                if d < best_d {
-                    best_d = d;
-                    best = Some(j);
-                }
-            }
-            out[i] = best
-                .map(|j| out[j])
-                .unwrap_or_else(|| key_colors.first().copied().unwrap_or((0, 0, 0)));
-        }
+        let mut out = Vec::with_capacity(self.lamps.len());
+        Self::fill_gui_colors_into(
+            self.lamps.len(),
+            &self.slot_for_lamp,
+            key_colors,
+            total_key_count,
+            &mut out,
+        );
         out
     }
 
     pub fn lamp_count(&self) -> usize {
         self.lamps.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mk_lamp(id: u16, x: u32, y: u32, binding: u8) -> LampInfo {
+        LampInfo { id, x, y, binding }
+    }
+
+    #[test]
+    fn precomputed_slot_map_handles_overrides_bindings_and_nearest_neighbor() {
+        // 1. Binding + nearest-neighbor fallback
+        let lamps = vec![
+            mk_lamp(0, 0, 0, 0x29),    // Esc -> slot 0
+            mk_lamp(1, 100, 0, 0x00),  // Unbound near Esc -> nearest is Esc (slot 0)
+            mk_lamp(2, 1000, 0, 0x3A), // F1 -> slot 1
+            mk_lamp(3, 950, 10, 0x00), // Unbound near F1 -> nearest is F1 (slot 1)
+        ];
+        let map = LampArrayBackend::build_lamp_slot_map(&lamps, false);
+        assert_eq!(map, vec![0, 0, 1, 1]);
+
+        // 2. OMEN MAX 120-lamp override
+        let omen_lamps: Vec<LampInfo> = (0..120)
+            .map(|i| mk_lamp(i as u16, i as u32 * 10, 0, 0x29))
+            .collect();
+        let omen_map = LampArrayBackend::build_lamp_slot_map(&omen_lamps, true);
+        assert_eq!(omen_map[119], 85); // Keypad Enter override
+        assert_eq!(omen_map[16], 14); // Omen key override
+        assert_eq!(omen_map[101], 87); // Fn key override
+    }
+
+    #[test]
+    fn diff_frame_reports_skips_unchanged_uses_range_for_uniform_and_packs_dirty_lamps() {
+        let lamps: Vec<LampInfo> = (0..10)
+            .map(|i| mk_lamp(100 + i as u16, i as u32 * 10, 0, 0))
+            .collect();
+        let mut prev = Vec::new();
+
+        // 1. Uniform frame uses single R_RANGE report (len 10)
+        let uniform = vec![(10, 20, 30); 10];
+        let r1 = LampArrayBackend::diff_frame_reports(&lamps, &mut prev, &uniform);
+        assert_eq!(r1.len(), 1);
+        assert_eq!(r1[0].0, 10);
+        assert_eq!(r1[0].1[0], LampArrayBackend::R_RANGE);
+        assert_eq!(&r1[0].1[6..9], &[10, 20, 30]);
+
+        // 2. Identical frame emits 0 reports
+        let r2 = LampArrayBackend::diff_frame_reports(&lamps, &mut prev, &uniform);
+        assert!(r2.is_empty());
+
+        // 3. Single dirty lamp emits 1 R_MULTI report with count=1 and FLAG_COMPLETE
+        let mut one_dirty = uniform.clone();
+        one_dirty[4] = (255, 0, 128);
+        let r3 = LampArrayBackend::diff_frame_reports(&lamps, &mut prev, &one_dirty);
+        assert_eq!(r3.len(), 1);
+        assert_eq!(r3[0].0, 51);
+        assert_eq!(r3[0].1[0], LampArrayBackend::R_MULTI);
+        assert_eq!(r3[0].1[1], 1);
+        assert_eq!(r3[0].1[2], LampArrayBackend::FLAG_COMPLETE);
+        assert_eq!(u16::from_le_bytes([r3[0].1[3], r3[0].1[4]]), 104);
+        assert_eq!(&r3[0].1[19..22], &[255, 0, 128]);
+
+        // 4. 9 dirty lamps split into 2 R_MULTI reports (8 + 1), FLAG_COMPLETE only on final report
+        let mut nine_dirty = one_dirty.clone();
+        for (idx, c) in nine_dirty.iter_mut().enumerate().take(9) {
+            *c = (idx as u8 + 1, 50, 60);
+        }
+        let r4 = LampArrayBackend::diff_frame_reports(&lamps, &mut prev, &nine_dirty);
+        assert_eq!(r4.len(), 2);
+        assert_eq!(r4[0].1[1], 8);
+        assert_eq!(r4[0].1[2], 0);
+        assert_eq!(r4[1].1[1], 1);
+        assert_eq!(r4[1].1[2], LampArrayBackend::FLAG_COMPLETE);
+
+        // 5. Cache reset (prev cleared) forces full multi-report on non-uniform frame
+        prev.clear();
+        let r5 = LampArrayBackend::diff_frame_reports(&lamps, &mut prev, &nine_dirty);
+        assert_eq!(r5.len(), 2);
+        assert_eq!(r5[0].1[1], 8);
+        assert_eq!(r5[1].1[1], 2);
+        assert_eq!(r5[1].1[2], LampArrayBackend::FLAG_COMPLETE);
+    }
+
+    #[test]
+    fn resource_set_gui_frame_reuses_scratch_buffers_with_zero_reallocations() {
+        let lamps: Vec<LampInfo> = (0..120)
+            .map(|i| {
+                mk_lamp(
+                    i as u16,
+                    (i % 20) as u32 * 1000,
+                    (i / 20) as u32 * 1000,
+                    0x29,
+                )
+            })
+            .collect();
+        let slot_map = LampArrayBackend::build_lamp_slot_map(&lamps, true);
+        let mut prev = Vec::new();
+        let mut scratch_colors = Vec::new();
+        let mut scratch_reports = Vec::new();
+        let mut key_frame = [(0u8, 0u8, 0u8); 104];
+
+        // Warm-up frame establishes capacities.
+        LampArrayBackend::fill_gui_colors_into(
+            lamps.len(),
+            &slot_map,
+            &key_frame,
+            104,
+            &mut scratch_colors,
+        );
+        LampArrayBackend::diff_frame_reports_into(
+            &lamps,
+            &mut prev,
+            &scratch_colors,
+            &mut scratch_reports,
+        );
+        // Reserve non-uniform max report capacity once on first non-uniform frame.
+        for (i, slot) in key_frame.iter_mut().enumerate() {
+            *slot = ((i * 2) as u8, 10, 20);
+        }
+        LampArrayBackend::fill_gui_colors_into(
+            lamps.len(),
+            &slot_map,
+            &key_frame,
+            104,
+            &mut scratch_colors,
+        );
+        LampArrayBackend::diff_frame_reports_into(
+            &lamps,
+            &mut prev,
+            &scratch_colors,
+            &mut scratch_reports,
+        );
+
+        let cap_prev = prev.capacity();
+        let cap_colors = scratch_colors.capacity();
+        let cap_reports = scratch_reports.capacity();
+
+        let mut prev_uniform = false;
+        for step in 0..500usize {
+            if step % 3 == 0 && !prev_uniform {
+                // Unchanged frame must emit 0 reports.
+                LampArrayBackend::fill_gui_colors_into(
+                    lamps.len(),
+                    &slot_map,
+                    &key_frame,
+                    104,
+                    &mut scratch_colors,
+                );
+                LampArrayBackend::diff_frame_reports_into(
+                    &lamps,
+                    &mut prev,
+                    &scratch_colors,
+                    &mut scratch_reports,
+                );
+                assert!(scratch_reports.is_empty());
+            } else if step % 5 == 0 {
+                // Uniform frame emits 1 R_RANGE report.
+                let uniform = [(55u8, 66u8, (step & 0xFF) as u8); 104];
+                LampArrayBackend::fill_gui_colors_into(
+                    lamps.len(),
+                    &slot_map,
+                    &uniform,
+                    104,
+                    &mut scratch_colors,
+                );
+                LampArrayBackend::diff_frame_reports_into(
+                    &lamps,
+                    &mut prev,
+                    &scratch_colors,
+                    &mut scratch_reports,
+                );
+                assert_eq!(scratch_reports.len(), 1);
+                assert_eq!(scratch_reports[0].1[0], LampArrayBackend::R_RANGE);
+                prev_uniform = true;
+            } else {
+                for (i, slot) in key_frame.iter_mut().enumerate() {
+                    *slot = (((i + step) % 255) as u8, ((step * 3) % 255) as u8, 90);
+                }
+                LampArrayBackend::fill_gui_colors_into(
+                    lamps.len(),
+                    &slot_map,
+                    &key_frame,
+                    104,
+                    &mut scratch_colors,
+                );
+                LampArrayBackend::diff_frame_reports_into(
+                    &lamps,
+                    &mut prev,
+                    &scratch_colors,
+                    &mut scratch_reports,
+                );
+                prev_uniform = false;
+            }
+
+            assert_eq!(prev.capacity(), cap_prev, "prev reallocated on step {step}");
+            assert_eq!(
+                scratch_colors.capacity(),
+                cap_colors,
+                "scratch_colors reallocated on step {step}"
+            );
+            assert_eq!(
+                scratch_reports.capacity(),
+                cap_reports,
+                "scratch_reports reallocated on step {step}"
+            );
+        }
     }
 }

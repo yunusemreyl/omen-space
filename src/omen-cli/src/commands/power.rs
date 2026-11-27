@@ -21,6 +21,11 @@ pub enum PowerCommand {
     Undervolt { mv: i32 },
     /// Set GPU Mux mode (hybrid, discrete, advanced, integrated)
     SetMux { mode: String },
+    /// Enable or disable automatic AC/Battery Eco profile switching (on/off)
+    AutoSwitch {
+        #[arg(value_parser = ["on", "off", "true", "false"])]
+        state: String,
+    },
     /// Get current power profile and limits
     Info,
 }
@@ -59,6 +64,11 @@ pub async fn handle(cmd: &PowerCommand, conn: &Connection) -> Result<()> {
             }
             let mux_proxy = MuxProxy::new(conn).await?;
             let res = mux_proxy.set_gpu_mode(&mode_lower).await?;
+            println!("Response: {}", res);
+        }
+        PowerCommand::AutoSwitch { state } => {
+            let enabled = matches!(state.as_str(), "on" | "true");
+            let res = proxy.set_ac_auto_switch(enabled).await?;
             println!("Response: {}", res);
         }
         PowerCommand::Info => {

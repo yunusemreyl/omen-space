@@ -428,6 +428,8 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("lightbar_sync_btn", "Paint All Segments"),
     ("perf_profile_apply_failed", "Failed to switch power profile"),
     ("fan_clean_stop_btn", "Stop & Restore Auto"),
+    ("ac_auto_switch_title", "Auto-Switch Profile on AC / Battery"),
+    ("ac_auto_switch_sub", "Automatically switch to Eco on battery and restore your previous profile on AC"),
 ];
 
 pub(super) fn translate(key: &str) -> Option<&'static str> {

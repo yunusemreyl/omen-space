@@ -8,7 +8,7 @@
 
   <p>
     <a href="https://github.com/yunusemreyl/omen-space/releases/latest">
-      <img src="https://img.shields.io/badge/Versi%C3%B3n-v2.6.0-e11d48?style=flat-square" alt="Versión v2.6.0" />
+      <img src="https://img.shields.io/badge/Versi%C3%B3n-v2.6.1-e11d48?style=flat-square" alt="Versión v2.6.1" />
     </a>
     <a href="LICENSE">
       <img src="https://img.shields.io/badge/Licencia-GPL--3.0-10b981?style=flat-square" alt="Licencia" />
@@ -87,7 +87,14 @@ curl -sSL https://raw.githubusercontent.com/yunusemreyl/omen-space/main/install.
 
 ---
 
-## Novedades en v2.6.0
+## Novedades en v2.6.1
+
+- **Motor RGB fluido con consumo mínimo de CPU:** Bucle unificado `rgb_engine_loop` con reposo a 0 % CPU mediante `tokio::sync::Notify`, renderizado en pila (`render_per_key_rgb`), mapeo precalculado de `LampArray` con diff por bloques sucios, envíos HID por lotes con `O_NONBLOCK`, y vista previa en `omen-gui` a 40 FPS con glifos en caché y fase continua al ajustar la velocidad (`~59.8 µs/fotograma`, `<0.18 %` de 1 núcleo a 30 FPS en `--release`).
+- **Cambio automático CA / Batería configurable y restauración completa al conectar CA (`#398`):** Nuevo interruptor **Auto-Switch Profile on AC / Battery** (`Ajustes -> Rendimiento`, `omen-cli power auto-switch on|off`, D-Bus `SetAcAutoSwitch`), restauración del perfil previo al reconectar el cargador, sincronización de `energy_performance_preference` (EPP) de CPU, recuperación de límites RAPL, fallback `performance -> balanced` en `power-profiles-daemon` y restauración de `PL1/PL2` en `hp-wmi.c` tanto en `Balanced` como en `Performance`.
+
+---
+
+## Anteriormente en v2.6.0
 
 - **Preajustes de color por tecla en RGB Studio (`#397`):** Guarda, carga, sobrescribe y elimina distribuciones personalizadas de 104 teclas (`~/.config/omenspace/key_presets.json`) directamente en RGB Studio con detección de edición activa y traducción TR/EN/ES (contribución de [@Dmitriy-Romanov](https://github.com/Dmitriy-Romanov)).
 - **RGB Reactivo y Onda Primax de ultra baja latencia (`#385`):** Despertar instantáneo por pulsación en `evdev`, escritura HID por lotes en una sola apertura y diff por páginas sucias en `0461:4F03` (de 10 paquetes/fotograma a 1–3), junto con control completo del deslizador de velocidad en `Reactive` y `Ripple`.

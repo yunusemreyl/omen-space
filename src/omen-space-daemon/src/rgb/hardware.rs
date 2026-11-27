@@ -33,6 +33,13 @@ pub fn scale_hex_color(hex: &str, scaler: f64) -> String {
     )
 }
 
+fn cached_product_name() -> &'static str {
+    static CACHE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| {
+        std::fs::read_to_string("/sys/class/dmi/id/product_name").unwrap_or_default()
+    })
+}
+
 pub fn lightbar_allowed_for(board_id: &str, caps: &ModelCapabilities, product_name: &str) -> bool {
     if caps.disable_wmi_rgb {
         return false;
@@ -181,8 +188,7 @@ impl RgbHardware {
             .unwrap_or_default()
             .trim()
             .to_uppercase();
-        let prod_name =
-            std::fs::read_to_string("/sys/class/dmi/id/product_name").unwrap_or_default();
+        let prod_name = cached_product_name();
         let specs = crate::sysmon::get_hardware_specs();
         let caps = crate::capabilities::detect(&board_id, prod_name.trim(), &specs.cpu_spec);
         if caps.disable_wmi_rgb {
@@ -257,6 +263,51 @@ impl RgbHardware {
         let path = format!("{}/win_lock", base);
         if Path::new(&path).exists() {
             let _ = std::fs::write(&path, if locked { "1" } else { "0" });
+        }
+    }
+
+    pub fn has_all_zones_node(&self) -> bool {
+        self.driver_path
+            .as_deref()
+            .is_some_and(|base| Path::new(base).join("all_zones").exists())
+    }
+
+    pub fn write_zones_rgb(&self, colors: &[(u8, u8, u8)]) {
+        use std::fmt::Write;
+        let Some(ref base) = self.driver_path else {
+            return;
+        };
+        let count = self.zone_count.clamp(1, 8) as usize;
+        let all_zones_path = format!("{}/all_zones", base);
+        if Path::new(&all_zones_path).exists() {
+            let mut mapped = [(0u8, 0u8, 0u8); 8];
+            for i in 0..count {
+                let actual = if self.zone_count == 4 {
+                    map_four_zone_index(&self.board_id, i)
+                } else {
+                    i
+                };
+                if actual < count {
+                    mapped[actual] = colors.get(i).copied().unwrap_or((0, 0, 0));
+                }
+            }
+            let mut payload = String::with_capacity(count * 7);
+            for (i, &(r, g, b)) in mapped.iter().take(count).enumerate() {
+                if i > 0 {
+                    payload.push(' ');
+                }
+                let _ = write!(payload, "{:02X}{:02X}{:02X}", r, g, b);
+            }
+            if std::fs::write(&all_zones_path, &payload).is_ok() {
+                return;
+            }
+            warn!("RGB batch write failed; falling back to individual zones");
+        }
+        let mut hex = String::with_capacity(6);
+        for (i, &(r, g, b)) in colors.iter().enumerate().take(count) {
+            hex.clear();
+            let _ = write!(hex, "{:02X}{:02X}{:02X}", r, g, b);
+            self.write_zone(i, &hex);
         }
     }
 
@@ -340,12 +391,8 @@ impl RgbHardware {
             ordered.swap(0, 2);
         }
         let payload = ordered.join(" ");
-        for name in ["all_zones", "zones"] {
-            let p = format!("{}/{}", base, name);
-            if Path::new(&p).exists() {
-                let _ = std::fs::write(&p, &payload);
-                return;
-            }
+        if self.write_all_zones_payload(base, &payload) {
+            return;
         }
         for (i, c) in colors.iter().take(4).enumerate() {
             for name in [format!("zone{:02}", i), format!("zone{}", i)] {
@@ -358,11 +405,63 @@ impl RgbHardware {
         }
     }
 
+    pub fn write_lightbar_zones_rgb(&self, colors: &[(u8, u8, u8); 4]) {
+        use std::fmt::Write;
+        let Some(ref base) = self.driver_path else {
+            return;
+        };
+        let order: [usize; 4] = if self.board_id.eq_ignore_ascii_case("8E9A") {
+            [2, 1, 0, 3]
+        } else {
+            [0, 1, 2, 3]
+        };
+        let mut payload = String::with_capacity(28);
+        for (pos, &idx) in order.iter().enumerate() {
+            if pos > 0 {
+                payload.push(' ');
+            }
+            let (r, g, b) = colors[idx];
+            if (r, g, b) == (255, 255, 255) {
+                payload.push_str("FFFFFE");
+            } else {
+                let _ = write!(payload, "{:02X}{:02X}{:02X}", r, g, b);
+            }
+        }
+        if self.write_all_zones_payload(base, &payload) {
+            return;
+        }
+        for (i, &(r, g, b)) in colors.iter().enumerate() {
+            let mut hex = String::with_capacity(6);
+            if (r, g, b) == (255, 255, 255) {
+                hex.push_str("FFFFFE");
+            } else {
+                let _ = write!(hex, "{:02X}{:02X}{:02X}", r, g, b);
+            }
+            for name in [format!("zone{:02}", i), format!("zone{}", i)] {
+                let p = format!("{}/{}", base, name);
+                if Path::new(&p).exists() {
+                    let _ = std::fs::write(&p, &hex);
+                    break;
+                }
+            }
+        }
+    }
+
+    fn write_all_zones_payload(&self, base: &str, payload: &str) -> bool {
+        for name in ["all_zones", "zones"] {
+            let p = format!("{}/{}", base, name);
+            if Path::new(&p).exists() {
+                let _ = std::fs::write(&p, payload);
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn lightbar_write_allowed(&self) -> bool {
-        let prod_name =
-            std::fs::read_to_string("/sys/class/dmi/id/product_name").unwrap_or_default();
+        let prod_name = cached_product_name();
         let caps = crate::capabilities::detect(&self.board_id, "", "");
-        lightbar_allowed_for(&self.board_id, &caps, &prod_name)
+        lightbar_allowed_for(&self.board_id, &caps, prod_name)
     }
 
     pub fn has_lightbar(&self) -> bool {
@@ -423,5 +522,53 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(max_zones_for_caps(&eight_zone), 8);
+    }
+
+    #[test]
+    fn write_zones_rgb_formats_mapped_payload_without_dropping_zones() {
+        let dir = std::env::temp_dir().join(format!(
+            "omen-zones-rgb-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("all_zones"), "").unwrap();
+
+        // 8-zone formatting preserves all 8 zones
+        let hw8 = RgbHardware {
+            driver_path: Some(dir.to_string_lossy().to_string()),
+            is_new_driver: false,
+            zone_count: 8,
+            available: true,
+            board_id: "TEST".into(),
+        };
+        assert!(hw8.has_all_zones_node());
+        let cols8: Vec<(u8, u8, u8)> = (0..8).map(|i| (i as u8 + 1, 0x10, 0x20)).collect();
+        hw8.write_zones_rgb(&cols8);
+        let p8 = std::fs::read_to_string(dir.join("all_zones")).unwrap();
+        assert_eq!(
+            p8,
+            "011020 021020 031020 041020 051020 061020 071020 081020"
+        );
+
+        // 4-zone classic board swaps Left (0) -> 2 and Right (2) -> 0
+        let hw4 = RgbHardware {
+            driver_path: Some(dir.to_string_lossy().to_string()),
+            is_new_driver: false,
+            zone_count: 4,
+            available: true,
+            board_id: "TEST".into(),
+        };
+        let cols4 = [
+            (0x11, 0x00, 0x00),
+            (0x22, 0x00, 0x00),
+            (0x33, 0x00, 0x00),
+            (0x44, 0x00, 0x00),
+        ];
+        hw4.write_zones_rgb(&cols4);
+        let p4 = std::fs::read_to_string(dir.join("all_zones")).unwrap();
+        assert_eq!(p4, "330000 220000 110000 440000");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

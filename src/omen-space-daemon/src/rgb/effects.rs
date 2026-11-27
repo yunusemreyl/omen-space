@@ -6,6 +6,19 @@ pub fn should_stream_software_frame(hw_effects: bool, has_mcu_effect: bool) -> b
     !hw_effects || !has_mcu_effect
 }
 
+fn sparkle_hash(eff_idx: usize, tick: u64) -> f64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut h = DefaultHasher::new();
+    (eff_idx as u64, tick).hash(&mut h);
+    let val = h.finish();
+    if val.is_multiple_of(4) {
+        0.1 + (val % 90) as f64 / 100.0
+    } else {
+        0.2
+    }
+}
+
 /// Compute animation color per zone or column.
 #[allow(clippy::too_many_arguments)]
 pub fn compute_anim_color(
@@ -85,8 +98,10 @@ pub fn compute_anim_color(
             )
         }
         "chase" => {
-            let pos = (step * 2.0) as usize % zone_count.max(1);
-            let factor = if eff_idx == pos { 1.0 } else { 0.15 };
+            let head = (step * 2.5).rem_euclid(count);
+            let direct = (eff_idx as f64 - head).abs();
+            let dist = direct.min(count - direct);
+            let factor = 0.12 + 0.88 * (1.0 - dist / 1.35).clamp(0.0, 1.0);
             (
                 (r1 as f64 * factor) as u8,
                 (g1 as f64 * factor) as u8,
@@ -94,16 +109,13 @@ pub fn compute_anim_color(
             )
         }
         "sparkle" => {
-            use std::collections::hash_map::DefaultHasher;
-            use std::hash::{Hash, Hasher};
-            let mut h = DefaultHasher::new();
-            (eff_idx as u64 + step as u64).hash(&mut h);
-            let val = h.finish();
-            let factor = if val.is_multiple_of(4) {
-                0.1 + (val % 90) as f64 / 100.0
-            } else {
-                0.2
-            };
+            let base_f = step.floor();
+            let base = base_f as i64 as u64;
+            let frac = step - base_f;
+            let smooth = frac * frac * (3.0 - 2.0 * frac);
+            let f0 = sparkle_hash(eff_idx, base);
+            let f1 = sparkle_hash(eff_idx, base.wrapping_add(1));
+            let factor = f0 + (f1 - f0) * smooth;
             (
                 (r1 as f64 * factor) as u8,
                 (g1 as f64 * factor) as u8,
@@ -148,10 +160,10 @@ pub fn compute_anim_color(
     }
 }
 
-/// Render a full 104-slot per-key frame for any animated or interactive RGB mode.
+/// Render a full 104-slot per-key RGB array with zero heap allocations.
 /// `recent_keys` supplies `(x, y, age_secs)` for `reactive` and `ripple`.
 #[allow(clippy::too_many_arguments)]
-pub fn render_per_key_frame(
+pub fn render_per_key_rgb(
     mode: &str,
     step: f64,
     speed: u32,
@@ -160,13 +172,13 @@ pub fn render_per_key_frame(
     secondary: (u8, u8, u8),
     scaler: f64,
     recent_keys: &[(f64, f64, f64)],
-) -> Vec<String> {
+) -> [(u8, u8, u8); 104] {
     let (r1, g1, b1) = primary;
     let (r2, g2, b2) = secondary;
     let clamped_speed = speed.clamp(1, 100) as f64 / 100.0;
-    let mut out = Vec::with_capacity(104);
+    let mut out = [(0u8, 0u8, 0u8); 104];
 
-    for i in 0..104 {
+    for (i, slot) in out.iter_mut().enumerate() {
         let (x, y) = slot_coords(i);
         let (mut rf, mut gf, mut bf) = (0.0f64, 0.0f64, 0.0f64);
 
@@ -204,24 +216,23 @@ pub fn render_per_key_frame(
                 bf = bf.clamp(0.0, 255.0);
             }
             "starlight" => {
-                use std::collections::hash_map::DefaultHasher;
-                use std::hash::{Hash, Hasher};
-                let mut h = DefaultHasher::new();
-                let slow_step = (step * 2.0) as u64;
-                (slow_step, i).hash(&mut h);
-                if h.finish().is_multiple_of(20) {
-                    rf = r1 as f64;
-                    gf = g1 as f64;
-                    bf = b1 as f64;
-                }
+                let phase = (i as f64 * 2.39996323) + ((i % 7) as f64 * 0.7);
+                let s = (((step * 1.6 + phase).sin() - 0.62) / 0.38).clamp(0.0, 1.0);
+                let intensity = s * s;
+                rf = r1 as f64 * intensity;
+                gf = g1 as f64 * intensity;
+                bf = b1 as f64 * intensity;
             }
             "raindrop" => {
                 let col = x.round();
-                let drop_pos = (step * 4.0 + col * 2.7) % 8.0;
-                if (y - drop_pos).abs() < 0.9 {
-                    rf = r1 as f64;
-                    gf = g1 as f64;
-                    bf = b1 as f64;
+                let drop_pos = (step * 4.0 + col * 2.7).rem_euclid(8.0);
+                let dy = (y - drop_pos).abs();
+                if dy < 1.25 {
+                    let f = 1.0 - dy / 1.25;
+                    let intensity = f * f;
+                    rf = r1 as f64 * intensity;
+                    gf = g1 as f64 * intensity;
+                    bf = b1 as f64 * intensity;
                 }
             }
             _ => {
@@ -235,14 +246,44 @@ pub fn render_per_key_frame(
             }
         }
 
-        out.push(format!(
-            "{:02X}{:02X}{:02X}",
+        *slot = (
             (rf * scaler) as u8,
             (gf * scaler) as u8,
-            (bf * scaler) as u8
-        ));
+            (bf * scaler) as u8,
+        );
     }
 
+    out
+}
+
+/// Render a full 104-slot per-key frame for any animated or interactive RGB mode.
+/// `recent_keys` supplies `(x, y, age_secs)` for `reactive` and `ripple`.
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+pub fn render_per_key_frame(
+    mode: &str,
+    step: f64,
+    speed: u32,
+    direction: &str,
+    primary: (u8, u8, u8),
+    secondary: (u8, u8, u8),
+    scaler: f64,
+    recent_keys: &[(f64, f64, f64)],
+) -> Vec<String> {
+    let rgb = render_per_key_rgb(
+        mode,
+        step,
+        speed,
+        direction,
+        primary,
+        secondary,
+        scaler,
+        recent_keys,
+    );
+    let mut out = Vec::with_capacity(104);
+    for (r, g, b) in rgb {
+        out.push(format!("{:02X}{:02X}{:02X}", r, g, b));
+    }
     out
 }
 
@@ -418,6 +459,111 @@ mod tests {
         assert!(
             distinct.len() > 1,
             "wave must animate across columns even when primary == secondary"
+        );
+    }
+
+    #[test]
+    fn render_per_key_rgb_matches_hex_wrapper() {
+        let rgb = render_per_key_rgb(
+            "wave",
+            0.75,
+            60,
+            "ltr",
+            (255, 128, 32),
+            (10, 40, 220),
+            0.85,
+            &[],
+        );
+        let hex = render_per_key_frame(
+            "wave",
+            0.75,
+            60,
+            "ltr",
+            (255, 128, 32),
+            (10, 40, 220),
+            0.85,
+            &[],
+        );
+        assert_eq!(hex.len(), 104);
+        for (i, &(r, g, b)) in rgb.iter().enumerate() {
+            assert_eq!(hex[i], format!("{:02X}{:02X}{:02X}", r, g, b));
+        }
+    }
+
+    #[test]
+    fn starlight_raindrop_and_chase_interpolate_smoothly_between_substeps() {
+        // Chase should vary continuously across fractional steps and have intermediate fade levels.
+        let mut chase_vals = std::collections::HashSet::new();
+        for k in 0..10 {
+            let c = compute_anim_color("chase", k as f64 * 0.05, 1, 8, 255, 0, 0, 0, 0, 0);
+            chase_vals.insert(c.0);
+        }
+        assert!(
+            chase_vals.len() > 3,
+            "chase must interpolate smoothly across substeps: {:?}",
+            chase_vals
+        );
+
+        // Starlight should shimmer smoothly instead of binary on/off snapping.
+        let mut star_levels = std::collections::HashSet::new();
+        for k in 0..80 {
+            let f = render_per_key_rgb(
+                "starlight",
+                k as f64 * 0.05,
+                50,
+                "ltr",
+                (255, 255, 255),
+                (0, 0, 0),
+                1.0,
+                &[],
+            );
+            for &(r, _, _) in &f {
+                if r > 0 && r < 255 {
+                    star_levels.insert(r);
+                }
+            }
+        }
+        assert!(
+            star_levels.len() > 5,
+            "starlight must produce intermediate twinkle levels: {:?}",
+            star_levels
+        );
+
+        // Raindrop should produce intermediate tail brightness rather than binary on/off.
+        let mut rain_levels = std::collections::HashSet::new();
+        for k in 0..40 {
+            let f = render_per_key_rgb(
+                "raindrop",
+                k as f64 * 0.04,
+                50,
+                "ltr",
+                (0, 200, 255),
+                (0, 0, 0),
+                1.0,
+                &[],
+            );
+            for &(_, _, b) in &f {
+                if b > 0 && b < 255 {
+                    rain_levels.insert(b);
+                }
+            }
+        }
+        assert!(
+            rain_levels.len() > 3,
+            "raindrop must fade smoothly over vertical distance: {:?}",
+            rain_levels
+        );
+
+        // Sparkle should interpolate smoothly between integer ticks.
+        let mut sparkle_vals = std::collections::HashSet::new();
+        for k in 0..10 {
+            let c = compute_anim_color("sparkle", k as f64 * 0.1, 0, 4, 255, 255, 255, 0, 0, 0);
+            sparkle_vals.insert(c.0);
+        }
+        assert!(
+            sparkle_vals.len() >= 2,
+            "sparkle must cross-fade across substeps: {:?}",
+            sparkle_vals
         );
     }
 }

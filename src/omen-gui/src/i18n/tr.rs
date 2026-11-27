@@ -428,6 +428,8 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("dbus_err_ctx_bat_bypass", "Pil tam şarj modu ayarlanamıyor"),
     ("perf_profile_apply_failed", "Güç profili değiştirilemedi"),
     ("fan_clean_stop_btn", "Durdur ve Otomatiğe Dön"),
+    ("ac_auto_switch_title", "Fişe Göre Otomatik Güç Profili"),
+    ("ac_auto_switch_sub", "Pilde otomatik Eco moduna geç ve AC bağlanınca önceki profili geri yükle"),
 ];
 
 pub(super) fn translate(key: &str) -> Option<&'static str> {

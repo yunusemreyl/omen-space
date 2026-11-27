@@ -2778,6 +2778,7 @@ static int victus_s_gpu_thermal_profile_set(bool ctgp_enable,
 static int victus_s_set_cpu_pl1_pl2(u8 pl1, u8 pl2)
 {
 	struct victus_power_limits power_limits;
+	int ret;
 
 	if (pl1 == HP_POWER_LIMIT_NO_CHANGE || pl2 == HP_POWER_LIMIT_NO_CHANGE)
 		return -EINVAL;
@@ -2791,8 +2792,14 @@ static int victus_s_set_cpu_pl1_pl2(u8 pl1, u8 pl2)
 	power_limits.pl4                    = HP_POWER_LIMIT_NO_CHANGE;
 	power_limits.cpu_gpu_concurrent_limit = HP_POWER_LIMIT_NO_CHANGE;
 
-	return hp_wmi_perform_query(HPWMI_SET_POWER_LIMITS_QUERY, HPWMI_GM,
-				    &power_limits, sizeof(power_limits), 0);
+	ret = hp_wmi_perform_query(HPWMI_SET_POWER_LIMITS_QUERY, HPWMI_GM,
+				   &power_limits, sizeof(power_limits), 0);
+	if (ret > 0) {
+		pr_debug("Set CPU power limits unsupported on this board (0x%x), skipping\n",
+			 ret);
+		return 0;
+	}
+	return ret;
 }
 
 static int platform_profile_victus_s_get_ec(
@@ -2904,6 +2911,21 @@ static int platform_profile_victus_s_set_ec(
 	if (err < 0) {
 		pr_err("Failed to set GPU profile %d: %d\n", profile, err);
 		return err;
+	}
+
+	/*
+	 * After a battery Eco cycle, Victus-S / modern OMEN EC firmware can keep
+	 * battery PL1/PL2 clamps latched until 0x29 (HP_POWER_LIMIT_DEFAULT) is
+	 * explicitly re-sent on AC power (#398).
+	 */
+	if ((profile == PLATFORM_PROFILE_PERFORMANCE ||
+	     profile == PLATFORM_PROFILE_BALANCED) &&
+	    power_supply_is_system_supplied() > 0 &&
+	    !dmi_match(DMI_BOARD_NAME, "8D2F")) {
+		err = victus_s_set_cpu_pl1_pl2(HP_POWER_LIMIT_DEFAULT,
+					       HP_POWER_LIMIT_DEFAULT);
+		if (err < 0)
+			pr_debug("Best-effort PL1/PL2 reset skipped (%d)\n", err);
 	}
 
 	return 0;
@@ -3034,15 +3056,15 @@ static int victus_s_powersource_event(struct notifier_block *nb,
 	}
 
 	/*
-	 * Switching power sources while PERFORMANCE mode is active requires a
-	 * manual CPU PL1/PL2 re-application.  Other modes self-correct.
-	 * Observed on HP 16-s1034nf (board 8C9C) with F.11 and F.13 BIOS.
+	 * Switching power sources back to AC can leave firmware battery PL1/PL2
+	 * clamps active across Balanced as well as Performance profiles until
+	 * HP_POWER_LIMIT_DEFAULT is re-applied (#398). Guard with AC supplied so
+	 * unplugging to battery never invokes 0x29 on battery power.
 	 */
-	if (actual_profile == PLATFORM_PROFILE_PERFORMANCE) {
-		/* On OMEN board 8D2F the reset leaves PL1/PL2 at 0 W on battery. */
-		if (dmi_match(DMI_BOARD_NAME, "8D2F"))
-			return NOTIFY_DONE;
-
+	if (power_supply_is_system_supplied() > 0 &&
+	    !dmi_match(DMI_BOARD_NAME, "8D2F") &&
+	    (actual_profile == PLATFORM_PROFILE_PERFORMANCE ||
+	     actual_profile == PLATFORM_PROFILE_BALANCED)) {
 		pr_debug("Triggering CPU PL1/PL2 actualization\n");
 		err = victus_s_set_cpu_pl1_pl2(HP_POWER_LIMIT_DEFAULT,
 					       HP_POWER_LIMIT_DEFAULT);

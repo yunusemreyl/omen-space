@@ -4,6 +4,29 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+#[derive(Clone)]
+struct AnimPreviewState {
+    mode: String,
+    speed: f64,
+    phase: f64,
+    last_frame_us: i64,
+    last_draw_us: i64,
+}
+
+type RgbCache = Rc<RefCell<Vec<(f64, f64, f64)>>>;
+
+fn sync_parsed_rgb(keys: &[KeyGeom], key_colors: &HashMap<String, String>, parsed_rgb: &RgbCache) {
+    let mut cache = parsed_rgb.borrow_mut();
+    cache.resize(keys.len(), (0.08, 0.08, 0.09));
+    for (idx, k) in keys.iter().enumerate() {
+        let hex = key_colors
+            .get(&k.name)
+            .map(|s| s.as_str())
+            .unwrap_or("#141418");
+        cache[idx] = parse_hex(hex);
+    }
+}
+
 fn load_keyboard_layout() -> KeyboardLayout {
     let Ok(home) = std::env::var("HOME") else {
         return KeyboardLayout::En;
@@ -475,6 +498,7 @@ pub fn build_interactive_keyboard(
                     id: global_idx,
                     name: name.to_string(),
                     display: display_name.to_string(),
+                    zone: get_zone_for_key(name),
                     x: current_x,
                     y: current_y,
                     w: width - margin,
@@ -510,20 +534,33 @@ pub fn build_interactive_keyboard(
             .build(),
     );
 
+    let keys_rc = Rc::new(keys);
+    let parsed_rgb = Rc::new(RefCell::new(Vec::with_capacity(keys_rc.len())));
+    sync_parsed_rgb(&keys_rc, &key_colors.borrow(), &parsed_rgb);
+    let glyph_offsets: Rc<RefCell<Vec<(f64, f64)>>> =
+        Rc::new(RefCell::new(Vec::with_capacity(keys_rc.len())));
+
     let da_layout = drawing_area.clone();
     let layout_labels_c = layout_labels.clone();
     let layout_c = current_layout.clone();
+    let glyph_offsets_layout = glyph_offsets.clone();
     layout_dropdown.connect_selected_notify(move |dd| {
         let chosen = KeyboardLayout::from_index(dd.selected());
         layout_c.set(chosen);
         *layout_labels_c.borrow_mut() = chosen.keycap_labels();
+        glyph_offsets_layout.borrow_mut().clear();
         da_layout.queue_draw();
         save_keyboard_layout(chosen);
     });
 
-    let keys_rc = Rc::new(keys);
     let selected_keys = Rc::new(RefCell::new(Vec::<String>::new()));
-    let anim_state = Rc::new(RefCell::new(("static".to_string(), 50.0, 0.0f64)));
+    let anim_state = Rc::new(RefCell::new(AnimPreviewState {
+        mode: "static".to_string(),
+        speed: 50.0,
+        phase: 0.0,
+        last_frame_us: 0,
+        last_draw_us: 0,
+    }));
     let anim_draw = anim_state.clone();
 
     let hovered_key = Rc::new(RefCell::new(None::<String>));
@@ -532,7 +569,9 @@ pub fn build_interactive_keyboard(
     let layout_labels_draw = layout_labels.clone();
     let selected_draw = selected_keys.clone();
     let hovered_draw = hovered_key.clone();
-    let colors_draw = key_colors.clone();
+    let parsed_rgb_draw = parsed_rgb.clone();
+    let glyph_offsets_draw = glyph_offsets.clone();
+    let zc_draw = zone_colors.clone();
     let sel_mode_draw = sel_mode.clone();
 
     drawing_area.set_draw_func(move |_, cr, _, _| {
@@ -540,67 +579,153 @@ pub fn build_interactive_keyboard(
         let _ = cr.paint();
         let sel = selected_draw.borrow();
         let hov = hovered_draw.borrow();
-        let cols = colors_draw.borrow();
+        let rgb_cache = parsed_rgb_draw.borrow();
+        let active_sel = *sel_mode_draw.borrow();
+        let hovered_zone = hov.as_deref().map(get_zone_for_key);
+        let labels_guard = layout_labels_draw.borrow();
+        let sec_wave_rgb = {
+            let zc = zc_draw.borrow();
+            if zc.len() > 1 && zc[1] != zc[0] {
+                Some(parse_hex(&zc[1]))
+            } else {
+                None
+            }
+        };
+        let (anim_mode, anim_phase) = {
+            let ts = anim_draw.borrow();
+            (ts.mode.clone(), ts.phase)
+        };
+
         cr.translate(10.0, 10.0);
+        cr.set_font_size(11.0);
 
-        let (anim_mode, anim_speed, anim_time) = anim_draw.borrow().clone();
-        for k in keys_draw.iter() {
-            let hex = cols.get(&k.name).map(|s| s.as_str()).unwrap_or("#141418");
-            let (mut r, mut g, mut b) = parse_hex(hex);
-
-            if anim_mode == "breathing" {
-                let factor = (anim_time * anim_speed * 0.05).sin().abs() * 0.8 + 0.2;
-                r *= factor;
-                g *= factor;
-                b *= factor;
-            } else if anim_mode == "cycle" {
-                let h = (anim_time * anim_speed * 2.0) % 360.0;
-                let (nr, ng, nb) = hsl_to_rgb(h, 1.0, 0.5);
-                r = nr;
-                g = ng;
-                b = nb;
-            } else if anim_mode == "wave" {
-                let phase = (anim_time * anim_speed * 0.08) + (k.x / 120.0);
-                let factor = (phase.sin() * 0.5) + 0.5;
-                let blend = 0.08 + 0.92 * factor;
-                r *= blend;
-                g *= blend;
-                b *= blend;
-            } else if anim_mode == "wave_rainbow" {
-                let offset = k.x / 10.0;
-                let h = ((anim_time * anim_speed * 4.0) - offset * 8.0) % 360.0;
-                let (nr, ng, nb) = hsl_to_rgb(h, 1.0, 0.5);
-                r = nr;
-                g = ng;
-                b = nb;
-            } else if anim_mode == "blinking" {
-                let factor = if (anim_time * anim_speed * 0.12).sin() >= 0.0 {
-                    1.0
+        let mut offsets_guard = glyph_offsets_draw.borrow_mut();
+        if offsets_guard.len() != keys_draw.len() {
+            offsets_guard.clear();
+            offsets_guard.reserve(keys_draw.len());
+            for k in keys_draw.iter() {
+                let label = labels_guard
+                    .get(&k.name)
+                    .map(|s| s.as_str())
+                    .unwrap_or(k.display.as_str());
+                if let Ok(extents) = cr.text_extents(label) {
+                    offsets_guard.push((
+                        (k.w - extents.width()) / 2.0 - extents.x_bearing(),
+                        (k.h - extents.height()) / 2.0 - extents.y_bearing(),
+                    ));
                 } else {
-                    0.08
-                };
-                r *= factor;
-                g *= factor;
-                b *= factor;
-            } else if anim_mode == "marquee" {
-                let norm_x = (k.x / 720.0).clamp(0.0, 1.0);
-                let head = (anim_time * anim_speed * 0.015).fract();
-                let d = (norm_x - head).abs();
-                let dist = d.min(1.0 - d);
-                let factor = (1.0 - (dist / 0.25)).clamp(0.06, 1.0);
-                r *= factor;
-                g *= factor;
-                b *= factor;
+                    offsets_guard.push((4.0, k.h * 0.65));
+                }
+            }
+        }
+
+        for (idx, k) in keys_draw.iter().enumerate() {
+            let (mut r, mut g, mut b) = rgb_cache.get(idx).copied().unwrap_or((0.08, 0.08, 0.09));
+
+            match anim_mode.as_str() {
+                "breathing" => {
+                    let factor = (anim_phase * 0.05).sin().abs() * 0.8 + 0.2;
+                    r *= factor;
+                    g *= factor;
+                    b *= factor;
+                }
+                "cycle" => {
+                    let h = (anim_phase * 2.0).rem_euclid(360.0);
+                    let (nr, ng, nb) = hsl_to_rgb(h, 1.0, 0.5);
+                    r = nr;
+                    g = ng;
+                    b = nb;
+                }
+                "wave" => {
+                    let wave_phase = (anim_phase * 0.08) + (k.x / 120.0);
+                    let factor = (wave_phase.sin() * 0.5) + 0.5;
+                    if let Some((sr, sg, sb)) = sec_wave_rgb {
+                        r = r * factor + sr * (1.0 - factor);
+                        g = g * factor + sg * (1.0 - factor);
+                        b = b * factor + sb * (1.0 - factor);
+                    } else {
+                        let blend = 0.08 + 0.92 * factor;
+                        r *= blend;
+                        g *= blend;
+                        b *= blend;
+                    }
+                }
+                "wave_rainbow" | "rainbow" => {
+                    let offset = k.x / 10.0;
+                    let h = ((anim_phase * 4.0) - offset * 8.0).rem_euclid(360.0);
+                    let (nr, ng, nb) = hsl_to_rgb(h, 1.0, 0.5);
+                    r = nr;
+                    g = ng;
+                    b = nb;
+                }
+                "blinking" => {
+                    let factor = if (anim_phase * 0.12).sin() >= 0.0 {
+                        1.0
+                    } else {
+                        0.08
+                    };
+                    r *= factor;
+                    g *= factor;
+                    b *= factor;
+                }
+                "chase" | "marquee" => {
+                    let norm_x = (k.x / 720.0).clamp(0.0, 1.0);
+                    let head = (anim_phase * 0.015).fract();
+                    let d = (norm_x - head).abs();
+                    let dist = d.min(1.0 - d);
+                    let factor = (1.0 - (dist / 0.25)).clamp(0.06, 1.0);
+                    r *= factor;
+                    g *= factor;
+                    b *= factor;
+                }
+                "starlight" => {
+                    let h = ((k.id as f64 + 1.0) * 12.9898).sin() * 43758.5453;
+                    let seed = h - h.floor();
+                    let pulse = ((anim_phase * 0.09 + seed * std::f64::consts::TAU).sin() * 0.5
+                        + 0.5)
+                        .powi(4);
+                    let factor = 0.15 + 0.85 * pulse;
+                    r *= factor;
+                    g *= factor;
+                    b *= factor;
+                }
+                "raindrop" => {
+                    let col = (k.x / 38.0).floor();
+                    let col_seed = ((col + 1.0) * 78.233).sin().abs();
+                    let drop_y = (anim_phase * 0.025 + col_seed).fract() * 260.0;
+                    let trail = (drop_y - k.y).rem_euclid(260.0);
+                    let factor = if trail < 90.0 {
+                        1.0 - (trail / 90.0) * 0.88
+                    } else {
+                        0.08
+                    };
+                    r *= factor;
+                    g *= factor;
+                    b *= factor;
+                }
+                "aurora" => {
+                    let w1 = ((anim_phase * 0.04) + k.x * 0.012 + k.y * 0.01).sin() * 0.5 + 0.5;
+                    let w2 = ((anim_phase * 0.025) - k.x * 0.008 + k.y * 0.015).cos() * 0.5 + 0.5;
+                    let h = 140.0 + w1 * 140.0;
+                    let l = 0.32 + 0.22 * w2;
+                    let (nr, ng, nb) = hsl_to_rgb(h, 0.95, l);
+                    r = nr;
+                    g = ng;
+                    b = nb;
+                }
+                "gradient" => {
+                    let t = ((anim_phase * 0.008 + k.x / 720.0).sin() * 0.5) + 0.5;
+                    let (sr, sg, sb) = sec_wave_rgb.unwrap_or((0.55, 0.1, 0.9));
+                    r = r * t + sr * (1.0 - t);
+                    g = g * t + sg * (1.0 - t);
+                    b = b * t + sb * (1.0 - t);
+                }
+                _ => {}
             }
 
-            let active_sel = *sel_mode_draw.borrow();
             let is_sel = sel.contains(&k.name);
             let is_hov = if active_sel == SelectionMode::Zone {
-                if let Some(h_name) = hov.as_ref() {
-                    get_zone_for_key(h_name) == get_zone_for_key(&k.name)
-                } else {
-                    false
-                }
+                hovered_zone == Some(k.zone)
             } else {
                 hov.as_ref() == Some(&k.name)
             };
@@ -630,19 +755,13 @@ pub fn build_interactive_keyboard(
                 cr.set_source_rgb(0.9, 0.9, 0.9);
             }
 
-            cr.set_font_size(11.0);
-            let labels_guard = layout_labels_draw.borrow();
             let label = labels_guard
                 .get(&k.name)
                 .map(|s| s.as_str())
                 .unwrap_or(k.display.as_str());
-            if let Ok(extents) = cr.text_extents(label) {
-                cr.move_to(
-                    k.x + (k.w - extents.width()) / 2.0 - extents.x_bearing(),
-                    k.y + (k.h - extents.height()) / 2.0 - extents.y_bearing(),
-                );
-                let _ = cr.show_text(label);
-            }
+            let (dx, dy) = offsets_guard.get(idx).copied().unwrap_or((4.0, k.h * 0.65));
+            cr.move_to(k.x + dx, k.y + dy);
+            let _ = cr.show_text(label);
         }
     });
 
@@ -698,6 +817,7 @@ pub fn build_interactive_keyboard(
     let btn_key_dd = btn_key.clone();
     let btn_zone_dd = btn_zone.clone();
     let kc_dd = key_colors.clone();
+    let pr_dd = parsed_rgb.clone();
     let pk_dd = per_key_colors.clone();
     let keys_dd = keys_rc.clone();
     let p_color_dd = paint_color.clone();
@@ -715,18 +835,24 @@ pub fn build_interactive_keyboard(
             }
             if detected_mode == KeyboardMode::PerKey && m == "static" {
                 let hex = p_color_dd.borrow().clone();
-                let mut kc_mut = kc_dd.borrow_mut();
-                for k in keys_dd.iter() {
-                    kc_mut.insert(k.name.clone(), hex.clone());
-                }
-            } else if detected_mode == KeyboardMode::PerKey && m == "per_key_custom" {
-                let pk = pk_dd.borrow();
-                let mut kc_mut = kc_dd.borrow_mut();
-                for k in keys_dd.iter() {
-                    if k.id < pk.len() {
-                        kc_mut.insert(k.name.clone(), pk[k.id].clone());
+                {
+                    let mut kc_mut = kc_dd.borrow_mut();
+                    for k in keys_dd.iter() {
+                        kc_mut.insert(k.name.clone(), hex.clone());
                     }
                 }
+                sync_parsed_rgb(&keys_dd, &kc_dd.borrow(), &pr_dd);
+            } else if detected_mode == KeyboardMode::PerKey && m == "per_key_custom" {
+                let pk = pk_dd.borrow();
+                {
+                    let mut kc_mut = kc_dd.borrow_mut();
+                    for k in keys_dd.iter() {
+                        if k.id < pk.len() {
+                            kc_mut.insert(k.name.clone(), pk[k.id].clone());
+                        }
+                    }
+                }
+                sync_parsed_rgb(&keys_dd, &kc_dd.borrow(), &pr_dd);
             }
             // Only "static" and the per-key layout render exactly what a
             // preset saved. Every other effect animates its own palette, so
@@ -767,6 +893,7 @@ pub fn build_interactive_keyboard(
 
     let p_color_c = paint_color.clone();
     let kc_c = key_colors.clone();
+    let pr_c = parsed_rgb.clone();
     let pk_c = per_key_colors.clone();
     let dirty_paint = colors_dirty.clone();
     let zc_c = zone_colors.clone();
@@ -837,6 +964,7 @@ pub fn build_interactive_keyboard(
                     }
                 }
             }
+            sync_parsed_rgb(&keys_click, &kc_mut, &pr_c);
 
             if detected_mode == KeyboardMode::PerKey {
                 dirty_paint.set(true);
@@ -887,6 +1015,7 @@ pub fn build_interactive_keyboard(
     let sm_d2 = sm_drag.clone();
     let p_color_u = paint_color.clone();
     let kc_u = key_colors.clone();
+    let pr_u = parsed_rgb.clone();
     let painted_u = painted_during_drag.clone();
 
     drag.connect_drag_update(move |_, dx, dy| {
@@ -947,6 +1076,7 @@ pub fn build_interactive_keyboard(
         }
 
         if changed {
+            sync_parsed_rgb(&keys_drag_u, &kc_mut, &pr_u);
             da_drag_u.queue_draw();
         }
     });
@@ -1064,6 +1194,7 @@ pub fn build_interactive_keyboard(
     let pk_color = per_key_colors.clone();
     let dirty_color = colors_dirty.clone();
     let kc_color = key_colors.clone();
+    let pr_color = parsed_rgb.clone();
     let keys_color = keys_rc.clone();
     let da_color = drawing_area.clone();
     let sm_color = sel_mode.clone();
@@ -1078,6 +1209,7 @@ pub fn build_interactive_keyboard(
         let pk_l = pk_color.clone();
         let dirty_l = dirty_color.clone();
         let kc_l = kc_color.clone();
+        let pr_l = pr_color.clone();
         let keys_l = keys_color.clone();
         let da_l = da_color.clone();
         let sm_l = sm_color.clone();
@@ -1106,6 +1238,7 @@ pub fn build_interactive_keyboard(
                     for k in keys_l.iter() {
                         kc_mut.insert(k.name.clone(), hex.clone());
                     }
+                    sync_parsed_rgb(&keys_l, &kc_mut, &pr_l);
                 }
                 crate::daemon_client::set_color_sync(8, hex);
                 da_l.queue_draw();
@@ -1116,6 +1249,7 @@ pub fn build_interactive_keyboard(
                     for k in keys_l.iter() {
                         kc_mut.insert(k.name.clone(), hex.clone());
                     }
+                    sync_parsed_rgb(&keys_l, &kc_mut, &pr_l);
                 }
                 crate::daemon_client::set_color_sync(8, hex);
                 da_l.queue_draw();
@@ -1132,6 +1266,7 @@ pub fn build_interactive_keyboard(
     let zc_reset = zone_colors.clone();
     let pk_reset = per_key_colors.clone();
     let kc_reset = key_colors.clone();
+    let pr_reset = parsed_rgb.clone();
     let keys_reset = keys_rc.clone();
     let da_reset = drawing_area.clone();
     let dirty_reset = colors_dirty.clone();
@@ -1172,6 +1307,7 @@ pub fn build_interactive_keyboard(
                 };
                 kc.insert(k.name.clone(), c);
             }
+            sync_parsed_rgb(&keys_reset, &kc, &pr_reset);
         }
         if detected_mode == KeyboardMode::PerKey {
             crate::daemon_client::set_per_key_colors_sync(pk_reset.borrow().clone());
@@ -1512,6 +1648,7 @@ pub fn build_interactive_keyboard(
             let dirty_apply = colors_dirty.clone();
             let pk = per_key_colors.clone();
             let kc = key_colors.clone();
+            let pr_apply = parsed_rgb.clone();
             let keys = keys_rc.clone();
             let da = drawing_area.clone();
             let sm_apply = sel_mode.clone();
@@ -1546,6 +1683,7 @@ pub fn build_interactive_keyboard(
                             kc.insert(k.name.clone(), c.clone());
                         }
                     }
+                    sync_parsed_rgb(&keys, &kc, &pr_apply);
                 }
                 if *sm_apply.borrow() == SelectionMode::Off {
                     btn_key_apply.set_active(true);
@@ -1639,13 +1777,18 @@ pub fn build_interactive_keyboard(
     let bright_scale_apply = bright_scale.clone();
     let hw_on_apply = hw_on.clone();
     let apply_anim: AnimCallback = Rc::new(move |mode: &str, speed: f64| {
-        let mut ts = anim_state_apply.borrow_mut();
-        ts.0 = mode.to_string();
-        ts.1 = speed;
-        drop(ts);
-        bright_scale_apply.set_sensitive(!hw_on_apply.get());
-
         let needs_anim = mode != "static" && mode != "per_key_custom";
+        {
+            let mut ts = anim_state_apply.borrow_mut();
+            let was_static = ts.mode == "static" || ts.mode == "per_key_custom";
+            ts.mode = mode.to_string();
+            ts.speed = speed;
+            if needs_anim && was_static {
+                ts.last_frame_us = 0;
+                ts.last_draw_us = 0;
+            }
+        }
+        bright_scale_apply.set_sensitive(!hw_on_apply.get());
 
         let mut curr_id = tick_id.borrow_mut();
         if !needs_anim && curr_id.is_some() {
@@ -1654,12 +1797,33 @@ pub fn build_interactive_keyboard(
             let anim_state_tick = anim_state_apply.clone();
             let da_tick = da_anim.clone();
             let id = da_anim.add_tick_callback(move |_, clock| {
-                if !da_tick.is_mapped() {
+                if !da_tick.is_mapped()
+                    || !da_tick.is_drawable()
+                    || da_tick
+                        .root()
+                        .and_then(|r| r.downcast::<gtk::Window>().ok())
+                        .is_some_and(|w| w.is_suspended())
+                {
                     return glib::ControlFlow::Continue;
                 }
-                let frame_time = clock.frame_time() as f64 / 1_000_000.0;
+                let now_us = clock.frame_time();
                 let mut ts = anim_state_tick.borrow_mut();
-                ts.2 = frame_time;
+                if ts.last_frame_us == 0 {
+                    ts.last_frame_us = now_us;
+                    ts.last_draw_us = now_us;
+                    drop(ts);
+                    da_tick.queue_draw();
+                    return glib::ControlFlow::Continue;
+                }
+                // Cap GUI preview redraws at ~40 FPS (25 ms) for smooth motion and minimal CPU.
+                if now_us - ts.last_draw_us < 25_000 {
+                    return glib::ControlFlow::Continue;
+                }
+                let dt_secs = (now_us - ts.last_frame_us) as f64 / 1_000_000.0;
+                ts.last_frame_us = now_us;
+                ts.last_draw_us = now_us;
+                let speed = ts.speed;
+                ts.phase = advance_anim_phase(ts.phase, dt_secs, speed);
                 drop(ts);
                 da_tick.queue_draw();
                 glib::ControlFlow::Continue
