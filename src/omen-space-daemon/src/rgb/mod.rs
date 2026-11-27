@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
 use zbus::interface;
 
@@ -427,39 +426,58 @@ impl RgbService {
         };
         write_uleds_level(initial).await;
 
-        let mut async_file = tokio::fs::File::from_std(std_file);
-
-        loop {
-            let mut val_bytes = [0u8; 4];
-            match async_file.read_exact(&mut val_bytes).await {
-                Ok(_) => {
-                    let new_brightness = i32::from_ne_bytes(val_bytes);
-                    {
-                        let mut g = inner.lock().await;
-                        let clamped = new_brightness.clamp(0, 100) as u32;
-                        // Echo of a level we published ourselves: nothing to do.
-                        if clamped == uleds_level(g.config.power, g.config.brightness) {
-                            continue;
+        // Reads on /dev/uleds block until the desktop changes the brightness,
+        // possibly forever.  Do NOT use tokio::fs here: it parks the read on
+        // the runtime's blocking pool, and runtime shutdown waits for that
+        // pool, so the daemon would hang on exit until systemd SIGKILLs it.
+        // A plain OS thread is not waited for when main() returns.
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<i32>();
+        let spawned = std::thread::Builder::new()
+            .name("uleds-reader".into())
+            .spawn(move || {
+                use std::io::Read;
+                let mut f = std_file;
+                let mut val_bytes = [0u8; 4];
+                loop {
+                    match f.read_exact(&mut val_bytes) {
+                        Ok(()) => {
+                            if tx.send(i32::from_ne_bytes(val_bytes)).is_err() {
+                                break;
+                            }
                         }
-                        if clamped == 0 {
-                            // Off from the desktop: keep the stored brightness so
-                            // turning it back on restores the previous level.
-                            g.config.power = false;
-                        } else {
-                            g.config.brightness = clamped;
-                            g.config.power = true;
+                        Err(e) => {
+                            warn!("uleds read error: {}, stopping listener", e);
+                            break;
                         }
-                        g.dirty_state = true;
-                        g.dirty_save = true;
-                        g.last_save_request = Some(std::time::Instant::now());
                     }
-                    wakeup.notify_one();
                 }
-                Err(e) => {
-                    warn!("uleds read error: {}, stopping listener", e);
-                    break;
+            });
+        if let Err(e) = spawned {
+            warn!("uleds: could not start reader thread: {}", e);
+            return;
+        }
+
+        while let Some(new_brightness) = rx.recv().await {
+            {
+                let mut g = inner.lock().await;
+                let clamped = new_brightness.clamp(0, 100) as u32;
+                // Echo of a level we published ourselves: nothing to do.
+                if clamped == uleds_level(g.config.power, g.config.brightness) {
+                    continue;
                 }
+                if clamped == 0 {
+                    // Off from the desktop: keep the stored brightness so
+                    // turning it back on restores the previous level.
+                    g.config.power = false;
+                } else {
+                    g.config.brightness = clamped;
+                    g.config.power = true;
+                }
+                g.dirty_state = true;
+                g.dirty_save = true;
+                g.last_save_request = Some(std::time::Instant::now());
             }
+            wakeup.notify_one();
         }
     }
 
