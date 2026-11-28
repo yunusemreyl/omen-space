@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
 use zbus::interface;
 
@@ -45,6 +44,33 @@ const VALID_DIRECTIONS: &[&str] = &["ltr", "rtl"];
 
 const CONFIG_PATH: &str = "/etc/omen-space/rgb.json";
 const PER_KEY_MAP_PATH: &str = "/root/.config/omen-space/per_key_map.json";
+
+/// Userspace LED device (kernel `uleds` module) used to expose the keyboard
+/// backlight to UPower / desktop power managers (KDE PowerDevil, GNOME).
+const ULEDS_DEV: &str = "/dev/uleds";
+const ULEDS_BRIGHTNESS_PATH: &str = "/sys/class/leds/omen::kbd_backlight/brightness";
+
+/// Brightness the desktop should see: 0 when the keyboard is off.
+fn uleds_level(power: bool, brightness: u32) -> u32 {
+    if power {
+        brightness.min(100)
+    } else {
+        0
+    }
+}
+
+/// Publish `level` on the uleds LED. Returns false if the LED is not registered.
+async fn write_uleds_level(level: u32) -> bool {
+    match tokio::fs::write(ULEDS_BRIGHTNESS_PATH, level.to_string()).await {
+        Ok(()) => true,
+        Err(e) => {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                warn!("uleds: failed to publish brightness {}: {}", level, e);
+            }
+            false
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct RgbConfig {
@@ -341,7 +367,30 @@ impl RgbService {
         let name_str = b"omen::kbd_backlight";
         dev.name[..name_str.len()].copy_from_slice(name_str);
 
-        let file = match File::options().read(true).write(true).open("/dev/uleds") {
+        // uleds is a stock kernel module but nothing loads it by default, so
+        // /dev/uleds is usually absent.  Load it on demand (the daemon runs as
+        // root with ProtectKernelModules=false).
+        if !Path::new(ULEDS_DEV).exists() {
+            match tokio::process::Command::new("modprobe")
+                .arg("uleds")
+                .status()
+                .await
+            {
+                Ok(s) if s.success() => {
+                    // devtmpfs creates the node asynchronously; give it a moment.
+                    for _ in 0..20 {
+                        if Path::new(ULEDS_DEV).exists() {
+                            break;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    }
+                }
+                Ok(s) => info!("uleds: `modprobe uleds` exited with {}", s),
+                Err(e) => info!("uleds: could not run modprobe: {}", e),
+            }
+        }
+
+        let file = match File::options().read(true).write(true).open(ULEDS_DEV) {
             Ok(f) => f,
             Err(e) => {
                 info!(
@@ -367,35 +416,68 @@ impl RgbService {
         }
 
         info!("Successfully registered /sys/class/leds/omen::kbd_backlight");
-        let mut async_file = tokio::fs::File::from_std(std_file);
 
-        loop {
-            let mut val_bytes = [0u8; 4];
-            match async_file.read_exact(&mut val_bytes).await {
-                Ok(_) => {
-                    let new_brightness = i32::from_ne_bytes(val_bytes);
-                    let mut should_notify = false;
-                    {
-                        let mut g = inner.lock().await;
-                        let clamped = new_brightness.clamp(0, 100) as u32;
-                        if g.config.brightness != clamped || (clamped > 0 && !g.config.power) {
-                            g.config.brightness = clamped;
-                            g.config.power = clamped > 0;
-                            g.dirty_state = true;
-                            g.dirty_save = true;
-                            g.last_save_request = Some(std::time::Instant::now());
-                            should_notify = true;
+        // A fresh uleds LED reports 0.  Publish the real level right away so
+        // UPower/desktop power managers never "restore" 0 and switch the
+        // keyboard off.
+        let initial = {
+            let g = inner.lock().await;
+            uleds_level(g.config.power, g.config.brightness)
+        };
+        write_uleds_level(initial).await;
+
+        // Reads on /dev/uleds block until the desktop changes the brightness,
+        // possibly forever.  Do NOT use tokio::fs here: it parks the read on
+        // the runtime's blocking pool, and runtime shutdown waits for that
+        // pool, so the daemon would hang on exit until systemd SIGKILLs it.
+        // A plain OS thread is not waited for when main() returns.
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<i32>();
+        let spawned = std::thread::Builder::new()
+            .name("uleds-reader".into())
+            .spawn(move || {
+                use std::io::Read;
+                let mut f = std_file;
+                let mut val_bytes = [0u8; 4];
+                loop {
+                    match f.read_exact(&mut val_bytes) {
+                        Ok(()) => {
+                            if tx.send(i32::from_ne_bytes(val_bytes)).is_err() {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            warn!("uleds read error: {}, stopping listener", e);
+                            break;
                         }
                     }
-                    if should_notify {
-                        wakeup.notify_one();
-                    }
                 }
-                Err(e) => {
-                    warn!("uleds read error: {}, stopping listener", e);
-                    break;
+            });
+        if let Err(e) = spawned {
+            warn!("uleds: could not start reader thread: {}", e);
+            return;
+        }
+
+        while let Some(new_brightness) = rx.recv().await {
+            {
+                let mut g = inner.lock().await;
+                let clamped = new_brightness.clamp(0, 100) as u32;
+                // Echo of a level we published ourselves: nothing to do.
+                if clamped == uleds_level(g.config.power, g.config.brightness) {
+                    continue;
                 }
+                if clamped == 0 {
+                    // Off from the desktop: keep the stored brightness so
+                    // turning it back on restores the previous level.
+                    g.config.power = false;
+                } else {
+                    g.config.brightness = clamped;
+                    g.config.power = true;
+                }
+                g.dirty_state = true;
+                g.dirty_save = true;
+                g.last_save_request = Some(std::time::Instant::now());
             }
+            wakeup.notify_one();
         }
     }
 
@@ -446,6 +528,7 @@ impl RgbService {
         let mut mcu_sig: Option<[u8; HidPerKeyBackend::MCU_RECORD_LEN]> = None;
         let mut last_frame_at = std::time::Instant::now();
         let mut recent_keys: Vec<(f64, f64, f64)> = Vec::with_capacity(32);
+        let mut last_uleds_level: Option<u32> = None;
 
         loop {
             let frame_start = std::time::Instant::now();
@@ -605,6 +688,12 @@ impl RgbService {
             };
 
             if snap.dirty_state {
+                // Mirror GUI/CLI/tray brightness changes to the uleds LED so the
+                // desktop's keyboard-brightness slider/OSD stays in sync.
+                let level = uleds_level(snap.power, snap.brightness);
+                if last_uleds_level != Some(level) && write_uleds_level(level).await {
+                    last_uleds_level = Some(level);
+                }
                 last_per_key_rgb = None;
                 last_lamp_rgb = None;
                 last_sysfs_rgb = None;
@@ -1563,6 +1652,24 @@ pub async fn test_single_key_static(index: usize, r: u8, g: u8, b: u8) -> bool {
         hid.test_single_key(index, r, g, b)
     } else {
         false
+    }
+}
+
+#[cfg(test)]
+mod uleds_tests {
+    use super::uleds_level;
+
+    #[test]
+    fn off_publishes_zero_regardless_of_brightness() {
+        assert_eq!(uleds_level(false, 80), 0);
+        assert_eq!(uleds_level(false, 0), 0);
+    }
+
+    #[test]
+    fn on_publishes_clamped_brightness() {
+        assert_eq!(uleds_level(true, 40), 40);
+        assert_eq!(uleds_level(true, 100), 100);
+        assert_eq!(uleds_level(true, 250), 100);
     }
 }
 
