@@ -42,6 +42,7 @@ pub fn t(key: &str) -> String {
             "fans" => "Fanlar",
             "battery" => "Pil",
             "close" => "Kapat",
+            "gpu_idle" => "Boşta",
             _ => key,
         },
         Lang::Es => match key {
@@ -63,6 +64,7 @@ pub fn t(key: &str) -> String {
             "fans" => "Ventiladores",
             "battery" => "Batería",
             "close" => "Cerrar",
+            "gpu_idle" => "Inactiva",
             _ => key,
         },
         Lang::En => match key {
@@ -84,6 +86,7 @@ pub fn t(key: &str) -> String {
             "fans" => "Fans",
             "battery" => "Battery",
             "close" => "Close",
+            "gpu_idle" => "Idle",
             _ => key,
         },
     }

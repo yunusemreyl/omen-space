@@ -8,14 +8,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
-### Fixed
-- **Updates no longer leave the system without a kernel driver:** `setup.sh install|update` now refuse to run while a kernel upgrade is pending a reboot (running kernel's module tree gone), before anything is changed. Previously `do_update` removed every `hp-omen-extra` DKMS version — including the one the package manager's DKMS hook had just built for the new kernel — and then `driver/setup.sh` aborted, so the next boot had no RGB/hp-omen-extra.
-- **Driver install is now build-first:** `driver/setup.sh install` test-builds the module against the running kernel in a temporary directory (`preflight_build`) and only removes the previously installed driver once that succeeds. Old-version cleanup moved here from `do_update`; superseded `/usr/src/hp-omen-extra-*` trees are removed too.
-- **No more root-owned files in the user's checkout:** `setup.sh` hands any root-owned files (from `git pull`, `cargo build`) back to the checkout's owner on exit, so the user's own `git`/`cargo` keep working after a GUI update.
-
 ### Added
 - **`setup.sh repair-driver`:** rebuilds and reloads only the kernel driver (same build-first path as `driver/setup.sh install`) and restarts the daemon, without rebuilding the Rust workspace.
 - **Updater "Repair" button:** the Updater's *DKMS Kernel Driver* row shows a **Repair** button when `hp_wmi`/`hp_omen_extra` are not loaded. It runs `setup.sh repair-driver` through `pkexec` — the same privilege path the Updater already uses for `setup.sh update` — and shows the result inline (TR/EN/ES).
+
+### Fixed
+- **`omen-cli fetch` no longer shows a fake "TGP: 0W":** the value came from the `gpu_w` power-config field, which no code path ever writes, so it read 0 W on every machine. `GetPowerState` now also reports the live NVIDIA **cTGP** (`gpu_tgp`) and **Dynamic Boost / PPAB** (`gpu_ppab`) states read from hp-wmi (`null` where the board does not expose them), and `fetch` prints `cTGP: On|Off | Boost: On|Off`, omitting the segment on boards without those attributes. `gpu_w` stays in the JSON for compatibility.
+- **Updates no longer leave the system without a kernel driver:** `setup.sh install|update` now refuse to run while a kernel upgrade is pending a reboot (running kernel's module tree gone), before anything is changed. Previously `do_update` removed every `hp-omen-extra` DKMS version — including the one the package manager's DKMS hook had just built for the new kernel — and then `driver/setup.sh` aborted, so the next boot had no RGB/hp-omen-extra.
+- **Driver install is now build-first:** `driver/setup.sh install` test-builds the module against the running kernel in a temporary directory (`preflight_build`) and only removes the previously installed driver once that succeeds. Old-version cleanup moved here from `do_update`; superseded `/usr/src/hp-omen-extra-*` trees are removed too.
+- **No more root-owned files in the user's checkout:** `setup.sh` hands any root-owned files (from `git pull`, `cargo build`) back to the checkout's owner on exit, so the user's own `git`/`cargo` keep working after a GUI update.
 
 ## [2.6.2] - 2026-11-27
 
