@@ -148,6 +148,31 @@ async fn sysfs_read_async(path: &str) -> Option<String> {
         .map(|s| s.trim().to_string())
 }
 
+/// Parse a hp-wmi boolean sysfs attribute (`gpu_tgp` / `gpu_ppab` print 0/1).
+fn parse_sysfs_bool(raw: Option<&str>) -> Option<bool> {
+    match raw?.trim() {
+        "1" | "Y" | "y" => Some(true),
+        "0" | "N" | "n" => Some(false),
+        _ => None,
+    }
+}
+
+/// Live NVIDIA cTGP / Dynamic Boost (PPAB) state from hp-wmi, `None` where the
+/// attribute is absent or unreadable (non Victus-S/OMEN thermal-profile boards).
+async fn read_gpu_boost_state() -> (Option<bool>, Option<bool>) {
+    let base = if sysfs_exists("/sys/devices/platform/hp-wmi") {
+        "/sys/devices/platform/hp-wmi"
+    } else {
+        "/sys/devices/platform/hp-omen"
+    };
+    let ctgp = sysfs_read_async(&format!("{}/gpu_tgp", base)).await;
+    let ppab = sysfs_read_async(&format!("{}/gpu_ppab", base)).await;
+    (
+        parse_sysfs_bool(ctgp.as_deref()),
+        parse_sysfs_bool(ppab.as_deref()),
+    )
+}
+
 // ── ACPI health guard ──────────────────────────────────────────────────────────
 /// Returns `true` if ACPI platform_profile sysfs responds within the timeout.
 /// If ACPI is stuck (AE_AML_LOOP_TIMEOUT / AE_AML_BUFFER_LIMIT storm), the
@@ -1315,6 +1340,8 @@ impl PowerService {
             }
         }
 
+        let (gpu_ctgp, gpu_ppab) = read_gpu_boost_state().await;
+
         let last_error = self.last_error.lock().await.clone();
         let json = serde_json::json!({
             "available": true,
@@ -1334,7 +1361,11 @@ impl PowerService {
             "baseline_provenance": self.rapl_baseline.as_ref().map(|(b,_)| &b.provenance),
             "baseline_persisted": self.rapl_baseline.as_ref().is_some_and(|(_,persisted)| *persisted),
             "pl_enabled": cfg.pl_enabled,
+            // Legacy field: never written by any code path, always 0. Kept for
+            // JSON compatibility; use gpu_ctgp / gpu_ppab for the live state.
             "gpu_w": cfg.gpu_w,
+            "gpu_ctgp": gpu_ctgp,
+            "gpu_ppab": gpu_ppab,
             "ac_auto_switch": cfg.ac_auto_switch,
             "system_power_sync": cfg.system_power_sync,
             "external_power_manager": Self::detect_external_power_manager(),
@@ -1461,6 +1492,21 @@ impl PowerService {
 
     async fn ping(&self) -> String {
         "OK".to_string()
+    }
+}
+
+#[cfg(test)]
+mod gpu_boost_tests {
+    use super::parse_sysfs_bool;
+
+    #[test]
+    fn parses_hp_wmi_boolean_attributes() {
+        assert_eq!(parse_sysfs_bool(Some("1")), Some(true));
+        assert_eq!(parse_sysfs_bool(Some("0\n")), Some(false));
+        assert_eq!(parse_sysfs_bool(Some("Y")), Some(true));
+        assert_eq!(parse_sysfs_bool(Some("")), None);
+        assert_eq!(parse_sysfs_bool(Some("80")), None);
+        assert_eq!(parse_sysfs_bool(None), None);
     }
 }
 

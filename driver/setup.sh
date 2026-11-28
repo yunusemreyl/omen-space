@@ -257,6 +257,36 @@ remove_hpwmi_override() {
     fi
 }
 
+# ── Pre-flight build ─────────────────────────────────────────────────────────
+# Compile the module in a throwaway directory against the running kernel.
+# Nothing on the system is touched; on failure we abort while the previously
+# installed driver is still intact.
+preflight_build() {
+    local kver build_dir tmp log
+    kver=$(uname -r)
+    build_dir="/lib/modules/$kver/build"
+    [ -d "$build_dir" ] || build_dir="/usr/lib/modules/$kver/build"
+    if [ ! -d "$build_dir" ]; then
+        error "Kernel headers for $kver not found ($build_dir). Install them and retry — the installed driver was left untouched."
+    fi
+
+    tmp=$(mktemp -d /tmp/omen-driver-preflight.XXXXXX)
+    log="$tmp/build.log"
+    cp "$SCRIPT_DIR/Makefile" "$SCRIPT_DIR/dkms.conf" "$SCRIPT_DIR"/*.c "$tmp/"
+    cp "$SCRIPT_DIR"/*.h "$tmp/" 2>/dev/null || true
+
+    info "Pre-flight: test-building the driver for kernel $kver..."
+    local llvm_arg=()
+    [ "${LLVM:-0}" = "1" ] && llvm_arg=(LLVM=1)
+    if make -C "$tmp" KDIR="$build_dir" "${llvm_arg[@]}" modules >"$log" 2>&1; then
+        ok "Pre-flight build succeeded."
+        rm -rf "$tmp"
+    else
+        tail -n 25 "$log" >&2 || true
+        error "Pre-flight build failed (full log: $log). The installed driver was left untouched."
+    fi
+}
+
 # ── Install ───────────────────────────────────────────────────────────────────
 
 do_install() {
@@ -272,6 +302,11 @@ do_install() {
     fi
 
     cd "$SCRIPT_DIR"
+
+    # Prove the new source builds for the running kernel BEFORE removing the
+    # currently installed driver.  A failed build must leave the working driver
+    # in place instead of leaving the system with no RGB/fan module at all.
+    preflight_build
 
     # Create the source directory and copy files first so that dkms remove has a valid dkms.conf to read
     # (otherwise dkms remove fails with 'Missing the module source directory')
@@ -309,6 +344,12 @@ do_install() {
         done
     fi
     rm -rf "/var/lib/dkms/${MODNAME}/${MODVER}"
+    # Drop source trees of superseded versions (dkms remove leaves /usr/src alone).
+    for old_src in /usr/src/"${MODNAME}"-*; do
+        [ -d "$old_src" ] || continue
+        [ "$old_src" = "/usr/src/${MODNAME}-${MODVER}" ] && continue
+        rm -rf "$old_src"
+    done
 
     # ── Stock hp-wmi override ────────────────────────────────────────────────
     # Must be done BEFORE depmod/dkms so that when the DKMS module lands in

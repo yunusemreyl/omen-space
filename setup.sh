@@ -27,6 +27,19 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# This script runs as root but usually lives in a user's checkout.  git pull,
+# cargo build and file copies would otherwise leave root-owned files in that
+# checkout (including .git/ and target/), breaking the user's own git/cargo.
+# On exit — success or failure — hand anything root-owned back to the owner of
+# the checkout directory.  Root-owned checkouts (/var/cache/...) are left alone.
+restore_repo_ownership() {
+    local owner
+    owner=$(stat -c '%U:%G' "$SCRIPT_DIR" 2>/dev/null) || return 0
+    [[ "$owner" == root:* ]] && return 0
+    find "$SCRIPT_DIR" -user root -exec chown -h "$owner" {} + 2>/dev/null || true
+}
+trap restore_repo_ownership EXIT
+
 emit_step() {
     local step_num="$1"
     local pct="$2"
@@ -60,6 +73,50 @@ service_stop_daemon() {
             pkill -x omen-space-daemon 2>/dev/null || true
             ;;
     esac
+}
+
+# Refuse to touch anything while a kernel upgrade is waiting for a reboot.
+# Package managers (pacman especially) delete the running kernel's module tree
+# on upgrade; DKMS has already rebuilt our driver for the NEW kernel at that
+# point, so removing it now and rebuilding against the vanished running kernel
+# leaves the next boot with no hp-omen-extra at all (RGB lost).
+require_booted_kernel() {
+    local kver
+    kver=$(uname -r)
+    if [ ! -e "/lib/modules/$kver/modules.dep" ] && [ ! -e "/usr/lib/modules/$kver/modules.dep" ]; then
+        echo "ERROR: A kernel update is pending a reboot (modules for running kernel $kver are gone)." >&2
+        echo "ERROR: Nothing was changed. Reboot into the new kernel, then run the update again." >&2
+        exit 1
+    fi
+}
+
+service_restart_daemon() {
+    case "$INIT_SYSTEM" in
+        systemd)
+            systemctl restart omen-space-daemon.service 2>/dev/null || true
+            ;;
+        openrc)
+            rc-service omen-space-daemon restart 2>/dev/null || true
+            ;;
+    esac
+}
+
+# Rebuild and reload only the kernel driver (used by the GUI "Repair" button).
+do_repair_driver() {
+    require_booted_kernel
+    local repo="$SCRIPT_DIR"
+    if [ ! -f "$repo/driver/setup.sh" ] && [ -f /etc/omen-space/repo_path ]; then
+        repo=$(tr -d '\r\n' < /etc/omen-space/repo_path)
+    fi
+    if [ ! -f "$repo/driver/setup.sh" ]; then
+        echo "ERROR: Driver sources not found (looked in $SCRIPT_DIR and /etc/omen-space/repo_path)." >&2
+        exit 1
+    fi
+    emit_step 1 30 "Rebuilding kernel driver (hp-wmi & hp-omen-extra)..."
+    bash "$repo/driver/setup.sh" install
+    emit_step 2 90 "Restarting omen-space-daemon..."
+    service_restart_daemon
+    echo "Driver repair complete."
 }
 
 service_reload_dbus() {
@@ -685,28 +742,17 @@ prepare_update_repo() {
 }
 
 do_update() {
+    require_booted_kernel
     prepare_update_repo "$@"
 
-    emit_step 2 28 "Checking system dependencies & cleaning old DKMS modules..."
+    emit_step 2 28 "Checking system dependencies..."
     check_conflicting_power_managers
     install_dependencies
     remove_legacy_omenctl
 
-    # FIX #254: Remove ALL previously installed DKMS versions for hp-omen-extra
-    # before rebuilding so that old modules don't accumulate across updates.
-    echo "====================================="
-    echo " Cleaning up old DKMS modules..."
-    echo "====================================="
-    if command -v dkms &>/dev/null; then
-        OLD_VERSIONS=$(dkms status 2>/dev/null | grep -i 'hp-omen-extra' | grep -oP '(?<=hp-omen-extra[/, ])[^,:]+' | tr -d ' ' | sort -u)
-        if [ -n "$OLD_VERSIONS" ]; then
-            for v in $OLD_VERSIONS; do
-                echo "Removing old DKMS module: hp-omen-extra/$v"
-                dkms remove -m "hp-omen-extra" -v "$v" --all 2>/dev/null || true
-                rm -rf "/usr/src/hp-omen-extra-$v" 2>/dev/null || true
-            done
-        fi
-    fi
+    # Old hp-omen-extra DKMS versions (FIX #254) are removed by driver/setup.sh
+    # only AFTER the new version passes a pre-flight build, so a failed update
+    # can never leave the system without a working driver.
 
     do_build
     do_install
@@ -722,6 +768,7 @@ case "$COMMAND" in
             echo "Source tree not found in $SCRIPT_DIR; fetching repository..."
             prepare_update_repo install "$@"
         fi
+        require_booted_kernel
         emit_step 1 15 "Checking system dependencies..."
         check_conflicting_power_managers
         install_dependencies
@@ -735,11 +782,15 @@ case "$COMMAND" in
     update)
         do_update "$@"
         ;;
+    repair-driver)
+        do_repair_driver
+        ;;
     *)
-        echo "Usage: sudo ./setup.sh [install|update|uninstall] [--non-interactive] [--from-gui]"
+        echo "Usage: sudo ./setup.sh [install|update|uninstall|repair-driver] [--non-interactive] [--from-gui]"
         echo "  install   : Builds and installs OMENSpace (cleans legacy omenctl)"
         echo "  update    : Pulls latest git changes, builds, and reinstalls"
         echo "  uninstall : Completely removes OMENSpace from the system"
+        echo "  repair-driver : Rebuilds and reloads only the kernel driver"
         exit 1
         ;;
 esac
