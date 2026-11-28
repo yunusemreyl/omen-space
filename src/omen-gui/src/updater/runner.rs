@@ -310,7 +310,8 @@ pub(super) struct UpdateUiTargets {
     pub(super) status_icon: gtk::Image,
 }
 
-fn build_pkexec_update_command() -> tokio::process::Command {
+/// Locate the source checkout's `setup.sh` (one that has a full source tree).
+fn resolve_repo_setup_script() -> Option<String> {
     let home_dir = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
     let mut candidate_dirs: Vec<String> = Vec::new();
     if let Ok(p) = std::fs::read_to_string("/etc/omen-space/repo_path") {
@@ -328,13 +329,58 @@ fn build_pkexec_update_command() -> tokio::process::Command {
         "/opt/omen-space".to_string(),
     ]);
 
-    let valid_repo_setup = candidate_dirs
+    candidate_dirs
         .into_iter()
         .find(|dir| {
             std::path::Path::new(&format!("{}/setup.sh", dir)).exists()
                 && std::path::Path::new(&format!("{}/Cargo.toml", dir)).exists()
         })
-        .map(|dir| format!("{}/setup.sh", dir));
+        .map(|dir| format!("{}/setup.sh", dir))
+}
+
+/// Rebuild and reload only the kernel driver via `setup.sh repair-driver`.
+/// Returns Ok(()) on success or the tail of the script output on failure.
+pub(super) async fn run_driver_repair() -> Result<(), String> {
+    let setup = resolve_repo_setup_script()
+        .filter(|p| {
+            std::path::Path::new(p)
+                .parent()
+                .map(|d| d.join("driver/setup.sh").exists())
+                .unwrap_or(false)
+        })
+        .ok_or_else(|| "Driver sources not found; run a full update instead.".to_string())?;
+
+    let output = crate::daemon_client::get_runtime()
+        .spawn(async move {
+            tokio::process::Command::new("pkexec")
+                .arg("env")
+                .arg("OMEN_NONINTERACTIVE=1")
+                .arg("bash")
+                .arg(setup)
+                .arg("repair-driver")
+                .output()
+                .await
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("pkexec error: {e}"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    let text = strip_ansi_codes(&text);
+    let lines: Vec<&str> = text
+        .lines()
+        .filter(|l| !l.trim().is_empty() && !l.starts_with("::OMEN_STEP::"))
+        .collect();
+    let start = lines.len().saturating_sub(4);
+    Err(lines[start..].join("\n"))
+}
+
+fn build_pkexec_update_command() -> tokio::process::Command {
+    let valid_repo_setup = resolve_repo_setup_script();
 
     let mut cmd_builder = tokio::process::Command::new("pkexec");
     cmd_builder

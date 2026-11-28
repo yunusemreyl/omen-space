@@ -59,9 +59,21 @@ fn estimate_max_watts(specs: &HardwareSpecs) -> (f64, f64) {
     (cpu_max_watt, gpu_max_watt)
 }
 
+/// True when the daemon is deliberately not sampling the dGPU (quiet window or
+/// runtime suspend), including older daemons that only send negative `gpu_pwr`.
+fn gpu_is_idle(stats: &SystemStats) -> bool {
+    matches!(
+        stats.gpu_sample_state,
+        GpuSampleState::Deferred | GpuSampleState::Suspended
+    ) || (stats.gpu_sample_state == GpuSampleState::Unknown && stats.gpu_pwr < 0.0)
+}
+
 fn format_gpu_power(stats: &SystemStats) -> String {
-    if stats.gpu_sample_state == GpuSampleState::Deferred || stats.gpu_pwr <= -1.5 {
-        i18n::t("mon_gpu_not_sampled").to_string()
+    if stats.gpu_sample_state == GpuSampleState::Unavailable && stats.gpu_pwr < 0.0 {
+        // Real sampling failure (e.g. NVML timeout), not an idle GPU.
+        "──".to_string()
+    } else if stats.gpu_sample_state == GpuSampleState::Deferred || stats.gpu_pwr <= -1.5 {
+        i18n::t("mon_gpu_not_in_use").to_string()
     } else if stats.gpu_sample_state == GpuSampleState::Suspended || stats.gpu_pwr < 0.0 {
         i18n::t("mon_gpu_suspended").to_string()
     } else {
@@ -413,7 +425,9 @@ pub fn build_telemetry_dock() -> gtk::Box {
             .set_label(&format!("{} {}", f1, i18n::t("mon_rpm")));
 
         // GPU
-        if stats.gpu_temp <= 0 || g_avg <= 0 {
+        if gpu_is_idle(&stats) {
+            gpu_col.temp_label.set_label(i18n::t("mon_gpu_idle"));
+        } else if stats.gpu_temp <= 0 || g_avg <= 0 {
             gpu_col.temp_label.set_label("──");
         } else {
             gpu_col.temp_label.set_label(&format!("{}°C", g_avg));
@@ -1148,7 +1162,11 @@ pub fn build_monitor_page() -> gtk::Box {
         }
 
         // GPU panel update
-        if stats.gpu_temp <= 0 || g_avg <= 0 {
+        // The daemon deliberately stops polling an idle dGPU so it can sleep.
+        // Say so instead of showing placeholder dashes that look like an error.
+        if gpu_is_idle(&stats) {
+            gpu_panel.temp_label.set_label(i18n::t("mon_gpu_idle"));
+        } else if stats.gpu_temp <= 0 || g_avg <= 0 {
             gpu_panel.temp_label.set_label("──");
         } else {
             gpu_panel.temp_label.set_label(&format!("{}°C", g_avg));

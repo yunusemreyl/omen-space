@@ -9,8 +9,8 @@ use std::rc::Rc;
 
 use crate::i18n;
 use runner::{
-    check_github_updates_async, execute_update, resolve_installed_build, run_fwupd_check_async,
-    UpdateUiTargets,
+    check_github_updates_async, execute_update, resolve_installed_build, run_driver_repair,
+    run_fwupd_check_async, UpdateUiTargets,
 };
 
 /* ─────────────────────────────────────────────────────────────
@@ -535,6 +535,43 @@ pub fn build_embedded(window: &adw::ApplicationWindow) -> gtk::Box {
         .margin_end(12)
         .build();
     dkms_row.add_prefix(&dkms_icon);
+
+    // One-click repair when the driver is missing (e.g. after an interrupted
+    // update or a kernel upgrade DKMS could not build for).
+    if !dkms_loaded {
+        let repair_btn = gtk::Button::builder()
+            .label(i18n::t("updater_dkms_repair"))
+            .css_classes(["suggested-action", "pill"])
+            .valign(gtk::Align::Center)
+            .build();
+        let row = dkms_row.clone();
+        let icon = dkms_icon.clone();
+        repair_btn.connect_clicked(move |btn| {
+            btn.set_sensitive(false);
+            btn.set_label(i18n::t("updater_dkms_repairing"));
+            row.set_subtitle(i18n::t("updater_dkms_repairing"));
+            let (btn, row, icon) = (btn.clone(), row.clone(), icon.clone());
+            glib::spawn_future_local(async move {
+                match run_driver_repair().await {
+                    Ok(()) => {
+                        row.set_subtitle(i18n::t("updater_dkms_loaded"));
+                        icon.set_icon_name(Some("object-select-symbolic"));
+                        btn.set_visible(false);
+                    }
+                    Err(msg) => {
+                        row.set_subtitle(&format!(
+                            "{}\n{}",
+                            i18n::t("updater_dkms_repair_failed"),
+                            msg
+                        ));
+                        btn.set_label(i18n::t("updater_dkms_repair"));
+                        btn.set_sensitive(true);
+                    }
+                }
+            });
+        });
+        dkms_row.add_suffix(&repair_btn);
+    }
     fw_group.add(&dkms_row);
 
     let icons = [
