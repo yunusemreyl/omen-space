@@ -175,6 +175,8 @@ pub fn build_page() -> gtk::Box {
     off_hold_row.set_active(init_battery_off_hold);
     off_hold_row.set_sensitive(init_battery_care);
     bat_group.add(&off_hold_row);
+    // Cleared when the daemon reports the firmware rejects the `hold` mode.
+    let off_hold_supported = Rc::new(std::cell::Cell::new(true));
 
     let bypass_row = adw::SwitchRow::builder()
         .title(i18n::t("battery_limit_bypass"))
@@ -191,6 +193,7 @@ pub fn build_page() -> gtk::Box {
         let stop_r = stop_row.clone();
         let start_r = start_row.clone();
         let hold_r = off_hold_row.clone();
+        let hold_ok = off_hold_supported.clone();
         let byp_r = bypass_row.clone();
         let badge = bat_status_badge.clone();
         let bat_sw = battery_row.clone();
@@ -199,7 +202,7 @@ pub fn build_page() -> gtk::Box {
             let byp = byp_r.is_active();
             stop_r.set_sensitive(active);
             start_r.set_sensitive(active);
-            hold_r.set_sensitive(active);
+            hold_r.set_sensitive(active && hold_ok.get());
             byp_r.set_sensitive(active);
             if !active {
                 badge.set_label(i18n::t("battery_limit_status_off"));
@@ -298,6 +301,7 @@ pub fn build_page() -> gtk::Box {
         let stop_r = stop_row.clone();
         let start_r = start_row.clone();
         let hold_r = off_hold_row.clone();
+        let hold_ok = off_hold_supported.clone();
         let byp_r = bypass_row.clone();
         let badge = bat_status_badge.clone();
         glib::spawn_future_local(async move {
@@ -318,6 +322,10 @@ pub fn build_page() -> gtk::Box {
                         .and_then(|v| v.as_bool())
                         .unwrap_or(true);
                     let bypass = val.get("bypass").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let off_hold_supported = val
+                        .get("off_hold_supported")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
                     let lim_state = val
                         .get("limiter_state")
                         .and_then(|v| v.as_str())
@@ -338,7 +346,11 @@ pub fn build_page() -> gtk::Box {
                     let native_only = backend == "native_threshold";
                     stop_r.set_sensitive(enabled);
                     start_r.set_sensitive(enabled && !native_only);
-                    hold_r.set_sensitive(enabled && !native_only);
+                    hold_ok.set(off_hold_supported);
+                    if !off_hold_supported {
+                        hold_r.set_subtitle(i18n::t("battery_limit_off_hold_unsupported"));
+                    }
+                    hold_r.set_sensitive(enabled && !native_only && off_hold_supported);
                     byp_r.set_sensitive(enabled);
 
                     if !supported {

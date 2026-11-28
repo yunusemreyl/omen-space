@@ -267,6 +267,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("battery_limit_start_sub", "WMI 0x2B kartlarda pil bu değerin altına inince şarjı devam ettirir"),
     ("battery_limit_off_hold", "Kapalıyken Şarjı Tut (Off Hold)"),
     ("battery_limit_off_hold_sub", "Bilgisayar kapatıldığında veya uyuduğunda şarj engelini korur"),
+    ("battery_limit_off_hold_unsupported", "Bu dizüstü bilgisayarın donanım yazılımı desteklemiyor — kapalıyken şarj normal şekilde devam eder"),
     ("battery_limit_bypass", "Tek Seferlik %100 Şarj (Bypass)"),
     ("battery_limit_bypass_sub", "Bir kez tam doluma izin ver, %100'e ulaşınca otomatik sınırı geri aç"),
     ("battery_limit_status_limiting", "Sınırlanıyor"),

@@ -495,7 +495,12 @@ impl PlatformService {
         let _ = tokio::task::spawn_blocking(move || {
             let reading = read_sysfs_battery_reading();
             let mut writer = HpWmiSysfsBackend::system();
-            limiter.on_shutdown(reading, &cfg, &mut writer)
+            limiter.hold_supported = crate::battery_limit::hold_supported();
+            let applied = limiter.on_shutdown(reading, &cfg, &mut writer);
+            if limiter.hold_rejected {
+                crate::battery_limit::mark_hold_unsupported();
+            }
+            applied
         })
         .await;
     }
@@ -791,6 +796,7 @@ impl PlatformService {
             "stop": cfg.stop_pct,
             "start": cfg.start_pct,
             "off_hold": cfg.off_hold,
+            "off_hold_supported": crate::battery_limit::hold_supported(),
             "bypass": cfg.bypass,
             "limiter_state": state_str,
             "firmware_mode": fw_mode,

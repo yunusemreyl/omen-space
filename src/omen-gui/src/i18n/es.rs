@@ -238,6 +238,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("battery_limit_start_sub", "Reanuda la carga en placas WMI 0x2B cuando la batería baja a este nivel"),
     ("battery_limit_off_hold", "Mantener límite apagado"),
     ("battery_limit_off_hold_sub", "Conserva el bloqueo de carga al apagar o suspender si supera el umbral mínimo"),
+    ("battery_limit_off_hold_unsupported", "No compatible con el firmware de este portátil: la carga continúa con normalidad al apagar"),
     ("battery_limit_bypass", "Carga completa temporal al 100 %"),
     ("battery_limit_bypass_sub", "Permite una carga al 100 % y reactiva el límite automáticamente al completar"),
     ("battery_limit_status_limiting", "Limitando"),
