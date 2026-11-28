@@ -96,7 +96,7 @@ pub async fn run_live_dashboard(conn: &zbus::Connection) -> Result<()> {
             let pl1 = power_json["pl1_w"].as_i64().unwrap_or(0);
             let pl2 = power_json["pl2_w"].as_i64().unwrap_or(0);
             let undervolt_mv = power_json["undervolt_mv"].as_i64().unwrap_or(0);
-            let gpu_w = power_json["gpu_w"].as_u64().unwrap_or(0);
+            let gpu_boost = gpu_boost_segment(&power_json);
 
             let fan_mode = fan_json["mode"].as_str().unwrap_or("auto");
             let fan1_rpm = fan_json["fans"]["1"]["current"].as_u64().unwrap_or(0);
@@ -136,7 +136,7 @@ pub async fn run_live_dashboard(conn: &zbus::Connection) -> Result<()> {
                 format!("\x1b[1;36mCPU\x1b[0m: {}", cpu_name),
                 format!("\x1b[1;36m{}\x1b[0m: \x1b[1;32m{}\x1b[0m [PL1: {}W / PL2: {}W]", crate::i18n::t("power_profile"), power_active, pl1, pl2),
                 format!("\x1b[1;36m{}\x1b[0m: CPU: {}°C | GPU: {}°C | Fan1: {} RPM | Fan2: {} RPM [\x1b[33m{}\x1b[0m]", crate::i18n::t("thermal_fans"), cpu_temp, gpu_temp, fan1_rpm, fan2_rpm, fan_mode),
-                format!("\x1b[1;36m{}\x1b[0m: \x1b[1;35m{}\x1b[0m | \x1b[1;31mTGP\x1b[0m: {}W | \x1b[1;36mUV\x1b[0m: {}mV", crate::i18n::t("gpu_mux"), mux_mode, gpu_w, undervolt_mv),
+                format!("\x1b[1;36m{}\x1b[0m: \x1b[1;35m{}\x1b[0m | {}\x1b[1;36mUV\x1b[0m: {}mV", crate::i18n::t("gpu_mux"), mux_mode, gpu_boost, undervolt_mv),
                 if let Some(bat) = sysmon_json.get("battery").filter(|b| !b.is_null()) {
                     let charge = bat["charge_pct"].as_u64().unwrap_or(0);
                     let health_str = bat["health_pct"].as_f64().map(|h| format!("{:.0}%", h)).unwrap_or_else(|| "N/A".into());
@@ -334,7 +334,7 @@ pub async fn print_omen_fetch(conn: &zbus::Connection) -> Result<()> {
     let pl1 = power_json["pl1_w"].as_i64().unwrap_or(0);
     let pl2 = power_json["pl2_w"].as_i64().unwrap_or(0);
     let undervolt_mv = power_json["undervolt_mv"].as_i64().unwrap_or(0);
-    let gpu_w = power_json["gpu_w"].as_u64().unwrap_or(0);
+    let gpu_boost = gpu_boost_segment(&power_json);
 
     let fan_mode = fan_json["mode"].as_str().unwrap_or("auto");
     let fan1_rpm = fan_json["fans"]["1"]["current"].as_u64().unwrap_or(0);
@@ -376,7 +376,7 @@ pub async fn print_omen_fetch(conn: &zbus::Connection) -> Result<()> {
         format!("\x1b[1;36mCPU\x1b[0m: {}", cpu_name),
         format!("\x1b[1;36m{}\x1b[0m: \x1b[1;32m{}\x1b[0m [PL1: {}W / PL2: {}W]", crate::i18n::t("power_profile"), power_active, pl1, pl2),
         format!("\x1b[1;36m{}\x1b[0m: CPU: {}°C | GPU: {}°C | Fan1: {} RPM | Fan2: {} RPM [\x1b[33m{}\x1b[0m]", crate::i18n::t("thermal_fans"), cpu_temp, gpu_temp, fan1_rpm, fan2_rpm, fan_mode),
-        format!("\x1b[1;36m{}\x1b[0m: \x1b[1;35m{}\x1b[0m | \x1b[1;31mTGP\x1b[0m: {}W | \x1b[1;36mUV\x1b[0m: {}mV", crate::i18n::t("gpu_mux"), mux_mode, gpu_w, undervolt_mv),
+        format!("\x1b[1;36m{}\x1b[0m: \x1b[1;35m{}\x1b[0m | {}\x1b[1;36mUV\x1b[0m: {}mV", crate::i18n::t("gpu_mux"), mux_mode, gpu_boost, undervolt_mv),
         if let Some(bat) = sysmon_json.get("battery").filter(|b| !b.is_null()) {
             let charge = bat["charge_pct"].as_u64().unwrap_or(0);
             let health_str = bat["health_pct"].as_f64().map(|h| format!("{:.0}%", h)).unwrap_or_else(|| "N/A".into());
@@ -850,4 +850,51 @@ fn get_os_release_name() -> Option<String> {
         }
     }
     None
+}
+
+/// "cTGP: On | Boost: On | " from the daemon's live hp-wmi state, or "" when the
+/// board exposes neither (the old `TGP: {gpu_w}W` field was never populated).
+fn gpu_boost_segment(power_json: &Value) -> String {
+    let on_off = |v: &Value| v.as_bool().map(|b| if b { "On" } else { "Off" });
+    let mut out = String::new();
+    if let Some(s) = on_off(&power_json["gpu_ctgp"]) {
+        out.push_str(&format!("\x1b[1;31mcTGP\x1b[0m: {} | ", s));
+    }
+    if let Some(s) = on_off(&power_json["gpu_ppab"]) {
+        out.push_str(&format!("\x1b[1;31mBoost\x1b[0m: {} | ", s));
+    }
+    out
+}
+
+#[cfg(test)]
+mod gpu_boost_segment_tests {
+    use super::gpu_boost_segment;
+    use serde_json::json;
+
+    fn plain(s: &str) -> String {
+        let mut out = String::new();
+        let mut esc = false;
+        for c in s.chars() {
+            match (esc, c) {
+                (false, '\x1b') => esc = true,
+                (true, 'm') => esc = false,
+                (false, _) => out.push(c),
+                _ => {}
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn shows_live_states() {
+        let j = json!({"gpu_w": 0, "gpu_ctgp": false, "gpu_ppab": true});
+        assert_eq!(plain(&gpu_boost_segment(&j)), "cTGP: Off | Boost: On | ");
+    }
+
+    #[test]
+    fn omitted_when_unsupported_or_old_daemon() {
+        assert_eq!(gpu_boost_segment(&json!({"gpu_w": 0})), "");
+        let j = json!({"gpu_ctgp": null, "gpu_ppab": null});
+        assert_eq!(gpu_boost_segment(&j), "");
+    }
 }

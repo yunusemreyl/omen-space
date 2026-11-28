@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **`omen-cli fetch` no longer shows a fake "TGP: 0W":** the value came from the `gpu_w` power-config field, which no code path ever writes, so it read 0 W on every machine. `GetPowerState` now also reports the live NVIDIA **cTGP** (`gpu_tgp`) and **Dynamic Boost / PPAB** (`gpu_ppab`) states read from hp-wmi (`null` where the board does not expose them), and `fetch` prints `cTGP: On|Off | Boost: On|Off`, omitting the segment on boards without those attributes. `gpu_w` stays in the JSON for compatibility.
+
 ## [2.6.2] - 2026-11-27
 
 ### Added
